@@ -1,0 +1,75 @@
+#output-container {
+    height: 1fr;
+    border: solid $primary;
+    margin: 1;
+}
+
+#output {
+    height: 1fr;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1;
+    scrollbar-size: 1 1;
+}
+
+#output:focus {
+    border: tall $primary;
+}
+
+.message-block {
+    width: 100%;
+    padding: 1;
+    margin: 0 0 1 0;
+}
+
+.message-user {
+    background: $surface-darken-1;
+    border-left: heavy $accent;
+}
+
+.message-assistant {
+    background: $surface-darken-1;
+    border-left: heavy $success;
+}
+
+.message-system {
+    color: $text-muted;
+    padding: 0 1;
+}
+
+.message-tool {
+    color: $warning;
+    padding: 0 1;
+}
+
+.tool-block {
+    width: 100%;
+    padding: 1;
+    margin: 0 0 1 0;
+    border-left: heavy $warning;
+    background: $surface-darken-1;
+}
+
+#input {
+    dock: bottom;
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    border: solid $accent;
+    margin: 0 1;
+}
+
+.thinking {
+    color: $text-muted;
+    text-style: italic;
+}
+
+.tool-call {
+    color: $success;
+    text-style: bold;
+}
+
+.error {
+    color: $error;
+    text-style: bold;
+}

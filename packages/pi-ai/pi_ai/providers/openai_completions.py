@@ -72,7 +72,7 @@ class OpenAICompletionsProvider(BaseProvider):
                 api=model.api,
                 provider=model.provider,
                 model=model.id,
-                stopReason=StopReason.STOP,
+                stop_reason=StopReason.STOP,
                 timestamp=int(time.time() * 1000),
             )
 
@@ -115,7 +115,7 @@ class OpenAICompletionsProvider(BaseProvider):
 
                     # Update stop reason
                     if choice.finish_reason:
-                        output.stopReason = self._map_stop_reason(choice.finish_reason)
+                        output.stop_reason = self._map_stop_reason(choice.finish_reason)
 
                     # Process delta
                     if choice.delta:
@@ -131,19 +131,19 @@ class OpenAICompletionsProvider(BaseProvider):
                     raise Exception("Request was aborted")
 
                 # Emit done event
-                stream.push({"type": "done", "reason": output.stopReason, "message": output})
+                stream.push({"type": "done", "reason": output.stop_reason, "message": output})
                 stream.end()
 
             except Exception as error:
                 # Handle errors
-                output.stopReason = (
+                output.stop_reason = (
                     StopReason.ABORTED
                     if (hasattr(options, "signal") and options.signal and options.signal.aborted)
                     else StopReason.ERROR
                 )
-                output.errorMessage = str(error)
+                output.error_message = str(error)
 
-                stream.push({"type": "error", "reason": output.stopReason, "error": output})
+                stream.push({"type": "error", "reason": output.stop_reason, "error": output})
                 stream.end()
 
         # Start streaming in background

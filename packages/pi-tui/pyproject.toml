@@ -5,6 +5,7 @@ description = "Terminal UI framework for Pi Coding Agent"
 authors = ["Pi Team"]
 readme = "README.md"
 packages = [{include = "pi_tui"}]
+include = ["pi_tui/styles/*.tcss"]
 
 [tool.poetry.dependencies]
 python = "^3.12"

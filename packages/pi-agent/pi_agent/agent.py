@@ -154,9 +154,12 @@ class Agent:
             UserMessage(role="user", content=user_message, timestamp=0)
         )
 
-        # Run with max_turns=1 to only execute one turn
+        # Run with max_turns=3 to allow tool execution
+        # Turn 1: LLM decides to call tool
+        # Turn 2: Tool executes, LLM formats result
+        # Turn 3: Backup for complex scenarios
         original_max_turns = self.max_turns
-        self.max_turns = 1
+        self.max_turns = 3
 
         try:
             return await self.run(stream_llm_events=stream_llm_events)

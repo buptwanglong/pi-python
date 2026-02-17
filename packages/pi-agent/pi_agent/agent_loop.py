@@ -201,13 +201,18 @@ async def run_agent_turn(
             )
         else:
             # Convert result to string
-            result_str = (
-                json.dumps(tr["result"]) if not isinstance(tr["result"], str) else tr["result"]
-            )
+            # Handle Pydantic models by calling model_dump
+            if hasattr(tr["result"], "model_dump"):
+                result_dict = tr["result"].model_dump()
+                result_str = json.dumps(result_dict)
+            elif not isinstance(tr["result"], str):
+                result_str = json.dumps(tr["result"])
+            else:
+                result_str = tr["result"]
             result_content.append(TextContent(type="text", text=result_str))
 
     tool_result_msg = ToolResultMessage(
-        role="tool_result",
+        role="toolResult",
         tool_call_id=tool_results[0]["tool_call_id"],  # First tool call ID
         tool_name=tool_results[0]["tool_name"],  # First tool name
         content=result_content,

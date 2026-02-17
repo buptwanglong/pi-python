@@ -16,6 +16,13 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
+def _event_type(event: AssistantMessageEvent) -> str:
+    """Get event type from dict or object."""
+    if isinstance(event, dict):
+        return event.get("type", "")
+    return getattr(event, "type", "")
+
+
 class EventStream(Generic[T, R]):
     """
     Generic event stream class for async iteration with final result promise.
@@ -161,7 +168,7 @@ class AssistantMessageEventStream(EventStream[AssistantMessageEvent, AssistantMe
     def __init__(self):
         """Initialize assistant message event stream."""
         super().__init__(
-            is_complete=lambda event: event.type == "done" or event.type == "error",
+            is_complete=lambda event: _event_type(event) == "done" or _event_type(event) == "error",
             extract_result=self._extract_message,
         )
 
@@ -171,7 +178,7 @@ class AssistantMessageEventStream(EventStream[AssistantMessageEvent, AssistantMe
         Extract final message from completion event.
 
         Args:
-            event: Completion event (done or error)
+            event: Completion event (done or error), dict or object
 
         Returns:
             The final AssistantMessage
@@ -179,12 +186,18 @@ class AssistantMessageEventStream(EventStream[AssistantMessageEvent, AssistantMe
         Raises:
             ValueError: If event is not a completion event
         """
-        if event.type == "done":
-            return event.message
-        elif event.type == "error":
-            return event.error
+        ev_type = _event_type(event)
+        if isinstance(event, dict):
+            if ev_type == "done":
+                return event["message"]
+            if ev_type == "error":
+                return event["error"]
         else:
-            raise ValueError(f"Unexpected event type for final result: {event.type}")
+            if ev_type == "done":
+                return event.message
+            if ev_type == "error":
+                return event.error
+        raise ValueError(f"Unexpected event type for final result: {ev_type}")
 
 
 def create_assistant_message_event_stream() -> AssistantMessageEventStream:

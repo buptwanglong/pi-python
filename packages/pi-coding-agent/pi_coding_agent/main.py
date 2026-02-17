@@ -3,7 +3,10 @@ Main entry point for the pi-coding-agent CLI.
 """
 
 import asyncio
+import copy
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -34,14 +37,23 @@ class CodingAgent:
         self.settings_manager = settings_manager or SettingsManager()
         self.settings = self.settings_manager.load()
 
+        # Apply api_keys from settings to env so providers (e.g. Anthropic) can use them
+        for key, value in self.settings.api_keys.items():
+            if value:
+                os.environ[key] = value
+
         # Create session manager
         sessions_dir = Path(self.settings.sessions_dir).expanduser()
         self.session_manager = SessionManager(sessions_dir)
 
-        # Initialize model
+        # Initialize model (optionally with custom base_url from settings)
+        model_kwargs: dict = {}
+        if self.settings.model.base_url:
+            model_kwargs["base_url"] = self.settings.model.base_url
         self.model = get_model(
             self.settings.model.provider,
             self.settings.model.model_id,
+            **model_kwargs,
         )
 
         # Create context
@@ -95,9 +107,10 @@ Always explain what you're doing before using tools.
         """Setup event handlers for agent events."""
 
         def on_text_delta(event):
-            """Handle text delta events."""
-            if self.settings.agent.verbose:
-                print(event["delta"], end="", flush=True)
+            """Handle text delta events - always show assistant reply."""
+            delta = event.get("delta", "")
+            if delta:
+                print(delta, end="", flush=True)
 
         def on_tool_call_start(event):
             """Handle tool call start events."""
@@ -164,23 +177,32 @@ Always explain what you're doing before using tools.
                     UserMessage(
                         role="user",
                         content=user_input,
-                        timestamp=0,
+                        timestamp=int(time.time() * 1000),
                     )
                 )
 
+                # Save context snapshot for error recovery
+                messages_snapshot = copy.deepcopy(self.context.messages)
+
                 # Run agent
                 print()  # Newline before agent output
-                await self.agent.run(stream_llm_events=True)
+                try:
+                    await self.agent.run(stream_llm_events=True)
+                except Exception as agent_error:
+                    # Restore context on agent failure
+                    self.context.messages = messages_snapshot
+                    raise agent_error
                 print()  # Newline after agent output
 
             except KeyboardInterrupt:
                 print("\n\nInterrupted. Type 'exit' to quit.")
                 continue
             except Exception as e:
-                print(f"\nError: {e}")
+                print(f"\n❌ Error: {e}")
                 if self.settings.agent.verbose:
                     import traceback
                     traceback.print_exc()
+                print("Context has been restored to previous state.")
 
     async def run_once(self, message: str) -> str:
         """
@@ -194,7 +216,7 @@ Always explain what you're doing before using tools.
         """
         # Add user message
         self.context.messages.append(
-            UserMessage(role="user", content=message, timestamp=0)
+            UserMessage(role="user", content=message, timestamp=int(time.time() * 1000))
         )
 
         # Run agent

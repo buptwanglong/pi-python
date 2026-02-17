@@ -5,10 +5,149 @@ Runs the coding agent with an interactive TUI interface.
 """
 
 import asyncio
+import copy
+import time
 from typing import Optional
 
 from pi_agent import Agent
 from pi_tui import PiCodingAgentApp
+
+
+def _format_tool_result(tool_name: str, result: any) -> str:
+    """
+    Format tool result for display in TUI.
+
+    Args:
+        tool_name: Name of the tool that was executed
+        result: Result object from the tool
+
+    Returns:
+        Formatted string representation of the result
+    """
+    if result is None:
+        return "Tool executed successfully (no output)"
+
+    # Handle dict results (Pydantic models are converted to dicts)
+    if isinstance(result, dict):
+        if tool_name == "bash":
+            stdout = result.get("stdout", "").strip()
+            stderr = result.get("stderr", "").strip()
+            exit_code = result.get("exit_code", 0)
+            timeout = result.get("timeout", False)
+
+            parts = []
+            if timeout:
+                parts.append("⏱️  Command timed out")
+            parts.append(f"Exit code: {exit_code}")
+            if stdout:
+                parts.append(f"Output:\n{stdout[:500]}")
+            if stderr:
+                parts.append(f"Errors:\n{stderr[:500]}")
+            return "\n".join(parts)
+
+        elif tool_name == "read":
+            lines = result.get("lines", 0)
+            file_path = result.get("file_path", "")
+            content = result.get("content", "")
+            preview = content[:200] + "..." if len(content) > 200 else content
+            return f"📄 Read {lines} lines from {file_path}\nPreview:\n{preview}"
+
+        elif tool_name == "write":
+            file_path = result.get("file_path", "")
+            success = result.get("success", False)
+            if success:
+                return f"✍️  Wrote file: {file_path}"
+            else:
+                error = result.get("error", "Unknown error")
+                return f"❌ Write failed: {error}"
+
+        elif tool_name == "edit":
+            success = result.get("success", False)
+            replacements = result.get("replacements_made", 0)
+            file_path = result.get("file_path", "")
+            if success:
+                return f"✏️  Made {replacements} replacement(s) in {file_path}"
+            else:
+                error = result.get("error", "Unknown error")
+                return f"❌ Edit failed: {error}"
+
+        elif tool_name == "grep":
+            total_matches = result.get("total_matches", 0)
+            truncated = result.get("truncated", False)
+            matches = result.get("matches", [])
+
+            parts = [f"🔍 Found {total_matches} match(es)"]
+            if truncated:
+                parts.append("(results truncated)")
+            if matches:
+                sample_count = min(3, len(matches))
+                parts.append(f"\nFirst {sample_count} matches:")
+                for match in matches[:sample_count]:
+                    file_path = match.get("file_path", "")
+                    line_number = match.get("line_number", 0)
+                    parts.append(f"  {file_path}:{line_number}")
+            return "\n".join(parts)
+
+    # Fallback for other result types
+    result_str = str(result)
+    if len(result_str) > 300:
+        return result_str[:300] + "..."
+    return result_str
+
+
+def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
+    """
+    Connect agent event handlers to app display methods (same-thread direct calls).
+
+    Used by run_tui_mode. Event handlers call app methods directly because
+    agent runs in the same asyncio loop as the TUI; call_from_thread must not
+    be used from the app thread.
+    """
+    def on_text_delta(event):
+        delta = event.get("delta", "")
+        current_response["text"] += delta
+        app.append_text(delta)
+
+    def on_thinking_delta(event):
+        delta = event.get("delta", "")
+        current_response["thinking"] += delta
+        if not current_response["in_thinking"]:
+            current_response["in_thinking"] = True
+            app.append_message("system", "💭 Thinking...")
+        app.append_thinking(delta)
+
+    def on_tool_call_start(event):
+        tool_name = event.get("tool_name", "unknown")
+        arguments = event.get("arguments", {})
+        app.show_tool_call(tool_name, arguments)
+
+    def on_tool_call_end(event):
+        error = event.get("error")
+        tool_name = event.get("tool_name", "unknown")
+        if error:
+            app.show_tool_result(str(error), success=False)
+        else:
+            result = event.get("result")
+            formatted_result = _format_tool_result(tool_name, result)
+            app.show_tool_result(formatted_result, success=True)
+
+    def on_agent_complete(event):
+        # Run finished: finalize current assistant block so the next user message gets a new block
+        app.finalize_assistant_block()
+        current_response["text"] = ""
+        current_response["thinking"] = ""
+        current_response["in_thinking"] = False
+
+    def on_agent_error(event):
+        error = event.get("error", "Unknown error")
+        app.append_message("system", f"❌ Error: {error}")
+
+    agent.on("text_delta", on_text_delta)
+    agent.on("thinking_delta", on_thinking_delta)
+    agent.on("agent_tool_call_start", on_tool_call_start)
+    agent.on("agent_tool_call_end", on_tool_call_end)
+    agent.on("agent_complete", on_agent_complete)
+    agent.on("agent_error", on_agent_error)
 
 
 async def run_tui_mode(agent: Agent) -> None:
@@ -25,65 +164,8 @@ async def run_tui_mode(agent: Agent) -> None:
     4. Runs the TUI application
     """
     app = PiCodingAgentApp(agent=agent)
-
-    # Track current response being built
     current_response = {"text": "", "thinking": "", "in_thinking": False}
-
-    def on_text_delta(event):
-        """Handle text delta events from the agent."""
-        delta = event.get("delta", "")
-        current_response["text"] += delta
-
-        # Use call_soon_threadsafe to update from agent thread
-        app.call_from_thread(app.append_text, delta)
-
-    def on_thinking_delta(event):
-        """Handle thinking delta events from the agent."""
-        delta = event.get("delta", "")
-        current_response["thinking"] += delta
-
-        if not current_response["in_thinking"]:
-            current_response["in_thinking"] = True
-            # Show thinking header
-            app.call_from_thread(app.append_message, "system", "💭 Thinking...")
-
-        app.call_from_thread(app.append_thinking, delta)
-
-    def on_tool_call_start(event):
-        """Handle tool call start events from the agent."""
-        tool_name = event.get("tool_name", "unknown")
-        # Note: tool args might not be available yet in start event
-        app.call_from_thread(app.show_tool_call, tool_name)
-
-    def on_tool_call_end(event):
-        """Handle tool call end events from the agent."""
-        error = event.get("error")
-
-        if error:
-            app.call_from_thread(app.show_tool_result, str(error), success=False)
-        else:
-            # Tool result will be in the context, we just show success
-            app.call_from_thread(app.show_tool_result, "Tool executed successfully", success=True)
-
-    def on_agent_turn_complete(event):
-        """Handle agent turn completion."""
-        # Reset response tracking
-        current_response["text"] = ""
-        current_response["thinking"] = ""
-        current_response["in_thinking"] = False
-
-    def on_agent_error(event):
-        """Handle agent errors."""
-        error = event.get("error", "Unknown error")
-        app.call_from_thread(app.append_message, "system", f"❌ Error: {error}")
-
-    # Register event handlers
-    agent.on("text_delta", on_text_delta)
-    agent.on("thinking_delta", on_thinking_delta)
-    agent.on("agent_tool_call_start", on_tool_call_start)
-    agent.on("agent_tool_call_end", on_tool_call_end)
-    agent.on("agent_turn_complete", on_agent_turn_complete)
-    agent.on("agent_error", on_agent_error)
+    _connect_agent_handlers(app, agent, current_response)
 
     async def handle_user_input(user_input: str):
         """
@@ -99,18 +181,29 @@ async def run_tui_mode(agent: Agent) -> None:
             UserMessage(
                 role="user",
                 content=user_input,
-                timestamp=0,
+                timestamp=int(time.time() * 1000),
             )
         )
 
-        # Show thinking indicator
-        app.call_from_thread(app.append_message, "assistant", "")
+        # Snapshot context for error recovery (restore on exception)
+        messages_snapshot = copy.deepcopy(agent.context.messages)
 
-        # Run agent (this will emit events we're listening to)
+        # Create assistant block so streaming updates go to one block (must be before run)
+        await app.ensure_assistant_block()
+
+        # Run agent in a cancellable task
+        task = asyncio.create_task(agent.run(stream_llm_events=True))
+        app.set_agent_task(task)
         try:
-            await agent.run(stream_llm_events=True)
+            await task
+        except asyncio.CancelledError:
+            app.append_message("system", "Stopped by user.")
         except Exception as e:
-            app.call_from_thread(app.append_message, "system", f"❌ Error: {e}")
+            agent.context.messages = messages_snapshot
+            app.append_message("system", f"❌ Error: {e}")
+            app.append_message("system", "Context restored to previous state.")
+        finally:
+            app.set_agent_task(None)
 
     # Set input handler
     app.set_input_handler(handle_user_input)

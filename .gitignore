@@ -61,6 +61,11 @@ sessions/
 *.jsonl
 auth.json
 
+# Environment / secrets (do not commit)
+.env
+.env.local
+.env.*.local
+
 # Jupyter
 .ipynb_checkpoints
 *.ipynb

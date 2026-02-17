@@ -3,8 +3,8 @@ Multi-line Input Component with Autocomplete
 
 A TextArea-based input widget that supports:
 - Multi-line text editing
+- Enter to send, Shift+Enter for newline
 - Autocomplete suggestions
-- Submit on Ctrl+Enter
 """
 
 from textual.widgets import TextArea
@@ -16,14 +16,15 @@ class MultiLineInput(TextArea):
     Multi-line text input with autocomplete support.
 
     Features:
-    - Multi-line editing (Shift+Enter for newlines)
-    - Submit on Ctrl+Enter
+    - Enter: submit message
+    - Shift+Enter: new line
     - Basic autocomplete (can be extended)
     - Syntax highlighting for code
     """
 
     BINDINGS = [
-        Binding("ctrl+enter", "submit", "Submit", priority=True),
+        Binding("enter", "submit", "Send", priority=True),
+        Binding("shift+enter", "insert_newline", "New line", show=False),
         Binding("escape", "clear", "Clear"),
     ]
 
@@ -74,6 +75,10 @@ class MultiLineInput(TextArea):
             # Clear the input
             self.clear()
 
+    def action_insert_newline(self) -> None:
+        """Insert a newline at the cursor (Shift+Enter)."""
+        self.insert("\n")
+
     def action_clear(self) -> None:
         """Clear the input."""
         self.clear()
@@ -85,40 +90,3 @@ class MultiLineInput(TextArea):
             super().__init__(text_area)
             self.text = text
 
-
-class AutocompleteInput(MultiLineInput):
-    """
-    Multi-line input with autocomplete suggestions.
-
-    This extends MultiLineInput to add autocomplete functionality.
-    For now, it's a placeholder for future autocomplete features.
-    """
-
-    def __init__(
-        self,
-        text: str = "",
-        suggestions: list[str] | None = None,
-        **kwargs,
-    ):
-        """
-        Initialize autocomplete input.
-
-        Args:
-            text: Initial text
-            suggestions: List of autocomplete suggestions
-            **kwargs: Additional arguments for MultiLineInput
-        """
-        super().__init__(text=text, **kwargs)
-        self._suggestions = suggestions or []
-
-    def set_suggestions(self, suggestions: list[str]) -> None:
-        """
-        Update autocomplete suggestions.
-
-        Args:
-            suggestions: New list of suggestions
-        """
-        self._suggestions = suggestions
-
-    # Future: Implement autocomplete dropdown
-    # For now, just tracks suggestions for later use

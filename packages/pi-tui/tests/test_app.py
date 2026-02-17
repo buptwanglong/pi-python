@@ -41,7 +41,7 @@ async def test_app_compose():
 
 
 def test_app_message_methods():
-    """Test message append methods."""
+    """Test message append methods and block lifecycle."""
     app = PiCodingAgentApp()
 
     # These methods should exist
@@ -52,3 +52,6 @@ def test_app_message_methods():
     assert hasattr(app, "show_tool_result")
     assert hasattr(app, "append_markdown")
     assert hasattr(app, "show_code_block")
+    assert hasattr(app, "ensure_assistant_block")
+    assert hasattr(app, "finalize_assistant_block")
+    assert hasattr(app, "append_user_message_async")

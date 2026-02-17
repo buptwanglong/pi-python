@@ -73,7 +73,7 @@ class GoogleProvider(BaseProvider):
                 api=model.api,
                 provider=model.provider,
                 model=model.id,
-                stopReason=StopReason.STOP,
+                stop_reason=StopReason.STOP,
                 timestamp=int(time.time() * 1000),
             )
 
@@ -228,7 +228,7 @@ class GoogleProvider(BaseProvider):
                     if hasattr(chunk, "candidates") and chunk.candidates:
                         candidate = chunk.candidates[0]
                         if hasattr(candidate, "finish_reason") and candidate.finish_reason:
-                            output.stopReason = self._map_finish_reason(candidate.finish_reason)
+                            output.stop_reason = self._map_finish_reason(candidate.finish_reason)
 
                 # Finish last block
                 if current_block:
@@ -236,18 +236,18 @@ class GoogleProvider(BaseProvider):
 
                 # Check for tool use
                 if any(block.type == "toolCall" for block in output.content):
-                    output.stopReason = StopReason.TOOL_USE
+                    output.stop_reason = StopReason.TOOL_USE
 
                 # Emit done event
-                stream.push({"type": "done", "reason": output.stopReason, "message": output})
+                stream.push({"type": "done", "reason": output.stop_reason, "message": output})
                 stream.end()
 
             except Exception as error:
                 # Handle errors
-                output.stopReason = StopReason.ERROR
-                output.errorMessage = str(error)
+                output.stop_reason = StopReason.ERROR
+                output.error_message = str(error)
 
-                stream.push({"type": "error", "reason": output.stopReason, "error": output})
+                stream.push({"type": "error", "reason": output.stop_reason, "error": output})
                 stream.end()
 
         # Start streaming in background
@@ -262,7 +262,7 @@ class GoogleProvider(BaseProvider):
     ) -> Dict[str, Any]:
         """Build generation configuration."""
         config: Dict[str, Any] = {
-            "max_output_tokens": (options and options.max_tokens) or model.maxTokens,
+            "max_output_tokens": (options and options.max_tokens) or model.max_tokens,
         }
 
         # Add temperature

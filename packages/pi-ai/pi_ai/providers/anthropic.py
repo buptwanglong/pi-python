@@ -104,7 +104,7 @@ class AnthropicProvider(BaseProvider):
                 api=model.api,
                 provider=model.provider,
                 model=model.id,
-                stopReason=StopReason.STOP,
+                stop_reason=StopReason.STOP,
                 timestamp=int(time.time() * 1000),
             )
 
@@ -166,7 +166,7 @@ class AnthropicProvider(BaseProvider):
                     raise Exception("Request was aborted")
 
                 # Emit done event
-                stream.push({"type": "done", "reason": output.stopReason, "message": output})
+                stream.push({"type": "done", "reason": output.stop_reason, "message": output})
                 stream.end()
 
             except Exception as error:
@@ -176,14 +176,14 @@ class AnthropicProvider(BaseProvider):
                         delattr(block, "index")
 
                 # Handle errors
-                output.stopReason = (
+                output.stop_reason = (
                     StopReason.ABORTED
                     if (hasattr(options, "signal") and options.signal and options.signal.aborted)
                     else StopReason.ERROR
                 )
-                output.errorMessage = str(error)
+                output.error_message = str(error)
 
-                stream.push({"type": "error", "reason": output.stopReason, "error": output})
+                stream.push({"type": "error", "reason": output.stop_reason, "error": output})
                 stream.end()
 
         # Start streaming in background
@@ -242,12 +242,11 @@ class AnthropicProvider(BaseProvider):
         # Convert messages
         messages = self._convert_messages(model, context, oauth_token)
 
-        # Base parameters
+        # Base parameters (Anthropic SDK stream() does not take a "stream" kwarg)
         params: Dict[str, Any] = {
             "model": model.id,
             "messages": messages,
-            "max_tokens": (options and options.max_tokens) or model.maxTokens,
-            "stream": True,
+            "max_tokens": (options and options.max_tokens) or model.max_tokens,
         }
 
         # Add system prompt
@@ -596,7 +595,7 @@ class AnthropicProvider(BaseProvider):
     ) -> None:
         """Handle message_delta event."""
         if hasattr(event.delta, "stop_reason") and event.delta.stop_reason:
-            output.stopReason = self._map_stop_reason(event.delta.stop_reason)
+            output.stop_reason = self._map_stop_reason(event.delta.stop_reason)
 
         usage = event.usage
         output.usage.input = getattr(usage, "input_tokens", 0)

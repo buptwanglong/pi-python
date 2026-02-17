@@ -18,6 +18,7 @@ class ModelSettings(BaseModel):
     model_id: str = "gpt-4o-mini"
     temperature: float = 0.7
     max_tokens: int = 4096
+    base_url: Optional[str] = None  # Override API base URL (e.g. custom Anthropic endpoint)
 
 
 class AgentSettings(BaseModel):
