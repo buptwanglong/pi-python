@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "pi-coding-agent"
+version = "0.1.0"
+description = "Interactive CLI coding agent"
+authors = ["Pi Python Team"]
+readme = "README.md"
+packages = [{include = "pi_coding_agent"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pi-ai = {path = "../pi-ai", develop = true}
+pi-agent = {path = "../pi-agent", develop = true}
+pi-tui = {path = "../pi-tui", develop = true, optional = true}
+aiofiles = "^23.2"
+
+[tool.poetry.extras]
+tui = ["pi-tui"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+
+[tool.poetry.scripts]
+pi = "pi_coding_agent.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

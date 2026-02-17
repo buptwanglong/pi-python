@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "pi-agent"
+version = "0.1.0"
+description = "Stateful agent runtime with tool execution and event streaming"
+authors = ["Pi Python Team"]
+readme = "README.md"
+packages = [{include = "pi_agent"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pi-ai = {path = "../pi-ai", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
