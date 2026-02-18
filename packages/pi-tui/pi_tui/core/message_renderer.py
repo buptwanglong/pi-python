@@ -44,7 +44,7 @@ class MessageRenderer:
     @staticmethod
     def render_system_message(content: Any) -> Union[Text, Any]:
         """
-        Render a system message.
+        Render a system message in minimal style.
 
         Args:
             content: The system message content (string or Rich renderable)
@@ -55,7 +55,11 @@ class MessageRenderer:
         if hasattr(content, "__rich_console__"):
             # Already a Rich renderable (Markdown, Syntax, etc.)
             return content
-        return Text(f"{INFO_PREFIX}  {content}", style=SYSTEM_MESSAGE_STYLE)
+
+        from ..constants import SYSTEM_MESSAGE_STYLE
+
+        # No prefix emoji - just dimmed text
+        return Text(str(content), style=SYSTEM_MESSAGE_STYLE)
 
     @staticmethod
     def render_assistant_text(text: str) -> Text:

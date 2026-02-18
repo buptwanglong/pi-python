@@ -141,7 +141,7 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
         current_response["thinking"] += delta
         if not current_response["in_thinking"]:
             current_response["in_thinking"] = True
-            app.append_message("system", "💭 Thinking...")
+            app.append_message("system", "Thinking...")  # No emoji
         app.append_thinking(delta)
 
     def on_tool_call_start(event):
@@ -168,7 +168,7 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
 
     def on_agent_error(event):
         error = event.get("error", "Unknown error")
-        app.append_message("system", f"❌ Error: {error}")
+        app.append_message("system", f"Error: {error}")
 
     agent.on("text_delta", on_text_delta)
     agent.on("thinking_delta", on_thinking_delta)
@@ -228,7 +228,7 @@ async def run_tui_mode(agent: Agent) -> None:
             app.append_message("system", "Stopped by user.")
         except Exception as e:
             agent.context.messages = messages_snapshot
-            app.append_message("system", f"❌ Error: {e}")
+            app.append_message("system", f"Error: {e}")
             app.append_message("system", "Context restored to previous state.")
         finally:
             app.set_agent_task(None)

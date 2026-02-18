@@ -61,3 +61,17 @@ def test_thinking_block_no_emoji():
 
     # Should contain the thinking text
     assert "Analyzing" in formatted_str or "thinking" in formatted_str.lower()
+
+
+def test_system_message_no_emoji():
+    """System messages use plain text info prefix."""
+    renderer = MessageRenderer()
+
+    formatted = renderer.render_system_message("Operation completed")
+    formatted_str = str(formatted)
+
+    # No info emoji
+    assert "ℹ️" not in formatted_str
+
+    # Should contain the message
+    assert "Operation completed" in formatted_str
