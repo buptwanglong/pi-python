@@ -22,12 +22,12 @@ TOOL_BLOCK_CLASS = "tool-block"
 MIN_INPUT_HEIGHT = 3
 MAX_INPUT_HEIGHT = 10
 
-# Message Prefixes/Emojis
-THINKING_EMOJI = "💭"
-ERROR_PREFIX = "❌"
-INFO_EMOJI = "ℹ️"
+# Message Prefixes (minimal - remove emojis)
+THINKING_PREFIX = "Thinking..."
+ERROR_PREFIX = "Error:"
+INFO_PREFIX = "Info:"
 
-# Text Styles
-THINKING_STYLE = "italic dim yellow"
-USER_MESSAGE_STYLE = "bold cyan"
+# Text Styles (keep clean)
+THINKING_STYLE = "italic dim"
+USER_MESSAGE_STYLE = "bold"
 SYSTEM_MESSAGE_STYLE = "dim"

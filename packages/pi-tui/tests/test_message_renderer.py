@@ -15,7 +15,7 @@ def test_render_user_message():
 
     assert isinstance(result, Text)
     assert "You: Hello, world!" in str(result)
-    assert result.style == "bold cyan"
+    assert result.style == "bold"
 
 
 def test_render_system_message_string():
@@ -24,7 +24,7 @@ def test_render_system_message_string():
     result = renderer.render_system_message("System notification")
 
     assert isinstance(result, Text)
-    assert "ℹ️" in str(result)
+    assert "Info:" in str(result)
     assert "System notification" in str(result)
     assert result.style == "dim"
 
@@ -62,7 +62,7 @@ def test_render_thinking_text():
     result = renderer.render_thinking_text("Analyzing code...")
 
     assert isinstance(result, Text)
-    assert "💭" in str(result)
+    assert "Thinking..." in str(result)
     assert "Analyzing code..." in str(result)
 
 
@@ -75,11 +75,9 @@ def test_format_tool_block_with_args():
 
     result = renderer.format_tool_block(tool_name, args, result_text)
 
-    assert "调用: read_file" in result
-    assert "入参:" in result
-    assert "path" in result
-    assert "/test/file.py" in result
-    assert "结果: 执行中..." in result
+    assert "Read_file:" in result
+    assert "path" in result or "encoding" in result or "/test/file.py" in result
+    assert "执行中..." in result
 
 
 def test_format_tool_block_no_args():
@@ -91,10 +89,8 @@ def test_format_tool_block_no_args():
 
     result = renderer.format_tool_block(tool_name, args, result_text)
 
-    assert "调用: list_files" in result
-    assert "入参:" in result
-    assert "（无）" in result
-    assert "结果: 完成" in result
+    assert "List_files:" in result
+    assert "完成" in result
 
 
 def test_format_tool_result_line_success():
@@ -103,7 +99,7 @@ def test_format_tool_result_line_success():
     result = renderer.format_tool_result_line("Operation completed", success=True)
 
     assert result == "Operation completed"
-    assert "❌" not in result
+    assert "Error:" not in result
 
 
 def test_format_tool_result_line_failure():
@@ -111,7 +107,7 @@ def test_format_tool_result_line_failure():
     renderer = MessageRenderer()
     result = renderer.format_tool_result_line("File not found", success=False)
 
-    assert "❌" in result
+    assert "Error:" in result
     assert "File not found" in result
 
 

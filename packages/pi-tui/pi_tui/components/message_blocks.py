@@ -12,7 +12,7 @@ from ..constants import (
     MESSAGE_BLOCK_CLASS,
     MESSAGE_SYSTEM_CLASS,
     TOOL_BLOCK_CLASS,
-    THINKING_EMOJI,
+    THINKING_PREFIX,
     THINKING_STYLE,
 )
 from ..core.message_renderer import MessageRenderer
@@ -29,7 +29,7 @@ class ThinkingBlock(Static):
     def __init__(self):
         """Initialize the thinking block with empty state."""
         super().__init__(
-            Text(f"{THINKING_EMOJI} Thinking...", style=THINKING_STYLE),
+            Text(f"{THINKING_PREFIX}", style=THINKING_STYLE),
             classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_SYSTEM_CLASS}",
         )
         self.thinking_text = ""

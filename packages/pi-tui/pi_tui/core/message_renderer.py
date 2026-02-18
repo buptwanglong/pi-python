@@ -11,9 +11,9 @@ from rich.text import Text
 from rich.markdown import Markdown
 
 from ..constants import (
-    THINKING_EMOJI,
+    THINKING_PREFIX,
     ERROR_PREFIX,
-    INFO_EMOJI,
+    INFO_PREFIX,
     THINKING_STYLE,
     USER_MESSAGE_STYLE,
     SYSTEM_MESSAGE_STYLE,
@@ -55,7 +55,7 @@ class MessageRenderer:
         if hasattr(content, "__rich_console__"):
             # Already a Rich renderable (Markdown, Syntax, etc.)
             return content
-        return Text(f"{INFO_EMOJI}  {content}", style=SYSTEM_MESSAGE_STYLE)
+        return Text(f"{INFO_PREFIX}  {content}", style=SYSTEM_MESSAGE_STYLE)
 
     @staticmethod
     def render_assistant_text(text: str) -> Text:
@@ -95,7 +95,7 @@ class MessageRenderer:
             Rich Text object with thinking emoji and styling
         """
         return Text(
-            f"{THINKING_EMOJI} {thinking_text}",
+            f"{THINKING_PREFIX} {thinking_text}",
             style=THINKING_STYLE,
             overflow="fold",
         )
@@ -103,7 +103,7 @@ class MessageRenderer:
     @staticmethod
     def format_tool_block(tool_name: str, args: dict, result: str) -> str:
         """
-        Format a complete tool call block with name, arguments, and result.
+        Format a tool call block in minimal Claude Code style.
 
         Args:
             tool_name: Name of the tool being called
@@ -111,21 +111,53 @@ class MessageRenderer:
             result: Result string (may be placeholder or actual result)
 
         Returns:
-            Formatted string with Chinese labels (调用/入参/结果)
+            Formatted string with minimal decorations
         """
-        args_str = json.dumps(args, ensure_ascii=False, indent=2) if args else "（无）"
-        return f"调用: {tool_name}\n入参:\n{args_str}\n结果: {result}"
+        # Format args - show only most relevant parameter
+        args_display = _format_args_minimal(tool_name, args)
+
+        # Simple format: tool name, key args, separator, result
+        parts = [
+            f"{tool_name.capitalize()}: {args_display}",
+            "─" * 50,  # Simple separator line
+            result
+        ]
+
+        return "\n".join(parts)
 
     @staticmethod
     def format_tool_result_line(result: str, success: bool = True) -> str:
         """
-        Format a tool result line with success/error indicator.
+        Format a tool result line without emoji decorations.
 
         Args:
             result: The result text
             success: Whether the tool execution was successful
 
         Returns:
-            Formatted result line with error prefix if unsuccessful
+            Formatted result line (no emoji prefix in minimal style)
         """
-        return result if success else f"{ERROR_PREFIX} {result}"
+        if not success:
+            return f"Error: {result}"
+        return result
+
+
+def _format_args_minimal(tool_name: str, args: dict) -> str:
+    """Extract and format most relevant argument for display."""
+    if tool_name == "bash":
+        return args.get("command", str(args))
+    elif tool_name == "read":
+        path = args.get("file_path", "")
+        return path
+    elif tool_name == "write":
+        return args.get("file_path", "")
+    elif tool_name == "edit":
+        path = args.get("file_path", "")
+        return path
+    elif tool_name == "grep":
+        pattern = args.get("pattern", "")
+        return f'"{pattern}"'
+    else:
+        # Fallback: show args as compact JSON
+        import json
+        return json.dumps(args, ensure_ascii=False)[:100]

@@ -68,7 +68,7 @@ def test_tool_block_update_result_success():
     # Should not have error prefix
     updated_content = str(block.renderable)
     assert "File read successfully" in updated_content
-    assert "❌" not in updated_content
+    assert "Error:" not in updated_content
 
 
 def test_tool_block_update_result_failure():
@@ -80,7 +80,7 @@ def test_tool_block_update_result_failure():
 
     # Should have error prefix
     updated_content = str(block.renderable)
-    assert "❌" in updated_content
+    assert "Error:" in updated_content
     assert "File not found" in updated_content
 
 
