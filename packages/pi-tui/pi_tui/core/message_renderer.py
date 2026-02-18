@@ -86,16 +86,16 @@ class MessageRenderer:
     @staticmethod
     def render_thinking_text(thinking_text: str) -> Text:
         """
-        Render thinking/reasoning text.
+        Render thinking/reasoning text in minimal style.
 
         Args:
             thinking_text: The thinking text to display
 
         Returns:
-            Rich Text object with thinking emoji and styling
+            Rich Text object with minimal styling
         """
         return Text(
-            f"{THINKING_PREFIX} {thinking_text}",
+            f"Thinking... {thinking_text}",
             style=THINKING_STYLE,
             overflow="fold",
         )

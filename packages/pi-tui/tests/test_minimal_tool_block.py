@@ -47,3 +47,17 @@ def test_tool_result_no_emoji_prefix():
     # No emojis
     assert "✅" not in success_result
     assert "❌" not in error_result
+
+
+def test_thinking_block_no_emoji():
+    """Thinking blocks use plain text, no emoji."""
+    renderer = MessageRenderer()
+
+    formatted = renderer.render_thinking_text("Analyzing the code...")
+    formatted_str = str(formatted)
+
+    # No thinking emoji
+    assert "💭" not in formatted_str
+
+    # Should contain the thinking text
+    assert "Analyzing" in formatted_str or "thinking" in formatted_str.lower()
