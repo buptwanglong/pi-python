@@ -12,7 +12,7 @@
 ```bash
 Provider: anthropic
 Model: aws.claude-sonnet-4.5
-Base URL: https://newapi.waimai.test.sankuai.com
+Base URL: https://internal-api.example.com
 ```
 
 **结果：** ✅ **成功检测到问题**
@@ -313,8 +313,8 @@ Status: 401 Unauthorized
 ### Error 3: Service Unavailable
 ```html
 503 Service Unavailable
-appkey: com.sankuai.daojiaqaai.newapi
-后端服务节点: 10.15.193.196:3000
+appkey: com.example.app.newapi
+后端服务节点: <internal-node-placeholder>
 ```
 
 ---

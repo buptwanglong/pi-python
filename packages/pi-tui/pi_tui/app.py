@@ -55,6 +55,14 @@ class MountWidget(Message):
         self.widget = widget
 
 
+class EnsureAssistantBlockAndAppend(Message):
+    """Request to ensure an assistant block exists (e.g. after tool) and append text. Processed asynchronously."""
+
+    def __init__(self, text: str, sender=None) -> None:
+        super().__init__()
+        self.text = text
+
+
 class PiCodingAgentApp(App):
     """
     Interactive TUI for Pi Coding Agent.
@@ -141,6 +149,16 @@ class PiCodingAgentApp(App):
         """Mount an existing widget (e.g. thinking block, tool block) to the output container."""
         container = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
         await container.mount(event.widget)
+        self._scroll_output_end()
+
+    async def on_ensure_assistant_block_and_append(self, event: "EnsureAssistantBlockAndAppend") -> None:
+        """Ensure assistant block exists (e.g. after tool), then append text. Used for post-tool summary."""
+        await self.ensure_assistant_block()
+        self.state.streaming_buffer += event.text
+        if self.state.has_active_assistant_widget():
+            self.state.current_assistant_widget.update(
+                self.renderer.render_assistant_text(self.state.streaming_buffer)
+            )
         self._scroll_output_end()
 
     def _scroll_output_end(self) -> None:
@@ -253,13 +271,18 @@ class PiCodingAgentApp(App):
         self.post_message(MountMessageBlock(role, content))
 
     def append_text(self, text: str) -> None:
-        """Append streaming text to the current assistant block (buffer + update in place)."""
-        self.state.streaming_buffer += text
+        """Append streaming text to the current assistant block (buffer + update in place).
+        If there is no current block (e.g. after a tool call), posts EnsureAssistantBlockAndAppend
+        so the summary text gets a new block.
+        """
         if self.state.has_active_assistant_widget():
+            self.state.streaming_buffer += text
             self.state.current_assistant_widget.update(
                 self.renderer.render_assistant_text(self.state.streaming_buffer)
             )
             self._scroll_output_end()
+        else:
+            self.post_message(EnsureAssistantBlockAndAppend(text))
 
     def append_thinking(self, thinking: str) -> None:
         """Append thinking text. Mounts a thinking block on first call, then updates in place."""
