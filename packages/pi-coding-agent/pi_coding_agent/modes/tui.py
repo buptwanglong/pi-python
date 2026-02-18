@@ -15,7 +15,7 @@ from pi_tui import PiCodingAgentApp
 
 def _format_tool_result(tool_name: str, result: any) -> str:
     """
-    Format tool result for display in TUI.
+    Format tool result for display in TUI (Claude Code minimal style).
 
     Args:
         tool_name: Name of the tool that was executed
@@ -37,61 +37,89 @@ def _format_tool_result(tool_name: str, result: any) -> str:
 
             parts = []
             if timeout:
-                parts.append("⏱️  Command timed out")
-            parts.append(f"Exit code: {exit_code}")
+                parts.append("Command timed out")
+
+            # Simple status line
+            if exit_code == 0:
+                parts.append(f"exit {exit_code}")
+            else:
+                parts.append(f"exit {exit_code} (error)")
+
+            # Output with reasonable truncation
             if stdout:
-                parts.append(f"Output:\n{stdout[:500]}")
+                if len(stdout) > 1000:
+                    parts.append(f"\n{stdout[:1000]}\n... ({len(stdout)} chars total, truncated)")
+                else:
+                    parts.append(f"\n{stdout}")
+
             if stderr:
-                parts.append(f"Errors:\n{stderr[:500]}")
+                parts.append(f"\nErrors:\n{stderr[:500]}")
+
             return "\n".join(parts)
 
         elif tool_name == "read":
             lines = result.get("lines", 0)
             file_path = result.get("file_path", "")
             content = result.get("content", "")
-            preview = content[:200] + "..." if len(content) > 200 else content
-            return f"📄 Read {lines} lines from {file_path}\nPreview:\n{preview}"
+
+            # Show first few lines as preview
+            content_lines = content.split("\n")
+            preview_lines = content_lines[:5]
+            preview = "\n".join(preview_lines)
+
+            parts = [f"Read {lines} lines from {file_path}"]
+            if len(content_lines) > 5:
+                parts.append(f"\nFirst 5 lines:\n{preview}\n... ({lines} total lines)")
+            else:
+                parts.append(f"\n{preview}")
+
+            return "\n".join(parts)
 
         elif tool_name == "write":
             file_path = result.get("file_path", "")
             success = result.get("success", False)
+
             if success:
-                return f"✍️  Wrote file: {file_path}"
+                return f"Wrote file: {file_path}"
             else:
                 error = result.get("error", "Unknown error")
-                return f"❌ Write failed: {error}"
+                return f"Write failed: {error}"
 
         elif tool_name == "edit":
             success = result.get("success", False)
             replacements = result.get("replacements_made", 0)
             file_path = result.get("file_path", "")
+
             if success:
-                return f"✏️  Made {replacements} replacement(s) in {file_path}"
+                return f"Made {replacements} replacement(s) in {file_path}"
             else:
                 error = result.get("error", "Unknown error")
-                return f"❌ Edit failed: {error}"
+                return f"Edit failed: {error}"
 
         elif tool_name == "grep":
             total_matches = result.get("total_matches", 0)
             truncated = result.get("truncated", False)
             matches = result.get("matches", [])
 
-            parts = [f"🔍 Found {total_matches} match(es)"]
-            if truncated:
-                parts.append("(results truncated)")
+            parts = [f"Found {total_matches} match(es)"]
+
             if matches:
-                sample_count = min(3, len(matches))
-                parts.append(f"\nFirst {sample_count} matches:")
+                sample_count = min(5, len(matches))
+                parts.append(f"\nShowing {sample_count} of {total_matches}:")
                 for match in matches[:sample_count]:
                     file_path = match.get("file_path", "")
                     line_number = match.get("line_number", 0)
                     parts.append(f"  {file_path}:{line_number}")
+
+                if total_matches > sample_count:
+                    parts.append(f"... and {total_matches - sample_count} more")
+
             return "\n".join(parts)
 
     # Fallback for other result types
     result_str = str(result)
-    if len(result_str) > 300:
-        return result_str[:300] + "..."
+    if len(result_str) > 500:
+        return result_str[:500] + f"\n... ({len(result_str)} chars total, truncated)"
     return result_str
 
 
