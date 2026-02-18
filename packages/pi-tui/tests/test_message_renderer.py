@@ -24,7 +24,7 @@ def test_render_system_message_string():
     result = renderer.render_system_message("System notification")
 
     assert isinstance(result, Text)
-    assert "Info:" in str(result)
+    # No "Info:" prefix in minimal style
     assert "System notification" in str(result)
     assert result.style == "dim"
 
