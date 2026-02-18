@@ -10,6 +10,18 @@ Terminal UI framework for Pi Coding Agent, built with [Textual](https://github.c
 - 🎭 **Theming** - Light/dark mode with CSS styling
 - ⌨️ **Keyboard Shortcuts** - Efficient navigation and control
 
+## Design Philosophy
+
+Pi TUI follows Claude Code's minimal aesthetic:
+
+- **No decorative elements** - No emojis, complex borders, or visual noise
+- **Information hierarchy through spacing** - Use whitespace and indentation
+- **Subtle color accents** - Left border highlights for role identification
+- **Clean typography** - Let content speak for itself
+- **Progressive disclosure** - Show essential info first, details available
+
+This creates a professional, focused interface that doesn't distract from the content.
+
 ## Installation
 
 ```bash
