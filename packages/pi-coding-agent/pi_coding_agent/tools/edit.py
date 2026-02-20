@@ -5,10 +5,13 @@ Performs exact string matching and replacement in files.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class EditParams(BaseModel):
@@ -66,6 +69,7 @@ async def edit_file(
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
     except Exception as e:
+        logger.warning("Edit read failed for %s: %s", path, e)
         return EditResult(
             file_path=str(path),
             replacements=0,
@@ -105,6 +109,7 @@ async def edit_file(
         with open(path, "w", encoding="utf-8") as f:
             f.write(new_content)
     except Exception as e:
+        logger.warning("Edit write failed for %s: %s", path, e)
         return EditResult(
             file_path=str(path),
             replacements=0,

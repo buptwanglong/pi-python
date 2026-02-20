@@ -39,7 +39,7 @@ class MessageRenderer:
         Returns:
             Rich Text object with user message styling
         """
-        return Text(f"You: {content}", style=USER_MESSAGE_STYLE)
+        return Text(content, style=USER_MESSAGE_STYLE)
 
     @staticmethod
     def render_system_message(content: Any) -> Union[Text, Any]:
@@ -107,27 +107,55 @@ class MessageRenderer:
     @staticmethod
     def format_tool_block(tool_name: str, args: dict, result: str) -> str:
         """
-        Format a tool call block in minimal Claude Code style.
+        Format a tool call block (legacy string form).
+        Prefer render_tool_block_claude() for Claude-style Rich display.
+        """
+        args_display = _format_args_minimal(tool_name, args)
+        return f"{tool_name}({args_display})\n{result}"
+
+    @staticmethod
+    def render_tool_block_claude(
+        tool_name: str, args: dict, result_line: str, success: bool = True
+    ) -> Text:
+        """
+        Render tool block in Claude Code style: ▶/⏺ ToolName(args) + status line.
 
         Args:
-            tool_name: Name of the tool being called
-            args: Tool arguments dictionary
-            result: Result string (may be placeholder or actual result)
+            tool_name: Tool name
+            args: Tool arguments (for short summary)
+            result_line: "执行中...", "Running…", or actual result / error
+            success: Whether the tool completed successfully
 
         Returns:
-            Formatted string with minimal decorations
+            Rich Text with styled segments
         """
-        # Format args - show only most relevant parameter
         args_display = _format_args_minimal(tool_name, args)
-
-        # Simple format: tool name, key args, separator, result
-        parts = [
-            f"{tool_name.capitalize()}: {args_display}",
-            "─" * 50,  # Simple separator line
-            result
-        ]
-
-        return "\n".join(parts)
+        title = f"{tool_name}({args_display})"
+        is_placeholder = (
+            result_line in ("执行中...", "Running…", "")
+            or result_line.strip().startswith("Running")
+        )
+        if not success:
+            icon = "⏺ "
+            icon_style = "red"
+            status = "⎿ Interrupted · What should Claude do instead?"
+            status_style = "red"
+        elif is_placeholder:
+            icon = "▶ "
+            icon_style = "green"
+            status = "Running…"
+            status_style = "dim"
+        else:
+            icon = "▶ "
+            icon_style = "green"
+            status = result_line[:500] + ("..." if len(result_line) > 500 else "")
+            status_style = ""
+        t = Text()
+        t.append(icon, style=icon_style)
+        t.append(title + "\n", style="bold yellow")
+        t.append("  ", style="")
+        t.append(status, style=status_style)
+        return t
 
     @staticmethod
     def format_tool_result_line(result: str, success: bool = True) -> str:

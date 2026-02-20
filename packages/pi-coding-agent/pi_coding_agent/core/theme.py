@@ -5,9 +5,12 @@ Manages color themes for the terminal UI.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Optional, List
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ThemeColors(BaseModel):
@@ -222,6 +225,7 @@ class ThemeManager:
             return theme
 
         except Exception as e:
+            logger.warning("Failed to load theme from %s: %s", path, e)
             print(f"⚠️  Failed to load theme from {path}: {e}")
             return None
 

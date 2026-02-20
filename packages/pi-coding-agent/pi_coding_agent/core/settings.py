@@ -5,10 +5,13 @@ Handles loading and saving user settings.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ModelSettings(BaseModel):
@@ -36,6 +39,7 @@ class Settings(BaseModel):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     api_keys: Dict[str, str] = Field(default_factory=dict)
     sessions_dir: str = "~/.pi-coding-agent/sessions"
+    trajectory_dir: Optional[str] = "~/.pi-coding-agent/trajectories"  # Record task trajectories for RL/tuning; set to null/empty to disable
     custom: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,8 +78,8 @@ class SettingsManager:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return Settings(**data)
-        except Exception:
-            # Return defaults if file is corrupted
+        except Exception as e:
+            logger.warning("Failed to load settings, using defaults: %s", e)
             return Settings()
 
     def save(self, settings: Settings) -> None:

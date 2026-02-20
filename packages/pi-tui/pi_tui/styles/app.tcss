@@ -1,43 +1,34 @@
+/* Pi TUI — native feel: no box, no visible scrollbar; scroll + trackpad unchanged */
+
 #output-container {
     height: 1fr;
-    border: solid $primary;
-    margin: 1;
+    margin: 0 1;
 }
 
+/* Output: read-only TextArea for selectable text (click, drag, double-click) */
 #output {
     height: 1fr;
     min-height: 0;
-    overflow-y: auto;
-    padding: 1;
-    scrollbar-size: 1 1;
+    padding: 1 2;
+    scrollbar-size: 0 0;
+    border: none;
 }
 
-#output:focus {
-    border: tall $primary;
-}
-
-/* Message blocks - more spacing for hierarchy */
 .message-block {
     width: 100%;
     padding: 1 2;
-    margin: 0 0 2 0;  /* Increased bottom margin */
+    margin: 0 0 1 0;
 }
 
-/* User messages - subtle left border */
 .message-user {
     background: $surface-darken-1;
-    border-left: solid $accent;
-    padding: 1 2;
 }
 
-/* Assistant messages - subtle left border */
 .message-assistant {
-    background: $surface-darken-1;
-    border-left: solid $success;
+    background: transparent;
     padding: 1 2;
 }
 
-/* System messages - minimal styling */
 .message-system {
     color: $text-muted;
     padding: 0 2;
@@ -49,26 +40,26 @@
     padding: 0 1;
 }
 
-/* Tool blocks - indented and subtle */
 .tool-block {
     width: 100%;
     padding: 1 2;
-    margin: 0 0 1 4;  /* Left indent for hierarchy */
-    border-left: solid $warning;
+    margin: 0 0 1 0;
     background: $surface-darken-1;
 }
 
-/* Input area */
+.tool-block--claude {
+    padding: 1 2;
+}
+
 #input {
     dock: bottom;
     height: auto;
     min-height: 3;
     max-height: 10;
-    border: solid $accent;
+    border: solid $surface-darken-2;
     margin: 0 1;
 }
 
-/* Thinking text - subtle and italic */
 .thinking {
     color: $text-muted;
     text-style: italic;
@@ -79,7 +70,6 @@
     text-style: bold;
 }
 
-/* Error text - clear but not aggressive */
 .error {
     color: $error;
 }

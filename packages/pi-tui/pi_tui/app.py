@@ -9,29 +9,23 @@ This module provides the main Textual App that handles:
 """
 
 import logging
-from typing import Any, Optional
+import signal
+from typing import Optional
 import asyncio
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Header, Footer, Static
+from textual.containers import Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Header, Footer, TextArea, OptionList
 from textual.widget import Widget
 from textual.binding import Binding
 from textual.message import Message
 from textual.css.query import NoMatches
-from rich.text import Text
+from textual.events import Click
+from textual import on
 
 from .components.multiline_input import MultiLineInput
-from .components.message_blocks import ThinkingBlock, ToolBlock
 from .core.message_renderer import MessageRenderer
-from .constants import (
-    OUTPUT_CONTAINER_ID,
-    OUTPUT_ID,
-    INPUT_ID,
-    MESSAGE_BLOCK_CLASS,
-    MESSAGE_USER_CLASS,
-    MESSAGE_ASSISTANT_CLASS,
-    MESSAGE_SYSTEM_CLASS,
-)
+from .constants import OUTPUT_CONTAINER_ID, OUTPUT_ID, INPUT_ID
 from .state import AppState
 
 # Configure logging
@@ -55,12 +49,50 @@ class MountWidget(Message):
         self.widget = widget
 
 
-class EnsureAssistantBlockAndAppend(Message):
-    """Request to ensure an assistant block exists (e.g. after tool) and append text. Processed asynchronously."""
+class ProcessPendingInputs(Message):
+    """Process queued user inputs (append and run agent) after current agent completes."""
 
-    def __init__(self, text: str, sender=None) -> None:
-        super().__init__()
-        self.text = text
+
+class OutputTextArea(TextArea):
+    """Read-only output area: Cmd+C delegates to app copy (system clipboard)."""
+
+    def action_copy(self) -> None:
+        """Forward to app so selection is copied to system clipboard."""
+        if hasattr(self, "app") and self.app is not None:
+            self.app.action_copy_output()
+
+
+class CopyPasteMenuScreen(ModalScreen):
+    """Right-click context menu: 复制 / 粘贴."""
+
+    CSS = """
+    CopyPasteMenuScreen {
+        width: auto;
+        min-width: 12;
+    }
+    """
+
+    def __init__(self, source_widget: Widget | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._source = source_widget
+
+    def compose(self) -> ComposeResult:
+        yield OptionList(
+            OptionList.Option("复制", id="copy"),
+            OptionList.Option("粘贴", id="paste"),
+            id="copypaste-options",
+        )
+
+    @on(OptionList.OptionSelected)
+    def _on_option(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    @staticmethod
+    def _get_text_from(widget: Widget | None) -> str:
+        if widget is None:
+            return ""
+        text = getattr(widget, "selected_text", None) or getattr(widget, "text", "")
+        return (text or "").strip()
 
 
 class PiCodingAgentApp(App):
@@ -78,7 +110,11 @@ class PiCodingAgentApp(App):
     SUB_TITLE = "Interactive AI Coding Assistant"
 
     BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
+        Binding("meta+c", "copy_output", "Copy (Cmd+C)", priority=True),
+        Binding("ctrl+shift+c", "copy_output", "Copy", show=False),
+        Binding("meta+v", "paste", "Paste (Cmd+V)", priority=True),
+        Binding("ctrl+v", "paste", "Paste", show=False),
         Binding("ctrl+g", "stop_agent", "Stop", priority=True),
         Binding("ctrl+l", "clear", "Clear"),
         Binding("ctrl+d", "toggle_dark", "Toggle Dark Mode"),
@@ -101,75 +137,120 @@ class PiCodingAgentApp(App):
         super().__init__(**kwargs)
         self.agent = agent
         self._input_handler = None
+        self._menu_source = None
+        self._pending_user_inputs: list[str] = []
         self.state = AppState()
         self.renderer = MessageRenderer()
 
+    WELCOME_LINE = "Enter 发送，Shift+Enter 换行。右键 复制/粘贴，Q 退出。Scroll: 滚轮或 Page Up/Down。"
+
     def compose(self) -> ComposeResult:
-        """Create the UI layout. Output is a scrollable container for message blocks."""
+        """Output is a single read-only TextArea so text is selectable (click, drag, double-click)."""
         yield Header()
         with Vertical(id=OUTPUT_CONTAINER_ID):
-            with VerticalScroll(id=OUTPUT_ID):
-                yield Static(
-                    "Welcome to Pi Coding Agent!",
-                    classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_SYSTEM_CLASS}",
-                )
-                yield Static(
-                    "Type your request. Enter to send, Shift+Enter for new line. "
-                    "Scroll: move pointer here + trackpad, or Page Up/Down, or Ctrl+End to bottom.",
-                    classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_SYSTEM_CLASS}",
-                )
+            yield OutputTextArea(
+                self.WELCOME_LINE,
+                id=OUTPUT_ID,
+                read_only=True,
+            )
         yield MultiLineInput(id=INPUT_ID)
         yield Footer()
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
+        # Ignore Ctrl+C (SIGINT) so only Q quits
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass  # main thread only / Windows
+        self.state.output_blocks = [self.WELCOME_LINE]
         self.query_one(f"#{INPUT_ID}", MultiLineInput).focus()
 
-    async def on_mount_message_block(self, event: MountMessageBlock) -> None:
-        """Mount a message block (user, system, tool) to the output container."""
-        role, content = event.role, event.content
-        container = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
-        if isinstance(content, Widget):
-            content.add_class(MESSAGE_BLOCK_CLASS)
-            content.add_class(f"message-{role}")
-            await container.mount(content)
+    @on(Click)
+    def _on_click(self, event: Click) -> None:
+        """Right-click on output/input: show 复制/粘贴 menu."""
+        if event.button != 3:  # 3 = right-click
+            return
+        w = event.widget
+        try:
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
+            inp = self.query_one(f"#{INPUT_ID}", MultiLineInput)
+        except NoMatches:
+            return
+        if w == output or output in w.ancestors_with_self:
+            self._menu_source = output
+        elif w == inp or inp in w.ancestors_with_self:
+            self._menu_source = inp
         else:
-            if role == "user":
-                renderable = self.renderer.render_user_message(content)
-            elif role == "system":
-                renderable = self.renderer.render_system_message(content)
+            return
+        self.push_screen(CopyPasteMenuScreen(source_widget=self._menu_source), self._on_menu_result)
+
+    def _on_menu_result(self, choice: str | None) -> None:
+        """Handle 复制/粘贴 menu choice."""
+        source = getattr(self, "_menu_source", None)
+        if choice == "copy" and source is not None:
+            text = CopyPasteMenuScreen._get_text_from(source)
+            if text:
+                try:
+                    import pyperclip
+                    pyperclip.copy(text)
+                    self.notify(f"已复制 {len(text)} 字", severity="information", timeout=2)
+                except Exception as e:
+                    logger.debug("pyperclip copy failed: %s", e)
+                    try:
+                        self.copy_to_clipboard(text)
+                        self.notify(f"已复制 {len(text)} 字", severity="information", timeout=2)
+                    except Exception:
+                        self.notify("复制失败", severity="warning", timeout=2)
             else:
-                renderable = content if hasattr(content, "__rich_console__") else Text(str(content))
-            block = Static(renderable, classes=MESSAGE_BLOCK_CLASS, id=None)
-            block.add_class(f"message-{role}")
-            await container.mount(block)
-        self._scroll_output_end()
+                self.notify("无内容可复制", severity="information", timeout=1)
+        elif choice == "paste":
+            self.action_paste()
+        self._menu_source = None
 
-    async def on_mount_widget(self, event: MountWidget) -> None:
-        """Mount an existing widget (e.g. thinking block, tool block) to the output container."""
-        container = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
-        await container.mount(event.widget)
-        self._scroll_output_end()
 
-    async def on_ensure_assistant_block_and_append(self, event: "EnsureAssistantBlockAndAppend") -> None:
-        """Ensure assistant block exists (e.g. after tool), then append text. Used for post-tool summary."""
-        await self.ensure_assistant_block()
-        self.state.streaming_buffer += event.text
-        if self.state.has_active_assistant_widget():
-            self.state.current_assistant_widget.update(
-                self.renderer.render_assistant_text(self.state.streaming_buffer)
-            )
+    def _refresh_output(self) -> None:
+        """Rebuild output TextArea from output_blocks + current streaming buffer."""
+        try:
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
+        except NoMatches:
+            return
+        parts = list(self.state.output_blocks)
+        if self.state.streaming_assistant and self.state.streaming_buffer:
+            parts.append(self.state.streaming_buffer)
+        full = "\n\n".join(parts)
+        output.text = full
         self._scroll_output_end()
 
     def _scroll_output_end(self) -> None:
-        """Scroll the output container to the bottom."""
+        """Scroll the output to the bottom."""
         try:
-            output = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
             output.scroll_end()
         except NoMatches:
-            logger.debug("Output container not found, skipping scroll")
+            logger.debug("Output not found, skipping scroll")
         except Exception as e:
-            logger.error(f"Unexpected error while scrolling to bottom: {e}")
+            logger.error(f"Unexpected error while scrolling: {e}")
+
+    async def on_mount_message_block(self, event: MountMessageBlock) -> None:
+        """Append plain text to output (TextArea mode)."""
+        content = event.content
+        plain = content if isinstance(content, str) else str(content)
+        self.state.output_blocks.append(plain)
+        self._refresh_output()
+
+    async def on_process_pending_inputs(self, _event: ProcessPendingInputs) -> None:
+        """Process first queued user input after agent completed."""
+        if not self._pending_user_inputs or not self._input_handler:
+            return
+        user_input = self._pending_user_inputs.pop(0)
+        await self.append_user_message_async(user_input)
+        await asyncio.sleep(0)
+        await self._input_handler(user_input)
+
+    async def on_mount_widget(self, event: MountWidget) -> None:
+        """No-op when using TextArea output (no widgets mounted)."""
+        pass
 
     def action_scroll_to_bottom(self) -> None:
         """Scroll the message area to the bottom (see latest messages)."""
@@ -179,44 +260,35 @@ class PiCodingAgentApp(App):
     def action_scroll_output_up(self) -> None:
         """Scroll the message area up (Page Up from anywhere)."""
         try:
-            output = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
             output.scroll_page_up()
         except NoMatches:
-            logger.debug("Output container not found, skipping scroll up")
+            logger.debug("Output not found, skipping scroll up")
         except Exception as e:
             logger.error(f"Unexpected error while scrolling up: {e}")
 
     def action_scroll_output_down(self) -> None:
         """Scroll the message area down (Page Down from anywhere)."""
         try:
-            output = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
             output.scroll_page_down()
         except NoMatches:
-            logger.debug("Output container not found, skipping scroll down")
+            logger.debug("Output not found, skipping scroll down")
         except Exception as e:
             logger.error(f"Unexpected error while scrolling down: {e}")
 
     async def append_user_message_async(self, content: str) -> None:
-        """Mount the user message block immediately so it appears before the assistant block."""
-        block = Static(
-            self.renderer.render_user_message(content),
-            classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_USER_CLASS}",
-            id=None,
-        )
-        container = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
-        await container.mount(block)
-        self._scroll_output_end()
+        """Append user message to output (TextArea mode)."""
+        self.state.output_blocks.append(content)
+        self._refresh_output()
 
     async def ensure_assistant_block(self) -> None:
-        """Create and mount the current assistant (streaming) block. Call before agent.run()."""
-        if self.state.has_active_assistant_widget():
+        """Start streaming assistant block (TextArea mode)."""
+        if self.state.streaming_assistant:
             return
-        block = Static("", classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_ASSISTANT_CLASS}", id=None)
-        container = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
-        await container.mount(block)
-        self.state.current_assistant_widget = block
+        self.state.streaming_assistant = True
         self.state.streaming_buffer = ""
-        self._scroll_output_end()
+        self._refresh_output()
 
     def set_agent_task(self, task: Optional[asyncio.Task]) -> None:
         """Set the currently running agent task (for cancellation)."""
@@ -232,24 +304,27 @@ class PiCodingAgentApp(App):
         """
         Handle multi-line input submission (Enter).
 
-        Args:
-            event: Submitted event with .text
+        If agent is still running (streaming), queue the input and process it
+        after the current response completes, so user messages appear in correct order.
         """
         user_input = (event.text or "").strip()
 
         if not user_input:
             return
 
+        if self.agent and self._input_handler and self.state.is_agent_running():
+            # Agent still streaming: queue input, process after agent completes
+            self._pending_user_inputs.append(user_input)
+            self.notify("已加入队列，将在当前回复完成后处理", severity="information", timeout=2)
+            return
+
         # Mount user message block first so it appears before the assistant response
         await self.append_user_message_async(user_input)
-        # Yield so the UI paints the user block before the agent starts
         await asyncio.sleep(0)
 
-        # Forward to agent if connected
         if self.agent and self._input_handler:
             await self._input_handler(user_input)
         else:
-            # Echo response (for testing without agent)
             self.append_message("assistant", f"Echo: {user_input}")
 
     def set_input_handler(self, handler):
@@ -271,103 +346,132 @@ class PiCodingAgentApp(App):
         self.post_message(MountMessageBlock(role, content))
 
     def append_text(self, text: str) -> None:
-        """Append streaming text to the current assistant block (buffer + update in place).
-        If there is no current block (e.g. after a tool call), posts EnsureAssistantBlockAndAppend
-        so the summary text gets a new block.
-        """
-        if self.state.has_active_assistant_widget():
-            self.state.streaming_buffer += text
-            self.state.current_assistant_widget.update(
-                self.renderer.render_assistant_text(self.state.streaming_buffer)
-            )
-            self._scroll_output_end()
-        else:
-            self.post_message(EnsureAssistantBlockAndAppend(text))
+        """Append streaming text to current assistant block (TextArea mode). Always sync so buffer is ready at finalize."""
+        if not self.state.streaming_assistant:
+            self.state.streaming_assistant = True
+            self.state.streaming_buffer = ""
+        self.state.streaming_buffer += text
+        self._refresh_output()
 
     def append_thinking(self, thinking: str) -> None:
-        """Append thinking text. Mounts a thinking block on first call, then updates in place."""
-        if not self.state.has_active_thinking_widget():
-            self.state.current_thinking_widget = ThinkingBlock()
-            self.post_message(MountWidget(self.state.current_thinking_widget))
-        self.state.current_thinking_widget.append_thinking(thinking)
-        self._scroll_output_end()
+        """Append thinking as a block in output (TextArea mode)."""
+        if self.state.thinking_block_index is None:
+            self.state.output_blocks.append("Thinking... ")
+            self.state.thinking_block_index = len(self.state.output_blocks) - 1
+        self.state.output_blocks[self.state.thinking_block_index] = "Thinking... " + thinking
+        self._refresh_output()
 
     def show_tool_call(self, tool_name: str, args: Optional[dict] = None) -> None:
-        """Show tool call in a separate block: 调用 / 入参 / 结果 (结果=执行中...).
-        Finalizes the current assistant block first so order is: 模型首段 → 工具执行 → 模型总结.
-        """
-        # Freeze current assistant text so tool block appears after it; next stream will open a new block
+        """Append tool block (TextArea mode). Finalizes assistant block first."""
         self.finalize_assistant_block()
         args = args or {}
-        tool_block = ToolBlock(tool_name, args)
-        self.state.current_tool_widget = tool_block
-        self.post_message(MountWidget(tool_block))
+        self.state.current_tool_name = tool_name
+        self.state.current_tool_args = args
+        line = self.renderer.render_tool_block_claude(tool_name, args, "执行中...", success=True).plain
+        self.state.output_blocks.append(line)
+        self._refresh_output()
 
     def show_tool_result(self, result: str, success: bool = True) -> None:
-        """Update the current tool block with 结果 (or mount one if none)."""
-        if self.state.has_active_tool_widget():
-            self.state.current_tool_widget.update_result(result, success)
-            self.state.current_tool_widget = None
-        self._scroll_output_end()
+        """Update last block with tool result (TextArea mode)."""
+        if self.state.current_tool_name is None:
+            self._scroll_output_end()
+            return
+        result_line = self.renderer.format_tool_result_line(result, success)
+        line = self.renderer.render_tool_block_claude(
+            self.state.current_tool_name,
+            self.state.current_tool_args or {},
+            result_line,
+            success=success,
+        ).plain
+        self.state.output_blocks[-1] = line
+        self.state.current_tool_name = None
+        self.state.current_tool_args = None
+        self._refresh_output()
 
     def finalize_assistant_block(self, full_text: Optional[str] = None) -> None:
-        """Replace current assistant block content with Markdown and clear streaming state.
-        Uses internal streaming_buffer (assistant text only; tools are in separate blocks) when full_text is None.
-        """
+        """Push streaming buffer to output_blocks and clear streaming state (TextArea mode)."""
         content = (full_text if full_text is not None else self.state.streaming_buffer).strip()
-        if self.state.has_active_assistant_widget() and content:
-            self.state.current_assistant_widget.update(
-                self.renderer.render_assistant_markdown(content)
-            )
-        self.state.reset_streaming()
-        self._scroll_output_end()
+        logger.debug(
+            "finalize_assistant_block: full_text=%s, len(streaming_buffer)=%s, len(content)=%s, will_append=%s",
+            full_text is not None,
+            len(self.state.streaming_buffer),
+            len(content),
+            bool(content),
+        )
+        if content:
+            self.state.output_blocks.append(content)
+        self.state.streaming_assistant = False
+        self.state.streaming_buffer = ""
+        self.state.thinking_block_index = None
+        self._refresh_output()
 
     def append_markdown(self, markdown_text: str) -> None:
-        """Append a markdown block (mounts a new block)."""
-        self.post_message(
-            MountMessageBlock("system", self.renderer.render_assistant_markdown(markdown_text))
-        )
+        """Append markdown as plain text block (TextArea mode)."""
+        self.state.output_blocks.append(markdown_text.strip())
+        self._refresh_output()
 
     def show_code_block(self, code: str, language: str = "python") -> None:
-        """Display a code block (mounts a new block with syntax highlighting)."""
-        try:
-            from rich.syntax import Syntax
-
-            syntax = Syntax(
-                code,
-                language,
-                theme="monokai",
-                line_numbers=True,
-                word_wrap=False,
-                background_color="#1e1e1e",
-            )
-            block = Static(syntax, classes=MESSAGE_BLOCK_CLASS)
-            self.post_message(MountWidget(block))
-        except ImportError:
-            logger.error("Pygments not available for syntax highlighting")
-            # Fallback to plain text
-            self.append_message("system", f"```{language}\n{code}\n```")
-        except Exception as e:
-            logger.error(f"Error displaying code block: {e}")
-            # Fallback to plain text
-            self.append_message("system", code)
+        """Append code block as plain text (TextArea mode)."""
+        self.state.output_blocks.append(f"```{language}\n{code}\n```")
+        self._refresh_output()
 
     def action_clear(self) -> None:
-        """Clear all message blocks and reset streaming state."""
+        """Clear output and reset state (TextArea mode)."""
         try:
-            output = self.query_one(f"#{OUTPUT_ID}", VerticalScroll)
-            for child in list(output.children):
-                child.remove()
+            self.state.output_blocks = [self.WELCOME_LINE]
             self.state.reset_streaming()
-            self.append_message("system", "Output cleared.")
-        except NoMatches:
-            logger.error("Output container not found, cannot clear")
+            self._refresh_output()
+            self.notify("Output cleared.", severity="information")
         except Exception as e:
             logger.error(f"Error while clearing output: {e}")
 
     def action_toggle_dark(self) -> None:
         """Toggle dark mode."""
         self.dark = not self.dark
+
+    def action_paste(self) -> None:
+        """Paste from clipboard into input (Cmd+V). Always paste into input regardless of focus."""
+        try:
+            inp = self.query_one(f"#{INPUT_ID}", MultiLineInput)
+        except NoMatches:
+            return
+        try:
+            import pyperclip
+            text = pyperclip.paste()
+        except Exception as e:
+            logger.debug("pyperclip paste failed: %s", e)
+            self.notify("粘贴失败（需要 pyperclip）", severity="warning", timeout=2)
+            return
+        if text:
+            inp.insert(text)
+            inp.focus()
+            self.notify(f"已粘贴 {len(text)} 字", severity="information", timeout=1)
+
+    def action_copy_output(self) -> None:
+        """Copy selection to clipboard (Cmd+C), or full output if nothing selected."""
+        try:
+            output = self.query_one(f"#{OUTPUT_ID}", TextArea)
+        except NoMatches:
+            self.notify("No output to copy.", severity="warning")
+            return
+        text = getattr(output, "selected_text", None) or output.text
+        if not (text and text.strip()):
+            self.notify("No content to copy.", severity="information")
+            return
+        text = text.strip()
+        # Use system clipboard (pyperclip) so Cmd+C / Cmd+V use the same clipboard
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            self.notify(f"已复制 {len(text)} 字", severity="information", timeout=2)
+        except Exception as e:
+            logger.debug("pyperclip copy failed: %s", e)
+            try:
+                self.copy_to_clipboard(text)
+                self.notify(f"已复制 {len(text)} 字", severity="information", timeout=2)
+            except Exception as e2:
+                logger.debug("copy_to_clipboard failed: %s", e2)
+                self.notify("复制失败（需要 pyperclip 或终端支持剪贴板）", severity="warning", timeout=3)
 
 
 # Example usage

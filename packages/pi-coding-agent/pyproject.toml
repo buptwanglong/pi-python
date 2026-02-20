@@ -5,11 +5,18 @@ description = "Interactive CLI coding agent"
 authors = ["Pi Python Team"]
 readme = "README.md"
 packages = [{include = "pi_coding_agent"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"
 pi-ai = {path = "../pi-ai", develop = true}
 pi-agent = {path = "../pi-agent", develop = true}
+pi-trajectory = {path = "../pi-trajectory", develop = true}
 pi-tui = {path = "../pi-tui", develop = true, optional = true}
 aiofiles = "^23.2"
 

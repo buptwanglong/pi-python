@@ -49,10 +49,8 @@ class ThinkingBlock(Static):
 
 class ToolBlock(Static):
     """
-    Widget for displaying tool call information.
-
-    This widget maintains tool name, arguments, and result state,
-    providing a clean interface for updating tool execution status.
+    Widget for displaying tool call in Claude Code style:
+    ▶/⏺ ToolName(args) and status line (Running… / Interrupted / result).
     """
 
     def __init__(self, tool_name: str, args: dict):
@@ -66,12 +64,12 @@ class ToolBlock(Static):
         self.tool_name = tool_name
         self.tool_args = args
         renderer = MessageRenderer()
-        initial_content = renderer.format_tool_block(
-            tool_name, args, "执行中..."
+        initial_content = renderer.render_tool_block_claude(
+            tool_name, args, "执行中...", success=True
         )
         super().__init__(
-            Text(initial_content, overflow="fold"),
-            classes=f"{MESSAGE_BLOCK_CLASS} {TOOL_BLOCK_CLASS}",
+            initial_content,
+            classes=f"{MESSAGE_BLOCK_CLASS} {TOOL_BLOCK_CLASS} tool-block--claude",
         )
 
     def update_result(self, result: str, success: bool = True) -> None:
@@ -84,7 +82,7 @@ class ToolBlock(Static):
         """
         renderer = MessageRenderer()
         result_line = renderer.format_tool_result_line(result, success)
-        content = renderer.format_tool_block(
-            self.tool_name, self.tool_args, result_line
+        content = renderer.render_tool_block_claude(
+            self.tool_name, self.tool_args, result_line, success=success
         )
-        self.update(Text(content, overflow="fold"))
+        self.update(content)

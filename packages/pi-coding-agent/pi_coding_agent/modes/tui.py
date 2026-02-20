@@ -6,11 +6,15 @@ Runs the coding agent with an interactive TUI interface.
 
 import asyncio
 import copy
+import logging
 import time
 from typing import Optional
 
 from pi_agent import Agent
 from pi_tui import PiCodingAgentApp
+from pi_tui.app import ProcessPendingInputs
+
+logger = logging.getLogger(__name__)
 
 
 def _format_tool_result(tool_name: str, result: any) -> str:
@@ -165,6 +169,8 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
         current_response["text"] = ""
         current_response["thinking"] = ""
         current_response["in_thinking"] = False
+        # Process any user inputs queued while agent was streaming (correct display order)
+        app.post_message(ProcessPendingInputs())
 
     def on_agent_error(event):
         error = event.get("error", "Unknown error")
@@ -178,12 +184,12 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
     agent.on("agent_error", on_agent_error)
 
 
-async def run_tui_mode(agent: Agent) -> None:
+async def run_tui_mode(coding_agent) -> None:
     """
     Run the coding agent in TUI mode.
 
     Args:
-        agent: The Pi Agent instance to connect to the TUI
+        coding_agent: The CodingAgent instance (provides .agent, .context, _run_with_trajectory_if_enabled)
 
     This function:
     1. Creates a TUI app instance
@@ -191,6 +197,7 @@ async def run_tui_mode(agent: Agent) -> None:
     3. Sets up input handling to forward messages to the agent
     4. Runs the TUI application
     """
+    agent = coding_agent.agent
     app = PiCodingAgentApp(agent=agent)
     current_response = {"text": "", "thinking": "", "in_thinking": False}
     _connect_agent_handlers(app, agent, current_response)
@@ -205,7 +212,7 @@ async def run_tui_mode(agent: Agent) -> None:
         from pi_ai.types import UserMessage
 
         # Add user message to context
-        agent.context.messages.append(
+        coding_agent.context.messages.append(
             UserMessage(
                 role="user",
                 content=user_input,
@@ -214,20 +221,23 @@ async def run_tui_mode(agent: Agent) -> None:
         )
 
         # Snapshot context for error recovery (restore on exception)
-        messages_snapshot = copy.deepcopy(agent.context.messages)
+        messages_snapshot = copy.deepcopy(coding_agent.context.messages)
 
         # Create assistant block so streaming updates go to one block (must be before run)
         await app.ensure_assistant_block()
 
-        # Run agent in a cancellable task
-        task = asyncio.create_task(agent.run(stream_llm_events=True))
+        logger.debug("Sending user message, starting agent run")
+        # Run agent in a cancellable task (with optional trajectory recording)
+        task = asyncio.create_task(coding_agent._run_with_trajectory_if_enabled(stream_llm_events=True))
         app.set_agent_task(task)
         try:
             await task
         except asyncio.CancelledError:
+            logger.debug("Agent task cancelled by user")
             app.append_message("system", "Stopped by user.")
         except Exception as e:
-            agent.context.messages = messages_snapshot
+            logger.exception("Agent run failed in TUI")
+            coding_agent.context.messages = messages_snapshot
             app.append_message("system", f"Error: {e}")
             app.append_message("system", "Context restored to previous state.")
         finally:

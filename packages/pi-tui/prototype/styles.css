@@ -1,0 +1,326 @@
+/* ============================================================
+   Pi TUI 原型 — Claude Code 式布局 (HTML/CSS)
+   与 pi_tui/styles/app.tcss 语义对应，便于后续转 TUI
+   ============================================================ */
+
+:root {
+  /* 背景与表面 */
+  --bg: #1a1b26;
+  --surface: #24283b;
+  --surface-darken-1: #1f2335;
+  --surface-darken-2: #16161e;
+
+  /* 文字 */
+  --text: #c0caf5;
+  --text-muted: #565f89;
+
+  /* 语义色（与 TUI accent/success/warning 对应） */
+  --accent: #7aa2f7;
+  --success: #9ece6a;
+  --warning: #e0af68;
+  --error: #f7768e;
+
+  /* 布局 */
+  --header-height: 40px;
+  --footer-height: 28px;
+  --input-min-height: 72px;
+  --border-radius: 6px;
+  --padding-block: 10px 14px;
+  --padding-inline: 14px 18px;
+  --gap-blocks: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Monaco, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Header ---------- */
+.app-header {
+  height: var(--header-height);
+  padding: 0 var(--padding-inline);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--surface-darken-2);
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.header-hints {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.8em;
+}
+
+/* ---------- Main: 输出区 + 输入区 ---------- */
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.output-container {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--surface-darken-2);
+  margin: 6px 10px;
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+.output {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--padding-block) var(--padding-inline);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-blocks);
+}
+
+.output:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---------- 通用消息块 ---------- */
+.message-block {
+  width: 100%;
+  padding: var(--padding-block) var(--padding-inline);
+  margin: 0;
+  border-radius: var(--border-radius);
+}
+
+.block-label {
+  display: block;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.block-content {
+  margin: 0;
+}
+
+.block-content p,
+.block-content ul {
+  margin: 0 0 8px 0;
+}
+
+.block-content ul {
+  padding-left: 1.2em;
+}
+
+/* 用户消息 */
+.message-user {
+  background: var(--surface-darken-1);
+}
+
+/* 助手消息 */
+.message-assistant {
+  background: transparent;
+}
+
+.message-assistant .block-content {
+  color: var(--text);
+}
+
+/* 系统消息 */
+.message-system {
+  color: var(--text-muted);
+  background: transparent;
+  border-left: none;
+  padding-left: var(--padding-inline);
+}
+
+/* ---------- 工具块：调用 / 入参 / 结果 ---------- */
+.tool-block {
+  background: var(--surface-darken-1);
+  margin-left: 0;
+  padding: var(--padding-block) var(--padding-inline);
+}
+
+.tool-row {
+  margin-bottom: 8px;
+}
+
+.tool-row:last-child {
+  margin-bottom: 0;
+}
+
+.tool-call {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.tool-label {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin-bottom: 4px;
+}
+
+.tool-args-json,
+.tool-result-content {
+  margin: 0;
+  font-size: 0.9em;
+  color: var(--text);
+  background: var(--surface);
+  padding: 8px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-result-content {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ---------- Claude Code 风格工具块：紧凑一行 + 状态 ---------- */
+.tool-block--claude {
+  padding: 8px var(--padding-inline);
+  margin-left: 0;
+}
+
+.tool-claude-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tool-claude-icon {
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.tool-claude-icon--running {
+  color: var(--success);
+}
+
+.tool-claude-icon--interrupted {
+  color: var(--error);
+}
+
+.tool-claude-title {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.tool-claude-status {
+  padding-left: 1.4em;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.tool-claude-status--running {
+  color: var(--text-muted);
+}
+
+.tool-claude-status--interrupted {
+  color: var(--error);
+}
+
+.tool-claude-status-icon {
+  margin-right: 0.25em;
+}
+
+/* ---------- 代码块（助手内容内） ---------- */
+.code-block {
+  background: #1e1e1e;
+  border-radius: var(--border-radius);
+  padding: 12px 16px;
+  margin: 12px 0;
+  border: 1px solid var(--surface-darken-2);
+}
+
+.code-lang {
+  display: inline-block;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.code-content {
+  margin: 0;
+  font-size: 0.9em;
+  overflow-x: auto;
+}
+
+.code-content code {
+  color: #9ece6a;
+  background: none;
+  padding: 0;
+}
+
+/* ---------- 输入区 ---------- */
+.input-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--surface-darken-2);
+  padding: 6px 10px;
+  min-height: var(--input-min-height);
+}
+
+.input-field {
+  width: 100%;
+  min-height: 60px;
+  max-height: 200px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface-darken-1);
+  border: 1px solid var(--surface-darken-2);
+  border-radius: var(--border-radius);
+  resize: vertical;
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---------- Footer ---------- */
+.app-footer {
+  height: var(--footer-height);
+  padding: 0 var(--padding-inline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+  border-top: 1px solid var(--surface-darken-2);
+  flex-shrink: 0;
+}
+
+.footer-input-hint {
+  color: var(--text-muted);
+}
+
+.footer-shortcuts {
+  margin-left: auto;
+}

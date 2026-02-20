@@ -1,11 +1,10 @@
 [tool.poetry]
-name = "pi-tui"
+name = "pi-trajectory"
 version = "0.1.0"
-description = "Terminal UI framework for Pi Coding Agent"
-authors = ["Pi Team"]
+description = "Task trajectory recording for agent runs (RL and tuning)"
+authors = ["Pi Python Team"]
 readme = "README.md"
-packages = [{include = "pi_tui"}]
-include = ["pi_tui/styles/*.tcss"]
+packages = [{include = "pi_trajectory"}]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -15,10 +14,9 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.12"
-textual = "^0.68.0"
-rich = "^13.7.0"
-pygments = "^2.18.0"
-pyperclip = "^1.8.2"
+pydantic = "^2.7"
+pi-ai = {path = "../pi-ai", develop = true}
+pi-agent = {path = "../pi-agent", develop = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"

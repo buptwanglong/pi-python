@@ -5,11 +5,14 @@ Uses ripgrep-like functionality for fast content searching.
 """
 
 import asyncio
+import logging
 import re
 from pathlib import Path
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class GrepParams(BaseModel):
@@ -105,8 +108,8 @@ async def grep_files(
                                 line=line.rstrip(),
                             )
                         )
-        except (UnicodeDecodeError, PermissionError):
-            # Skip binary files or files we can't read
+        except (UnicodeDecodeError, PermissionError) as e:
+            logger.debug("Skip file %s: %s", file_path, e)
             continue
 
     return GrepResult(

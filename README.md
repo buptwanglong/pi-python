@@ -4,7 +4,7 @@ Python implementation of [pi-mono](https://github.com/badlogic/pi-mono): A compr
 
 ## 🎯 Status: Phases 1-8 Complete!
 
-**110 tests passing** | **11 LLM providers** | **5 core tools** | **Extension system** | **Theme support**
+**200+ tests** | **11 LLM providers** | **5 core tools** | **Extension system** | **Theme support**
 
 Pi-Python is a production-ready rewrite of the TypeScript pi-mono project, providing:
 
@@ -17,7 +17,7 @@ Pi-Python is a production-ready rewrite of the TypeScript pi-mono project, provi
 
 ## Architecture
 
-This is a monorepo with 4 core packages (+ 2 future applications):
+This is a monorepo with 5 core packages (+ 2 future applications):
 
 ```
 pi-python/
@@ -25,6 +25,7 @@ pi-python/
 │   ├── pi-ai/              # LLM abstraction layer ✅
 │   ├── pi-agent/           # Agent runtime ✅
 │   ├── pi-tui/             # Terminal UI ✅
+│   ├── pi-trajectory/      # Task trajectory recording (RL/tuning) ✅
 │   ├── pi-coding-agent/    # Interactive CLI agent ✅
 │   ├── pi-mom/             # Slack bot (future)
 │   └── pi-pods/            # vLLM management (future)
@@ -71,7 +72,7 @@ poetry install
 - [ ] **Phase 9**: Applications (Mom/Pods - future work)
 
 **Statistics:**
-- 110 tests (100% passing)
+- 200+ tests
 - 11 LLM providers
 - 5 core tools
 - 4 example extensions
@@ -148,7 +149,7 @@ Install to `~/.pi/extensions/` and the agent will load it automatically.
 ## Testing
 
 ```bash
-# Run all tests (110 tests)
+# Run all tests (200+ tests)
 cd packages/pi-coding-agent
 poetry run pytest -v
 
@@ -229,24 +230,13 @@ poetry run pytest --cov=pi_coding_agent --cov-report=html tests/
 
 ## Publishing to PyPI
 
-To publish the four packages (pi-ai, pi-tui, pi-agent, pi-coding-agent) to PyPI, use the release script and follow [RELEASE.md](RELEASE.md). Summary: run `./scripts/publish-to-pypi.sh` to build, or `./scripts/publish-to-pypi.sh --upload` to build and upload (set `TWINE_USERNAME`/`TWINE_PASSWORD` or use a PyPI token).
+To publish the five packages (pi-ai, pi-tui, pi-agent, pi-trajectory, pi-coding-agent) to PyPI, use the release script and follow [RELEASE.md](RELEASE.md). Summary: run `./scripts/publish-to-pypi.sh` to build, or `./scripts/publish-to-pypi.sh --upload` to build and upload (set `TWINE_USERNAME`/`TWINE_PASSWORD` or use a PyPI token).
 
 ## Contributing
 
-Contributions are welcome! This project follows the architecture of [pi-mono](https://github.com/badlogic/pi-mono).
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Development workflow:**
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new features
-4. Ensure all tests pass: `poetry run pytest -v`
-5. Submit a pull request
-
-**Code style:**
-- Follow PEP 8
-- Use type hints (Python 3.12+)
-- Write docstrings
-- Add tests for new features
+**Summary:** Fork the repo, create a feature branch, add tests for new features, run `poetry run pytest -v`, and submit a pull request. Follow PEP 8, use type hints and docstrings.
 
 ## License
 
@@ -259,7 +249,6 @@ This is a Python rewrite of the excellent [pi-mono](https://github.com/badlogic/
 ## Resources
 
 - [Original pi-mono repo](https://github.com/badlogic/pi-mono)
-- [Implementation plan](/.claude/plans/structured-stirring-pizza.md)
 - [Pydantic documentation](https://docs.pydantic.dev/)
 - [Textual documentation](https://textual.textualize.io/)
 - [Poetry documentation](https://python-poetry.org/)

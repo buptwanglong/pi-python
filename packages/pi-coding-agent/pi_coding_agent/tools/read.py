@@ -5,10 +5,13 @@ Supports reading text files with line number ranges and syntax highlighting.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ReadParams(BaseModel):
@@ -58,7 +61,7 @@ async def read_file(
         with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except UnicodeDecodeError:
-        # Try reading as binary and decode with errors='replace'
+        logger.debug("Read %s with replace errors", path)
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 

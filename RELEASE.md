@@ -1,13 +1,16 @@
 # 发布到 PyPI
 
-本仓库是 monorepo，包含 4 个可独立发布到 PyPI 的包，**必须按依赖顺序**发布。
+本仓库是 monorepo，包含 5 个可独立发布到 PyPI 的包，**必须按依赖顺序**发布。
 
 ## 依赖顺序
 
 1. **pi-ai** — 无内部 path 依赖  
 2. **pi-tui** — 无内部 path 依赖  
 3. **pi-agent** — 依赖 `pi-ai`  
-4. **pi-coding-agent** — 依赖 `pi-ai`、`pi-agent`、`pi-tui`（可选）
+4. **pi-trajectory** — 依赖 `pi-ai`、`pi-agent`  
+5. **pi-coding-agent** — 依赖 `pi-ai`、`pi-agent`、`pi-trajectory`、`pi-tui`（可选）
+
+发布顺序必须严格按上述顺序执行，否则依赖包未上传时后续包会构建或安装失败。
 
 本地开发时各包通过 `path = "../..."` 引用；发布前需要把 path 依赖改成版本约束（如 `^0.1.0`），否则用户 `pip install` 会找不到依赖。
 
@@ -58,6 +61,7 @@ VERSION=0.2.0 ./scripts/publish-to-pypi.sh --upload
    cd packages/pi-ai && poetry build && twine upload dist/* && cd ../..
    cd packages/pi-tui && poetry build && twine upload dist/* && cd ../..
    cd packages/pi-agent && poetry build && twine upload dist/* && cd ../..
+   cd packages/pi-trajectory && poetry build && twine upload dist/* && cd ../..
    cd packages/pi-coding-agent && poetry build && twine upload dist/* && cd ../..
    ```
 

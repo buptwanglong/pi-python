@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGES_DIR = REPO_ROOT / "packages"
 
 # Order: publish base packages first, then dependents
-PUBLISH_ORDER = ["pi-ai", "pi-tui", "pi-agent", "pi-coding-agent"]
+PUBLISH_ORDER = ["pi-ai", "pi-tui", "pi-agent", "pi-trajectory", "pi-coding-agent"]
 
 # Per-package: path dep -> version dep (regex, replacement with {version})
 PACKAGE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
@@ -28,6 +28,10 @@ PACKAGE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
     "pi-coding-agent": [
         (r'pi-ai = \{path = "\.\./pi-ai", develop = true\}', 'pi-ai = "^{version}"'),
         (r'pi-agent = \{path = "\.\./pi-agent", develop = true\}', 'pi-agent = "^{version}"'),
+        (
+            r'pi-trajectory = \{path = "\.\./pi-trajectory", develop = true\}',
+            'pi-trajectory = "^{version}"',
+        ),
         (
             r'pi-tui = \{path = "\.\./pi-tui", develop = true, optional = true\}',
             'pi-tui = {{version = "^{version}", optional = true}}',

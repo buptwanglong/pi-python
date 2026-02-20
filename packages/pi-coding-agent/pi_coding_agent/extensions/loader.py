@@ -5,11 +5,14 @@ Dynamically loads and manages extensions for the coding agent.
 """
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .api import ExtensionAPI
+
+logger = logging.getLogger(__name__)
 
 
 class ExtensionLoader:
@@ -65,6 +68,7 @@ class ExtensionLoader:
             return True
 
         except Exception as e:
+            logger.warning("Error loading extension %s: %s", path, e)
             print(f"❌ Error loading extension {path}: {e}")
             return False
 

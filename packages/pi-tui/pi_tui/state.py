@@ -5,8 +5,8 @@ This module provides the AppState dataclass that encapsulates
 all stateful components of the Pi TUI application.
 """
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 import asyncio
 from textual.widgets import Static
 
@@ -17,17 +17,24 @@ class AppState:
     Centralized state management for Pi TUI Application.
 
     Attributes:
-        current_assistant_widget: Widget displaying streaming assistant response
-        streaming_buffer: Accumulated text for current assistant message
-        current_tool_widget: Widget displaying current tool call
-        current_thinking_widget: Widget displaying thinking/reasoning text
-        agent_task: Currently running agent task (for cancellation)
+        output_blocks: Plain-text blocks when using TextArea output (selectable).
+        streaming_buffer: Accumulated text for current assistant message.
+        streaming_assistant: True while streaming an assistant block (between ensure and finalize).
+        current_assistant_widget: Widget displaying streaming assistant (None when using TextArea).
+        current_tool_widget: Widget displaying current tool call (None when using TextArea).
+        current_thinking_widget: Widget displaying thinking/reasoning text.
+        agent_task: Currently running agent task (for cancellation).
     """
 
-    current_assistant_widget: Optional[Static] = None
+    output_blocks: List[str] = field(default_factory=list)
     streaming_buffer: str = ""
+    streaming_assistant: bool = False
+    current_assistant_widget: Optional[Static] = None
     current_tool_widget: Optional[Static] = None
     current_thinking_widget: Optional[Static] = None
+    current_tool_name: Optional[str] = None
+    current_tool_args: Optional[dict] = None
+    thinking_block_index: Optional[int] = None
     agent_task: Optional[asyncio.Task] = None
 
     def reset_streaming(self) -> None:
@@ -38,8 +45,12 @@ class AppState:
         """
         self.current_assistant_widget = None
         self.streaming_buffer = ""
+        self.streaming_assistant = False
         self.current_tool_widget = None
         self.current_thinking_widget = None
+        self.current_tool_name = None
+        self.current_tool_args = None
+        self.thinking_block_index = None
 
     def reset_all(self) -> None:
         """
@@ -51,8 +62,8 @@ class AppState:
         self.agent_task = None
 
     def has_active_assistant_widget(self) -> bool:
-        """Check if there's an active assistant widget for streaming."""
-        return self.current_assistant_widget is not None
+        """Check if there's an active assistant block for streaming (widget or TextArea mode)."""
+        return self.current_assistant_widget is not None or self.streaming_assistant
 
     def has_active_tool_widget(self) -> bool:
         """Check if there's an active tool widget."""

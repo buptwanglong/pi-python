@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pi TUI 原型 — Claude Code 式布局</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <span class="app-title">Pi Coding Agent</span>
+    <span class="header-hints">Ctrl+G 停止 · Ctrl+L 清空 · Ctrl+End 到底部</span>
+  </header>
+
+  <main class="app-main">
+    <section id="output-container" class="output-container">
+      <div id="output" class="output">
+        <div class="message-block message-system">
+          Enter 发送，Shift+Enter 换行。Scroll: 滚轮或 Page Up/Down。
+        </div>
+
+        <div class="message-block message-user">
+          <div class="block-content">帮我列一下当前目录下的文件，并总结一下有哪些类型的文件。</div>
+        </div>
+
+        <div class="message-block message-assistant">
+          <div class="block-content"><p>好的，我先列出当前目录内容，再按类型归纳。</p></div>
+        </div>
+
+        <div class="message-block tool-block tool-block--claude">
+          <div class="tool-claude-head">
+            <span class="tool-claude-icon tool-claude-icon--running">▶</span>
+            <span class="tool-claude-title">Bash(ls -la)</span>
+          </div>
+          <div class="tool-claude-status tool-claude-status--running">Running…</div>
+        </div>
+
+        <div class="message-block tool-block tool-block--claude">
+          <div class="tool-claude-head">
+            <span class="tool-claude-icon tool-claude-icon--interrupted">⏺</span>
+            <span class="tool-claude-title">Bash(npm root -g)</span>
+          </div>
+          <div class="tool-claude-status tool-claude-status--interrupted">⎿ Interrupted · What should Claude do instead?</div>
+        </div>
+
+        <div class="message-block message-assistant">
+          <div class="block-content">
+            <p>当前目录内容如下，按类型归纳：</p>
+            <ul>
+              <li><strong>文档</strong>：CONFIG.md, README.md</li>
+              <li><strong>目录</strong>：packages/, tests/, .venv/</li>
+              <li><strong>配置</strong>：pyproject.toml, .gitignore</li>
+            </ul>
+            <p>若要用代码列出，可以：</p>
+            <div class="code-block">
+              <span class="code-lang">python</span>
+              <pre class="code-content"><code>import os
+for f in os.listdir('.'):
+    print(f)</code></pre>
+            </div>
+            <p>需要查看某个文件或目录的详细内容可以告诉我。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="input" class="input-area">
+      <textarea
+        class="input-field"
+        rows="3"
+        placeholder="Enter 发送 · Shift+Enter 换行"
+        aria-label="输入消息"
+      ></textarea>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span class="footer-input-hint">Enter 发送</span>
+    <span class="footer-shortcuts">Ctrl+G 停止 · Ctrl+L 清空 · Ctrl+End 到底部</span>
+  </footer>
+</body>
+</html>

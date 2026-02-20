@@ -4,6 +4,7 @@ Main entry point for the pi-coding-agent CLI.
 
 import asyncio
 import copy
+import logging
 import os
 import sys
 import time
@@ -17,6 +18,8 @@ from pi_ai.types import Context, UserMessage
 from .core import SettingsManager, SessionManager
 from .tools import BUILT_IN_TOOLS
 from .extensions import ExtensionLoader
+
+logger = logging.getLogger(__name__)
 
 
 class CodingAgent:
@@ -54,6 +57,12 @@ class CodingAgent:
             self.settings.model.provider,
             self.settings.model.model_id,
             **model_kwargs,
+        )
+        logger.info(
+            "Using model: provider=%s, model_id=%s, base_url=%s",
+            self.settings.model.provider,
+            self.settings.model.model_id,
+            self.settings.model.base_url or "(default)",
         )
 
         # Create context
@@ -126,6 +135,70 @@ Always explain what you're doing before using tools.
         self.agent.on("agent_tool_call_start", on_tool_call_start)
         self.agent.on("agent_tool_call_end", on_tool_call_end)
 
+    def _get_trajectory_dir(self) -> Optional[str]:
+        """Trajectory directory from env or settings; None if disabled."""
+        out = os.environ.get("PI_TRAJECTORY_DIR") or (self.settings.trajectory_dir or "").strip()
+        return out or None
+
+    def _on_trajectory_event(self, event: dict) -> None:
+        """Forward agent event to current trajectory recorder (if any)."""
+        recorder = getattr(self, "_trajectory_recorder", None)
+        if recorder is not None:
+            recorder.on_event(event)
+
+    def _ensure_trajectory_handlers(self) -> None:
+        """Register trajectory event handlers once (no-op when trajectory disabled)."""
+        if getattr(self, "_trajectory_handlers_registered", False):
+            return
+        for event_type in (
+            "agent_turn_start",
+            "agent_turn_end",
+            "agent_tool_call_start",
+            "agent_tool_call_end",
+            "agent_complete",
+            "agent_error",
+        ):
+            self.agent.on(event_type, self._on_trajectory_event)
+        self._trajectory_handlers_registered = True
+
+    async def _run_with_trajectory_if_enabled(self, stream_llm_events: bool = True):
+        """Run agent; if trajectory_dir is set, record trajectory and write to disk."""
+        trajectory_dir = self._get_trajectory_dir()
+        if not trajectory_dir:
+            return await self.agent.run(stream_llm_events=stream_llm_events)
+
+        from pathlib import Path
+        from pi_trajectory import TrajectoryRecorder, write_trajectory
+
+        self._ensure_trajectory_handlers()
+        recorder = TrajectoryRecorder()
+        self._trajectory_recorder = recorder
+
+        user_input = ""
+        for msg in reversed(self.context.messages):
+            if getattr(msg, "role", None) == "user":
+                content = getattr(msg, "content", "")
+                user_input = content if isinstance(content, str) else str(content)
+                break
+        recorder.start_task(user_input)
+
+        state = None
+        try:
+            state = await self.agent.run(stream_llm_events=stream_llm_events)
+        except Exception:
+            raise
+        finally:
+            self._trajectory_recorder = None
+            try:
+                recorder.finalize(state)
+                path = Path(trajectory_dir).expanduser()
+                path.mkdir(parents=True, exist_ok=True)
+                write_trajectory(recorder.get_trajectory(), path / f"task_{recorder.task_id}.json")
+            except Exception as e:
+                logger.warning("Failed to write trajectory: %s", e)
+
+        return state
+
     async def run_interactive(self) -> None:
         """
         Run the agent in interactive mode.
@@ -187,8 +260,9 @@ Always explain what you're doing before using tools.
                 # Run agent
                 print()  # Newline before agent output
                 try:
-                    await self.agent.run(stream_llm_events=True)
+                    await self._run_with_trajectory_if_enabled(stream_llm_events=True)
                 except Exception as agent_error:
+                    logger.exception("Agent run failed")
                     # Restore context on agent failure
                     self.context.messages = messages_snapshot
                     raise agent_error
@@ -198,6 +272,7 @@ Always explain what you're doing before using tools.
                 print("\n\nInterrupted. Type 'exit' to quit.")
                 continue
             except Exception as e:
+                logger.exception("Interactive loop error")
                 print(f"\n❌ Error: {e}")
                 if self.settings.agent.verbose:
                     import traceback
@@ -220,7 +295,7 @@ Always explain what you're doing before using tools.
         )
 
         # Run agent
-        state = await self.agent.run(stream_llm_events=False)
+        state = await self._run_with_trajectory_if_enabled(stream_llm_events=False)
 
         # Get last assistant message
         last_message = state.context.messages[-1]
@@ -282,6 +357,28 @@ async def main_async(args: Optional[list] = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
+    # Configure logging: default write to ~/.pi-coding-agent/logs/ (INFO); LOG_LEVEL overrides level
+    fmt = "%(asctime)s %(name)s: %(levelname)s: %(message)s"
+    log_level_name = (os.environ.get("LOG_LEVEL") or "").upper()
+    level = logging.INFO
+    if log_level_name:
+        level = getattr(logging, log_level_name, level) or level
+    log_dir = Path.home() / ".pi-coding-agent" / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "pi-coding-agent.log"
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter(fmt))
+        root = logging.getLogger()
+        root.setLevel(level)
+        root.addHandler(file_handler)
+        for name in ("pi_tui.app", "pi_coding_agent.modes.tui"):
+            logging.getLogger(name).setLevel(level)
+        logger.info("Log file: %s", log_file)
+    except OSError as e:
+        logger.debug("Could not create log file: %s", e)
+
     # Parse simple arguments
     use_tui = "--tui" in args
     if use_tui:
@@ -318,6 +415,7 @@ Environment variables:
     try:
         agent = CodingAgent()
     except Exception as e:
+        logger.exception("Failed to initialize agent")
         print(f"Error initializing agent: {e}")
         return 1
 
@@ -325,11 +423,12 @@ Environment variables:
     if len(args) == 0:
         # Choose mode based on flag
         if use_tui:
-            # TUI mode
+            # TUI mode (pass CodingAgent so trajectory recording works when enabled)
             try:
                 from .modes.tui import run_tui_mode
-                await run_tui_mode(agent.agent)
+                await run_tui_mode(agent)
             except ImportError as e:
+                logger.warning("TUI import failed: %s", e)
                 print(f"Error: TUI mode requires 'pi-tui' package: {e}")
                 print("Install with: poetry add pi-tui")
                 return 1

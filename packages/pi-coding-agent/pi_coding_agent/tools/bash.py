@@ -5,10 +5,13 @@ Runs bash commands with timeout and output capture.
 """
 
 import asyncio
+import logging
 import subprocess
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class BashParams(BaseModel):
@@ -64,6 +67,7 @@ async def execute_bash(command: str, timeout: int = 120) -> BashResult:
             timed_out = True
 
     except Exception as e:
+        logger.exception("Bash execution failed: %s", command)
         stdout = ""
         stderr = f"Failed to execute command: {e}"
         exit_code = -1

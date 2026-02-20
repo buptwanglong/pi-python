@@ -7,9 +7,12 @@ detects tool calls, executes tools, and manages the conversation flow.
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from pi_ai.api import stream
+
+logger = logging.getLogger(__name__)
 from pi_ai.types import (
     AssistantMessage,
     StopReason,
@@ -106,6 +109,11 @@ async def run_agent_turn(
 
     # Stream LLM response
     try:
+        logger.debug(
+            "Calling model stream, provider=%s, model_id=%s",
+            state.model.provider,
+            state.model.id,
+        )
         event_stream = await stream(state.model, state.context)
 
         # Forward LLM events if requested
@@ -115,8 +123,13 @@ async def run_agent_turn(
 
         # Get final message
         final_message = await event_stream.result()
+        logger.debug(
+            "Model stream done, content_blocks=%s",
+            len(final_message.content) if final_message else 0,
+        )
 
     except Exception as e:
+        logger.exception("LLM streaming error")
         yield AgentEventError(error=str(e)).model_dump()
         raise AgentLoopError(f"LLM streaming error: {e}")
 
@@ -192,34 +205,27 @@ async def run_agent_turn(
             }
         )
 
-    # Create tool result message
-    result_content = []
+    # One ToolResultMessage per tool call (Anthropic requires each tool_use to have a matching tool_result)
     for tr in tool_results:
         if tr["error"]:
-            result_content.append(
-                TextContent(type="text", text=f"Error: {tr['error']}")
-            )
+            result_content = [TextContent(type="text", text=f"Error: {tr['error']}")]
         else:
-            # Convert result to string
-            # Handle Pydantic models by calling model_dump
             if hasattr(tr["result"], "model_dump"):
-                result_dict = tr["result"].model_dump()
-                result_str = json.dumps(result_dict)
+                result_str = json.dumps(tr["result"].model_dump())
             elif not isinstance(tr["result"], str):
                 result_str = json.dumps(tr["result"])
             else:
                 result_str = tr["result"]
-            result_content.append(TextContent(type="text", text=result_str))
+            result_content = [TextContent(type="text", text=result_str)]
 
-    tool_result_msg = ToolResultMessage(
-        role="toolResult",
-        tool_call_id=tool_results[0]["tool_call_id"],  # First tool call ID
-        tool_name=tool_results[0]["tool_name"],  # First tool name
-        content=result_content,
-        timestamp=0,
-    )
-
-    state.add_message(tool_result_msg)
+        tool_result_msg = ToolResultMessage(
+            role="toolResult",
+            tool_call_id=tr["tool_call_id"],
+            tool_name=tr["tool_name"],
+            content=result_content,
+            timestamp=0,
+        )
+        state.add_message(tool_result_msg)
 
     # Emit turn end
     yield AgentEventTurnEnd(

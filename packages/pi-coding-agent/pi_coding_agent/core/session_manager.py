@@ -7,12 +7,15 @@ Each line is a JSON object representing a session entry (message, metadata, etc.
 
 import asyncio
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class SessionEntry(BaseModel):
@@ -155,8 +158,8 @@ class SessionManager:
                 if metadata_entry:
                     metadata = SessionMetadata(**metadata_entry.data)
                     sessions.append(metadata)
-            except Exception:
-                # Skip corrupted sessions
+            except Exception as e:
+                logger.debug("Skip corrupted session %s: %s", path, e)
                 continue
 
         return sessions

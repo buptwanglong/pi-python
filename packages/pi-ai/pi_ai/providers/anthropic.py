@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from anthropic import AsyncAnthropic
+
+logger = logging.getLogger(__name__)
 
 from pi_ai.providers.base import BaseProvider
 from pi_ai.providers.utils import get_env_api_key
@@ -130,6 +133,11 @@ class AnthropicProvider(BaseProvider):
                 if hasattr(options, "onPayload") and callable(options.onPayload):
                     options.onPayload(params)
 
+                logger.info(
+                    "Anthropic request: model=%s, base_url=%s",
+                    model.id,
+                    model.base_url or "(default)",
+                )
                 # Create streaming request
                 async with client.messages.stream(**params) as api_stream:
                     # Emit start event
@@ -170,6 +178,7 @@ class AnthropicProvider(BaseProvider):
                 stream.end()
 
             except Exception as error:
+                logger.warning("Anthropic request failed: %s", error)
                 # Clean up indices
                 for block in output.content:
                     if hasattr(block, "__dict__") and "index" in block.__dict__:
@@ -278,16 +287,33 @@ class AnthropicProvider(BaseProvider):
     def _convert_messages(
         self, model: Model, context: Context, oauth_token: bool
     ) -> List[Dict[str, Any]]:
-        """Convert Context messages to Anthropic format."""
-        result: List[Dict[str, Any]] = []
+        """Convert Context messages to Anthropic format.
 
-        for msg in context.messages:
+        Consecutive ToolResultMessages are merged into one user message with
+        multiple tool_result blocks, so each tool_use has a matching tool_result
+        in the next message (required by Anthropic/Bedrock).
+        """
+        result: List[Dict[str, Any]] = []
+        i = 0
+        while i < len(context.messages):
+            msg = context.messages[i]
             if isinstance(msg, UserMessage):
                 result.append(self._convert_user_message(msg))
+                i += 1
             elif isinstance(msg, AssistantMessage):
                 result.append(self._convert_assistant_message(msg))
+                i += 1
             elif isinstance(msg, ToolResultMessage):
-                result.append(self._convert_tool_result_message(msg, oauth_token))
+                tool_result_msgs = [msg]
+                i += 1
+                while i < len(context.messages) and isinstance(
+                    context.messages[i], ToolResultMessage
+                ):
+                    tool_result_msgs.append(context.messages[i])
+                    i += 1
+                result.append(
+                    self._merge_tool_result_messages(tool_result_msgs, oauth_token)
+                )
 
         return result
 
@@ -352,39 +378,38 @@ class AnthropicProvider(BaseProvider):
 
         return {"role": "assistant", "content": content}
 
+    def _merge_tool_result_messages(
+        self, messages: List[ToolResultMessage], oauth_token: bool
+    ) -> Dict[str, Any]:
+        """Merge consecutive ToolResultMessages into one user message with multiple tool_result blocks."""
+        content: List[Dict[str, Any]] = []
+        for msg in messages:
+            content_blocks: List[Dict[str, Any]] = []
+            for part in msg.content:
+                if part.type == "text":
+                    content_blocks.append({"type": "text", "text": part.text})
+                elif part.type == "image":
+                    content_blocks.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": part.mime_type,
+                            "data": part.data,
+                        },
+                    })
+            content.append({
+                "type": "tool_result",
+                "tool_use_id": msg.tool_call_id,
+                "content": content_blocks if content_blocks else "(no output)",
+                "is_error": msg.is_error,
+            })
+        return {"role": "user", "content": content}
+
     def _convert_tool_result_message(
         self, msg: ToolResultMessage, oauth_token: bool
     ) -> Dict[str, Any]:
-        """Convert ToolResultMessage to Anthropic format."""
-        # Convert content
-        content_blocks = []
-        for part in msg.content:
-            if part.type == "text":
-                content_blocks.append({"type": "text", "text": part.text})
-            elif part.type == "image":
-                content_blocks.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": part.mime_type,
-                        "data": part.data,
-                    },
-                })
-
-        # Build tool result
-        tool_name = to_claude_code_name(msg.tool_name) if oauth_token else msg.tool_name
-
-        return {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": msg.tool_call_id,
-                    "content": content_blocks if content_blocks else "(no output)",
-                    "is_error": msg.is_error,
-                }
-            ],
-        }
+        """Convert a single ToolResultMessage to Anthropic format (used when merging)."""
+        return self._merge_tool_result_messages([msg], oauth_token)
 
     def _convert_tools(self, tools: List[Tool], oauth_token: bool) -> List[Dict[str, Any]]:
         """Convert Tool definitions to Anthropic format."""
