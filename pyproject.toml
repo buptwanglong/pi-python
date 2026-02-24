@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "pi-python"
+name = "basket-python"
 version = "0.1.0"
 description = "Python implementation of pi-mono: AI agent framework with multi-provider LLM support"
 authors = ["Pi Python Team"]

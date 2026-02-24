@@ -1,4 +1,4 @@
-# Pi-Python Project - Final Summary
+# Basket-Python Project - Final Summary
 
 ## 🎉 项目完成情况
 
@@ -199,11 +199,11 @@
 ## 📦 包结构
 
 ```
-pi-python/
+basket-python/
 ├── packages/
-│   ├── pi-ai/              ✅ Multi-provider LLM (100%)
-│   ├── pi-agent/           ✅ Agent runtime (100%)
-│   └── pi-coding-agent/    ✅ CLI + Tools (100%)
+│   ├── basket-ai/              ✅ Multi-provider LLM (100%)
+│   ├── basket-agent/           ✅ Agent runtime (100%)
+│   └── basket-assistant/       ✅ CLI + Tools (100%)
 ├── pyproject.toml          ✅ Root config
 └── README.md               ✅ Documentation
 ```
@@ -214,14 +214,14 @@ pi-python/
 
 ```bash
 # 安装
-cd packages/pi-coding-agent
+cd packages/basket-assistant
 poetry install
 
 # 运行交互模式
-poetry run python -m pi_coding_agent.main
+poetry run basket
 
 # 或使用 one-shot 模式
-poetry run python -m pi_coding_agent.main "Read the README file"
+poetry run basket "Read the README file"
 ```
 
 ---

@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "basket-remote"
+version = "0.1.0"
+description = "Remote web terminal for Basket (ttyd-based; use with ZeroTier/LAN)"
+authors = ["Pi Python Team"]
+readme = "README.md"
+packages = [{include = "basket_remote"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

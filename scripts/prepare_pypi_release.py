@@ -5,7 +5,7 @@ constraints so 'poetry build' produces installable sdist/wheel.
 
 Usage:
   python scripts/prepare_pypi_release.py [--version 0.1.0] [--restore]
-  --version: version constraint for internal deps (default: read from pi-ai)
+  --version: version constraint for internal deps (default: read from basket-ai)
   --restore: restore pyproject.toml from .pypi-release.bak (after build/upload)
 """
 
@@ -18,31 +18,39 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGES_DIR = REPO_ROOT / "packages"
 
 # Order: publish base packages first, then dependents
-PUBLISH_ORDER = ["pi-ai", "pi-tui", "pi-agent", "pi-trajectory", "pi-coding-agent"]
+PUBLISH_ORDER = ["basket-ai", "basket-tui", "basket-agent", "basket-trajectory", "basket-assistant"]
 
 # Per-package: path dep -> version dep (regex, replacement with {version})
 PACKAGE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
-    "pi-agent": [
-        (r'pi-ai = \{path = "\.\./pi-ai", develop = true\}', 'pi-ai = "^{version}"'),
+    "basket-agent": [
+        (r'basket-ai = \{path = "\.\./basket-ai", develop = true\}', 'basket-ai = "^{version}"'),
     ],
-    "pi-coding-agent": [
-        (r'pi-ai = \{path = "\.\./pi-ai", develop = true\}', 'pi-ai = "^{version}"'),
-        (r'pi-agent = \{path = "\.\./pi-agent", develop = true\}', 'pi-agent = "^{version}"'),
+    "basket-trajectory": [
+        (r'basket-ai = \{path = "\.\./basket-ai", develop = true\}', 'basket-ai = "^{version}"'),
+        (r'basket-agent = \{path = "\.\./basket-agent", develop = true\}', 'basket-agent = "^{version}"'),
+    ],
+    "basket-assistant": [
+        (r'basket-ai = \{path = "\.\./basket-ai", develop = true\}', 'basket-ai = "^{version}"'),
+        (r'basket-agent = \{path = "\.\./basket-agent", develop = true\}', 'basket-agent = "^{version}"'),
         (
-            r'pi-trajectory = \{path = "\.\./pi-trajectory", develop = true\}',
-            'pi-trajectory = "^{version}"',
+            r'basket-trajectory = \{path = "\.\./basket-trajectory", develop = true\}',
+            'basket-trajectory = "^{version}"',
         ),
         (
-            r'pi-tui = \{path = "\.\./pi-tui", develop = true, optional = true\}',
-            'pi-tui = {{version = "^{version}", optional = true}}',
+            r'basket-tui = \{path = "\.\./basket-tui", develop = true, optional = true\}',
+            'basket-tui = {{version = "^{version}", optional = true}}',
+        ),
+        (
+            r'basket-remote = \{path = "\.\./basket-remote", develop = true, optional = true\}',
+            'basket-remote = {{version = "^{version}", optional = true}}',
         ),
     ],
 }
 
 
 def get_default_version() -> str:
-    """Read version from pi-ai pyproject.toml."""
-    path = PACKAGES_DIR / "pi-ai" / "pyproject.toml"
+    """Read version from basket-ai pyproject.toml."""
+    path = PACKAGES_DIR / "basket-ai" / "pyproject.toml"
     text = path.read_text()
     m = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
     if m:

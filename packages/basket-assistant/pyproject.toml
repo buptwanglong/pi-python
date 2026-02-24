@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "basket"
+version = "0.1.0"
+description = "Interactive CLI personal assistant"
+authors = ["Pi Python Team"]
+readme = "README.md"
+packages = [{include = "basket_assistant"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+basket-ai = {path = "../basket-ai", develop = true}
+basket-agent = {path = "../basket-agent", develop = true}
+basket-trajectory = {path = "../basket-trajectory", develop = true}
+basket-tui = {path = "../basket-tui", develop = true, optional = true}
+basket-remote = {path = "../basket-remote", develop = true, optional = true}
+aiofiles = "^23.2"
+starlette = "^0.37.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+websockets = "^14.0"
+
+[tool.poetry.extras]
+tui = ["basket-tui"]
+remote = ["basket-remote"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+
+[tool.poetry.scripts]
+basket = "basket_assistant.main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

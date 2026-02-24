@@ -1,0 +1,18 @@
+{
+  "model": {
+    "provider": "anthropic",
+    "model_id": "claude-sonnet-4-20250514",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "base_url": "https://api.anthropic.com"
+  },
+  "agent": {
+    "max_turns": 10,
+    "auto_save": true,
+    "verbose": false
+  },
+  "api_keys": {
+    "ANTHROPIC_API_KEY": "sk-ant-xxx"
+  },
+  "sessions_dir": "~/.basket/sessions"
+}

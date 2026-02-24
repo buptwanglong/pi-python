@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "basket-tui"
+version = "0.1.0"
+description = "Terminal UI framework for Basket Coding Agent"
+authors = ["Pi Team"]
+readme = "README.md"
+packages = [{include = "basket_tui"}]
+include = ["basket_tui/styles/*.tcss"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+textual = "^0.68.0"
+rich = "^13.7.0"
+pygments = "^2.18.0"
+pyperclip = "^1.8.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

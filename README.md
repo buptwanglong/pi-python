@@ -1,4 +1,4 @@
-# Pi-Python
+# Basket-Python
 
 Python implementation of [pi-mono](https://github.com/badlogic/pi-mono): A comprehensive AI agent framework with multi-provider LLM support.
 
@@ -6,7 +6,7 @@ Python implementation of [pi-mono](https://github.com/badlogic/pi-mono): A compr
 
 **200+ tests** | **11 LLM providers** | **5 core tools** | **Extension system** | **Theme support**
 
-Pi-Python is a production-ready rewrite of the TypeScript pi-mono project, providing:
+Basket-Python is a production-ready rewrite of the TypeScript pi-mono project, providing:
 
 - **Multi-provider LLM abstraction** - Unified API for 11+ providers (OpenAI, Anthropic, Google, Azure, Groq, Together, OpenRouter, Deepseek, Perplexity, Cerebras, xAI)
 - **Agent runtime** - Stateful agent execution with tool calling and event streaming
@@ -17,18 +17,19 @@ Pi-Python is a production-ready rewrite of the TypeScript pi-mono project, provi
 
 ## Architecture
 
-This is a monorepo with 5 core packages (+ 2 future applications):
+This is a monorepo with 6 core packages (+ 2 future applications):
 
 ```
-pi-python/
+basket-python/
 ├── packages/
-│   ├── pi-ai/              # LLM abstraction layer ✅
-│   ├── pi-agent/           # Agent runtime ✅
-│   ├── pi-tui/             # Terminal UI ✅
-│   ├── pi-trajectory/      # Task trajectory recording (RL/tuning) ✅
-│   ├── pi-coding-agent/    # Interactive CLI agent ✅
-│   ├── pi-mom/             # Slack bot (future)
-│   └── pi-pods/            # vLLM management (future)
+│   ├── basket-ai/              # LLM abstraction layer ✅
+│   ├── basket-agent/           # Agent runtime ✅
+│   ├── basket-tui/             # Terminal UI ✅
+│   ├── basket-trajectory/      # Task trajectory recording (RL/tuning) ✅
+│   ├── basket-remote/          # Remote web terminal (ZeroTier/LAN) ✅
+│   ├── basket-assistant/       # Interactive CLI agent ✅
+│   ├── pi-mom/                 # Slack bot (future)
+│   └── pi-pods/                # vLLM management (future)
 ```
 
 ## Requirements
@@ -51,7 +52,7 @@ cd pi-python
 poetry install
 
 # Install a specific package
-cd packages/pi-ai
+cd packages/basket-ai
 poetry install
 ```
 
@@ -82,29 +83,29 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for detailed breakdow
 
 ## Quick Start
 
-### Using Pi Coding Agent
+### Using Basket
 
 ```bash
 # Set API key
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Run interactive mode
-cd packages/pi-coding-agent
+cd packages/basket-assistant
 poetry install
-poetry run python -m pi_coding_agent
+poetry run basket
 
 # Or TUI mode (Textual-based UI)
-poetry run python -m pi_coding_agent --tui
+poetry run basket --tui
 
 # One-shot mode
-poetry run python -m pi_coding_agent "Create a hello.py file"
+poetry run basket "Create a hello.py file"
 ```
 
-### Using Pi-AI Library
+### Using basket-ai Library
 
 ```python
-from pi_ai import get_model, stream
-from pi_ai.types import Context, UserMessage
+from basket_ai import get_model, stream
+from basket_ai.types import Context, UserMessage
 
 # Initialize a model
 model = get_model("anthropic-messages", "claude-opus-4-20250514")
@@ -130,8 +131,8 @@ from pydantic import BaseModel, Field
 class MyToolParams(BaseModel):
     text: str = Field(..., description="Input text")
 
-def setup(pi):
-    @pi.register_tool(
+def setup(basket):
+    @basket.register_tool(
         name="my_tool",
         description="Process text",
         parameters=MyToolParams,
@@ -139,18 +140,18 @@ def setup(pi):
     async def my_tool(text: str) -> str:
         return f"Processed: {text}"
 
-    @pi.register_command("/mycmd")
+    @basket.register_command("/mycmd")
     def my_command(args: str):
         print(f"Command: {args}")
 ```
 
-Install to `~/.pi/extensions/` and the agent will load it automatically.
+Install to `~/.basket/extensions/` and the agent will load it automatically.
 
 ## Testing
 
 ```bash
 # Run all tests (200+ tests)
-cd packages/pi-coding-agent
+cd packages/basket-assistant
 poetry run pytest -v
 
 # Run specific test categories
@@ -159,7 +160,7 @@ poetry run pytest tests/test_extensions.py -v   # Extension tests
 poetry run pytest tests/test_theme.py -v        # Theme tests
 
 # Run with coverage
-poetry run pytest --cov=pi_coding_agent --cov-report=html tests/
+poetry run pytest --cov=basket_assistant --cov-report=html tests/
 ```
 
 **Test Coverage:**
@@ -195,15 +196,15 @@ poetry run pytest --cov=pi_coding_agent --cov-report=html tests/
 
 ### Extension System
 - Dynamic module loading
-- Decorator-based API (`@pi.register_tool`, `@pi.register_command`, `@pi.on`)
+- Decorator-based API (`@basket.register_tool`, `@basket.register_command`, `@basket.on`)
 - Event-driven architecture
-- Auto-discovery from `~/.pi/extensions/` and `./extensions/`
+- Auto-discovery from `~/.basket/extensions/` and `./extensions/`
 
 ### Theme System
 - JSON-based theme files
 - Variable references for DRY colors
 - Built-in dark and light themes
-- Load from `~/.pi/themes/`
+- Load from `~/.basket/themes/`
 
 ### Terminal UI (TUI)
 - Textual framework
@@ -230,7 +231,7 @@ poetry run pytest --cov=pi_coding_agent --cov-report=html tests/
 
 ## Publishing to PyPI
 
-To publish the five packages (pi-ai, pi-tui, pi-agent, pi-trajectory, pi-coding-agent) to PyPI, use the release script and follow [RELEASE.md](RELEASE.md). Summary: run `./scripts/publish-to-pypi.sh` to build, or `./scripts/publish-to-pypi.sh --upload` to build and upload (set `TWINE_USERNAME`/`TWINE_PASSWORD` or use a PyPI token).
+To publish the five packages (basket-ai, basket-tui, basket-agent, basket-trajectory, basket-assistant) to PyPI, use the release script and follow [RELEASE.md](RELEASE.md). Summary: run `./scripts/publish-to-pypi.sh` to build, or `./scripts/publish-to-pypi.sh --upload` to build and upload (set `TWINE_USERNAME`/`TWINE_PASSWORD` or use a PyPI token).
 
 ## Contributing
 

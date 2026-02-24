@@ -1,4 +1,4 @@
-# Contributing to Pi-Python
+# Contributing to Basket-Python
 
 Thank you for your interest in contributing. This project follows the architecture of [pi-mono](https://github.com/badlogic/pi-mono).
 
@@ -37,7 +37,7 @@ poetry run pytest -v
 Root `pyproject.toml` configures `testpaths = ["packages/*/tests"]`, so this runs tests for all packages. To run tests for a single package:
 
 ```bash
-cd packages/pi-coding-agent
+cd packages/basket-assistant
 poetry run pytest -v
 ```
 

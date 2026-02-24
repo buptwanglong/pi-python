@@ -4,11 +4,11 @@
 
 ## 依赖顺序
 
-1. **pi-ai** — 无内部 path 依赖  
-2. **pi-tui** — 无内部 path 依赖  
-3. **pi-agent** — 依赖 `pi-ai`  
-4. **pi-trajectory** — 依赖 `pi-ai`、`pi-agent`  
-5. **pi-coding-agent** — 依赖 `pi-ai`、`pi-agent`、`pi-trajectory`、`pi-tui`（可选）
+1. **basket-ai** — 无内部 path 依赖  
+2. **basket-tui** — 无内部 path 依赖  
+3. **basket-agent** — 依赖 `basket-ai`  
+4. **basket-trajectory** — 依赖 `basket-ai`、`basket-agent`  
+5. **basket-assistant**（PyPI 名 `basket`）— 依赖 `basket-ai`、`basket-agent`、`basket-trajectory`、`basket-tui`（可选）、`basket-remote`（可选）
 
 发布顺序必须严格按上述顺序执行，否则依赖包未上传时后续包会构建或安装失败。
 
@@ -36,7 +36,7 @@ pip install poetry twine
   ```
 - 或使用 **用户名 + 密码**：`TWINE_USERNAME` / `TWINE_PASSWORD`
 
-指定版本（否则用各包 `pyproject.toml` 里的 version，通常与 pi-ai 一致）：
+指定版本（否则用各包 `pyproject.toml` 里的 version，通常与 basket-ai 一致）：
 
 ```bash
 VERSION=0.2.0 ./scripts/publish-to-pypi.sh --upload
@@ -58,11 +58,11 @@ VERSION=0.2.0 ./scripts/publish-to-pypi.sh --upload
 
 2. **按顺序构建并上传**  
    ```bash
-   cd packages/pi-ai && poetry build && twine upload dist/* && cd ../..
-   cd packages/pi-tui && poetry build && twine upload dist/* && cd ../..
-   cd packages/pi-agent && poetry build && twine upload dist/* && cd ../..
-   cd packages/pi-trajectory && poetry build && twine upload dist/* && cd ../..
-   cd packages/pi-coding-agent && poetry build && twine upload dist/* && cd ../..
+   cd packages/basket-ai && poetry build && twine upload dist/* && cd ../..
+   cd packages/basket-tui && poetry build && twine upload dist/* && cd ../..
+   cd packages/basket-agent && poetry build && twine upload dist/* && cd ../..
+   cd packages/basket-trajectory && poetry build && twine upload dist/* && cd ../..
+   cd packages/basket-assistant && poetry build && twine upload dist/* && cd ../..
    ```
 
 3. **恢复本地开发用的 path 依赖**  
@@ -78,7 +78,7 @@ VERSION=0.2.0 ./scripts/publish-to-pypi.sh --upload
 产物在各自 `packages/<pkg>/dist/` 下，可本地测试安装：
 
 ```bash
-pip install packages/pi-coding-agent/dist/pi_coding_agent-0.1.0-py3-none-any.whl
+pip install packages/basket-assistant/dist/basket-0.1.0-py3-none-any.whl
 ```
 
 ## 测试网 PyPI（TestPyPI）
@@ -86,8 +86,8 @@ pip install packages/pi-coding-agent/dist/pi_coding_agent-0.1.0-py3-none-any.whl
 先发到 TestPyPI 验证再发正式 PyPI：
 
 ```bash
-twine upload --repository testpypi packages/pi-ai/dist/*
-# 安装测试：pip install -i https://test.pypi.org/simple/ pi-coding-agent
+twine upload --repository testpypi packages/basket-ai/dist/*
+# 安装测试：pip install -i https://test.pypi.org/simple/ basket
 ```
 
 ## 版本与兼容性

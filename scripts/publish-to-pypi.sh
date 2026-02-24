@@ -21,7 +21,7 @@ python3 scripts/prepare_pypi_release.py $PREPARE_EXTRA
 
 echo ""
 echo "=== Building packages ==="
-for pkg in pi-ai pi-tui pi-agent pi-trajectory pi-coding-agent; do
+for pkg in basket-ai basket-tui basket-agent basket-trajectory basket-assistant; do
   d=packages/$pkg
   if [ -d "$d" ]; then
     (cd "$d" && poetry build)
@@ -31,7 +31,7 @@ done
 if [ "$1" = "--upload" ]; then
   echo ""
   echo "=== Uploading to PyPI ==="
-  for pkg in pi-ai pi-tui pi-agent pi-trajectory pi-coding-agent; do
+  for pkg in basket-ai basket-tui basket-agent basket-trajectory basket-assistant; do
     d=packages/$pkg
     if [ -d "$d" ]; then
       (cd "$d" && twine upload dist/*)
