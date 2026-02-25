@@ -8,6 +8,8 @@ from .bash import BASH_TOOL, BashParams, BashResult, execute_bash
 from .edit import EDIT_TOOL, EditParams, EditResult, edit_file
 from .grep import GREP_TOOL, GrepMatch, GrepParams, GrepResult, grep_files
 from .read import READ_TOOL, ReadParams, ReadResult, read_file
+from .skill import SkillParams, create_skill_tool
+from .task import TaskParams, create_task_tool
 from .write import WRITE_TOOL, WriteParams, WriteResult, write_file
 
 # All built-in tools
@@ -48,4 +50,10 @@ __all__ = [
     "GrepMatch",
     "GrepResult",
     "grep_files",
+    # Skill
+    "SkillParams",
+    "create_skill_tool",
+    # Task
+    "TaskParams",
+    "create_task_tool",
 ]

@@ -1,9 +1,10 @@
 """
-Serve subpackage: resident assistant HTTP/WebSocket gateway.
+Serve subpackage: re-exports from basket_gateway for resident assistant.
 """
 
-from .gateway import create_app, run_gateway
-from .state import (
+from basket_gateway import (
+    create_app,
+    run_gateway,
     read_serve_state,
     write_serve_state,
     clear_serve_state,

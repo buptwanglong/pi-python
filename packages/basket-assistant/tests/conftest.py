@@ -159,8 +159,10 @@ async def mock_coding_agent(tmp_path, mock_settings_manager, monkeypatch):
     from basket_ai import api
     monkeypatch.setattr(api, "get_model", mock_get_model)
 
-    # Create agent with test settings
-    mock_settings_manager.settings.sessions_dir = str(tmp_path / "sessions")
+    # Create agent with test settings (persist sessions_dir so load() sees it)
+    settings = mock_settings_manager.load()
+    settings.sessions_dir = str(tmp_path / "sessions")
+    mock_settings_manager.save(settings)
     agent = CodingAgent(settings_manager=mock_settings_manager, load_extensions=False)
 
     return agent

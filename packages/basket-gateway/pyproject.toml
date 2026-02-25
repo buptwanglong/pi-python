@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "basket"
+name = "basket-gateway"
 version = "0.1.0"
-description = "Interactive CLI personal assistant"
+description = "Gateway and channels for the resident assistant (WebSocket, Feishu, etc.)"
 authors = ["Pi Python Team"]
 readme = "README.md"
-packages = [{include = "basket_assistant"}]
+packages = [{include = "basket_gateway"}]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -14,27 +14,20 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.12"
-basket-ai = {path = "../basket-ai", develop = true}
 basket-agent = {path = "../basket-agent", develop = true}
-basket-gateway = {path = "../basket-gateway", develop = true}
-basket-trajectory = {path = "../basket-trajectory", develop = true}
-basket-tui = {path = "../basket-tui", develop = true, optional = true}
-basket-remote = {path = "../basket-remote", develop = true, optional = true}
-aiofiles = "^23.2"
+basket-ai = {path = "../basket-ai", develop = true}
 starlette = "^0.37.0"
 uvicorn = {extras = ["standard"], version = "^0.30.0"}
-websockets = "^14.0"
+lark-oapi = {version = "^1.0", optional = true}
+dingtalk-stream = {version = "^0.2", optional = true}
 
 [tool.poetry.extras]
-tui = ["basket-tui"]
-remote = ["basket-remote"]
+feishu = ["lark-oapi"]
+dingtalk = ["dingtalk-stream"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
 pytest-asyncio = "^0.23.0"
-
-[tool.poetry.scripts]
-basket = "basket_assistant.main:main"
 
 [build-system]
 requires = ["poetry-core"]

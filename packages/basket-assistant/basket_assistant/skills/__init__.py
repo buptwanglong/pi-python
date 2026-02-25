@@ -1,5 +1,5 @@
-"""Skills: load skill index and full content for system prompt injection."""
+"""Re-export from core (skills loader lives in core.skills_loader)."""
 
-from .loader import get_skill_full_content, get_skills_index
+from basket_assistant.core import get_skill_base_dir, get_skill_full_content, get_skills_index
 
-__all__ = ["get_skills_index", "get_skill_full_content"]
+__all__ = ["get_skill_base_dir", "get_skill_full_content", "get_skills_index"]

@@ -73,13 +73,19 @@ Search for patterns in files using regex.
 
 ## Skills
 
-Skills are instruction documents (Markdown) that the agent can use for a single turn. The main prompt only includes a short **index** (name + description); when you invoke a skill with `/skill <id>`, the full content is injected for that turn only.
+OpenCode/Claude-style layout: **one directory per skill with `SKILL.md` inside**. Same directories work with OpenCode and Claude Code.
 
-- **Directories**: `~/.basket/skills/` and `./.basket/skills/` (project overrides user for same id).
-- **Files**: One skill per file, `{id}.md` (e.g. `refactor.md`). Optional YAML frontmatter with `description: ...` for the index; the rest is the full instruction body.
-- **Usage**: In interactive mode, type `/skill refactor` or `/skill refactor your request here`. The agent will see the full skill content for that turn and use the existing tools to follow it.
+- **Layout**: Create a subdirectory per skill (e.g. `git-release`); put `SKILL.md` inside. `SKILL.md` must have YAML frontmatter: `name` (matches directory name), `description` (1–1024 chars). Optional: `metadata`, `compatibility`, `license`. Name must match `^[a-z0-9]+(-[a-z0-9]+)*$`, length 1–64.
+- **Default search paths** (when not configured): Basket (`~/.basket/skills`, `./.basket/skills`), OpenCode (`~/.config/opencode/skills`, `./.opencode/skills`), Claude (`~/.claude/skills`, `./.claude/skills`), Agents (`~/.agents/skills`, `./.agents/skills`). Later path wins for the same skill name.
+- **Discovery and loading**: The agent has a `skill` tool; its description lists available skills in `<available_skills>`. Call the tool with a skill name to load the full content (returned as tool result). You can also type `/skill <id> [message]` in interactive mode to force that skill for the current turn.
+- **Settings** in `~/.basket/settings.json`: `skills_dirs` (list of paths; when set, only these are used), `skills_include` (list of skill names to load; empty = all).
 
-Optional settings in `~/.basket/settings.json`: `skills_dirs` (list of paths), `skills_include` (list of skill ids to load; empty = all).
+## SubAgents and Task tool
+
+You can configure **subagents** (e.g. general-purpose, explore) and let the main agent delegate work via the **task** tool. The subagent runs in its own context with its own prompt and (optionally) tool set, then returns a single result.
+
+- **Config**: `agents` in `~/.basket/settings.json` and/or `.basket/agents/*.md` files (YAML frontmatter + body as prompt). Same name in a later source overrides the earlier.
+- **Task tool**: When at least one subagent is configured, the main agent gets a `task` tool; call it with `subagent_type`, `prompt`, and `description`. See [CONFIG.md](CONFIG.md) for `SubAgentConfig` fields and `.basket/agents` layout.
 
 ## License
 

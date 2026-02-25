@@ -32,6 +32,21 @@ class AgentSettings(BaseModel):
     verbose: bool = False
 
 
+class SubAgentConfig(BaseModel):
+    """Configuration for a subagent (used by the Task tool)."""
+
+    description: str = Field(..., description="Short description for the Task tool list")
+    prompt: str = Field(..., description="System prompt for this subagent")
+    model: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional override: e.g. {\"provider\": \"openai\", \"model_id\": \"gpt-4o-mini\"}",
+    )
+    tools: Optional[Dict[str, bool]] = Field(
+        None,
+        description="Optional: tool name -> enabled; unset = all tools like main agent",
+    )
+
+
 class Settings(BaseModel):
     """Global settings for the coding agent."""
 
@@ -42,6 +57,10 @@ class Settings(BaseModel):
     trajectory_dir: Optional[str] = "~/.basket/trajectories"  # Record task trajectories for RL/tuning; set to null/empty to disable
     skills_dirs: List[str] = Field(default_factory=list)  # Empty => use ~/.basket/skills and ./.basket/skills
     skills_include: List[str] = Field(default_factory=list)  # Empty => load all; else only these skill ids
+    agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)  # Subagents for Task tool
+    agents_dirs: List[str] = Field(default_factory=list)  # Empty => ~/.basket/agents and ./.basket/agents
+    # Opaque channel config for basket serve; schema owned by basket-gateway/channels, assistant only passes through
+    serve: Optional[Dict[str, Any]] = None
     custom: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -79,7 +98,7 @@ class SettingsManager:
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return Settings(**data)
+            return Settings(**data)
         except Exception as e:
             logger.warning("Failed to load settings, using defaults: %s", e)
             return Settings()
@@ -172,4 +191,10 @@ class SettingsManager:
         self.save(settings)
 
 
-__all__ = ["ModelSettings", "AgentSettings", "Settings", "SettingsManager"]
+__all__ = [
+    "ModelSettings",
+    "AgentSettings",
+    "SubAgentConfig",
+    "Settings",
+    "SettingsManager",
+]

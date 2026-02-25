@@ -12,6 +12,7 @@ from basket_assistant.core.settings import (
     SettingsManager,
     ModelSettings,
     AgentSettings,
+    SubAgentConfig,
 )
 
 
@@ -190,6 +191,29 @@ def test_agent_settings_defaults():
     assert agent.max_turns == 10
     assert agent.auto_save is True
     assert agent.verbose is False
+
+
+def test_settings_with_agents_save_and_load(settings_manager):
+    """Settings with agents (SubAgentConfig) round-trip correctly."""
+    settings = Settings(
+        agents={
+            "general": SubAgentConfig(
+                description="General research",
+                prompt="You are a research assistant.",
+            ),
+            "explore": SubAgentConfig(
+                description="Codebase exploration",
+                prompt="Explore with read/grep.",
+                tools={"read": True, "grep": True},
+            ),
+        }
+    )
+    settings_manager.save(settings)
+    loaded = settings_manager.load()
+    assert "general" in loaded.agents
+    assert loaded.agents["general"].description == "General research"
+    assert "explore" in loaded.agents
+    assert loaded.agents["explore"].tools == {"read": True, "grep": True}
 
 
 if __name__ == "__main__":

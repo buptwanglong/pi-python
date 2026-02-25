@@ -10,16 +10,16 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 from basket_agent import Agent
 from basket_ai.api import get_model
 from basket_ai.types import Context, UserMessage
 
-from .core import SettingsManager, SessionManager
+from .core import SettingsManager, SessionManager, SubAgentConfig, load_agents_from_dirs
 from .extensions import ExtensionLoader
-from .skills import get_skill_full_content, get_skills_index
-from .tools import BUILT_IN_TOOLS
+from .core import get_skill_full_content, get_skills_index
+from .tools import BUILT_IN_TOOLS, create_skill_tool, create_task_tool
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +92,109 @@ class CodingAgent:
             if num_loaded > 0:
                 print(f"📦 Loaded {num_loaded} extension(s)")
 
+    def _get_agents_dirs(self) -> list[Path]:
+        """Resolve agents directories; default ~/.basket/agents and ./.basket/agents."""
+        if self.settings.agents_dirs:
+            return [Path(d).expanduser().resolve() for d in self.settings.agents_dirs]
+        return [
+            Path.home() / ".basket" / "agents",
+            Path.cwd() / ".basket" / "agents",
+        ]
+
+    def _get_subagent_configs(self) -> Dict[str, SubAgentConfig]:
+        """Merge settings.agents with agents loaded from .basket/agents/*.md; later overrides."""
+        out: Dict[str, SubAgentConfig] = {}
+        for k, v in self.settings.agents.items():
+            out[k] = v
+        for k, v in load_agents_from_dirs(self._get_agents_dirs()).items():
+            out[k] = v
+        return out
+
+    def _get_registerable_tools(self) -> List[dict]:
+        """Return list of tool dicts (name, description, parameters, execute_fn) as used in _register_tools."""
+        include = self.settings.skills_include or None
+        if include is not None and len(self.settings.skills_include) == 0:
+            include = None
+        skill_tool = create_skill_tool(self._get_skills_dirs, include)
+        return list(BUILT_IN_TOOLS) + [skill_tool]
+
+    def _filter_tools_for_subagent(self, cfg: SubAgentConfig) -> List[dict]:
+        """Return tool dicts allowed for this subagent; cfg.tools None = all."""
+        tools = self._get_registerable_tools()
+        if cfg.tools is None:
+            return tools
+        return [t for t in tools if cfg.tools.get(t["name"], True)]
+
+    async def run_subagent(self, subagent_name: str, user_prompt: str) -> str:
+        """Run a subagent with the given prompt; returns last assistant text."""
+        configs = self._get_subagent_configs()
+        cfg = configs.get(subagent_name)
+        if not cfg:
+            available = ", ".join(configs) if configs else "none"
+            return f'SubAgent "{subagent_name}" not found. Available: {available}'
+
+        if cfg.model and isinstance(cfg.model, dict):
+            model_kwargs: dict = {}
+            if self.settings.model.base_url:
+                model_kwargs["base_url"] = self.settings.model.base_url
+            model = get_model(
+                cfg.model.get("provider", self.settings.model.provider),
+                cfg.model.get("model_id", self.settings.model.model_id),
+                **model_kwargs,
+            )
+        else:
+            model = self.model
+
+        context = Context(
+            systemPrompt=cfg.prompt,
+            messages=[
+                UserMessage(
+                    role="user",
+                    content=user_prompt,
+                    timestamp=int(time.time() * 1000),
+                )
+            ],
+        )
+        sub_agent = Agent(model, context)
+        sub_agent.max_turns = self.settings.agent.max_turns
+        for t in self._filter_tools_for_subagent(cfg):
+            sub_agent.register_tool(
+                name=t["name"],
+                description=t["description"],
+                parameters=t["parameters"],
+                execute_fn=t["execute_fn"],
+            )
+
+        state = await sub_agent.run(stream_llm_events=False)
+
+        for msg in reversed(state.context.messages):
+            if getattr(msg, "role", None) == "assistant" and hasattr(msg, "content"):
+                content = getattr(msg, "content", [])
+                texts = []
+                for block in content:
+                    if getattr(block, "type", None) == "text" and hasattr(block, "text"):
+                        texts.append(block.text)
+                if texts:
+                    return "\n".join(texts)
+        return "(No response)"
+
     def _get_skills_dirs(self) -> list[Path]:
-        """Resolve skills directories; default if settings.skills_dirs is empty."""
+        """Resolve skills directories; default includes Basket, OpenCode, Claude, Agents paths."""
         if self.settings.skills_dirs:
             return [Path(d).expanduser().resolve() for d in self.settings.skills_dirs]
         return [
             Path.home() / ".basket" / "skills",
             Path.cwd() / ".basket" / "skills",
+            Path.home() / ".config" / "opencode" / "skills",
+            Path.cwd() / ".opencode" / "skills",
+            Path.home() / ".claude" / "skills",
+            Path.cwd() / ".claude" / "skills",
+            Path.home() / ".agents" / "skills",
+            Path.cwd() / ".agents" / "skills",
         ]
 
     def _get_system_prompt(self) -> str:
-        """Get the system prompt for the agent (base + skills index only)."""
+        """Get the system prompt for the agent (base + brief skill tool mention)."""
         base = """You are a helpful coding assistant. You have access to tools to read, write, and edit files, execute shell commands, and search for code.
 
 When using tools:
@@ -112,19 +204,11 @@ When using tools:
 - Use 'bash' to run shell commands (git, npm, pytest, etc.)
 - Use 'grep' to search for patterns in files
 
+You have a `skill` tool to discover and load reusable skills by name; use it when you need instructions for a specific task. The skill tool's description lists available skills.
+
 Always explain what you're doing before using tools.
 """
-        dirs = self._get_skills_dirs()
-        include = self.settings.skills_include or None
-        if include is not None and len(self.settings.skills_include) == 0:
-            include = None
-        index = get_skills_index(dirs, include_ids=include)
-        if not index:
-            return base
-        block = "\n\n## Available skills (use /skill <id> to load full instructions)\n" + "\n".join(
-            f"- {sid}: {desc}" for sid, desc in index
-        )
-        return base + block
+        return base
 
     def get_system_prompt_for_run(self, invoked_skill_id: Optional[str] = None) -> str:
         """System prompt for this run; if invoked_skill_id set, append that skill's full content."""
@@ -145,6 +229,27 @@ Always explain what you're doing before using tools.
                 description=tool["description"],
                 parameters=tool["parameters"],
                 execute_fn=tool["execute_fn"],
+            )
+        # Skill tool: dynamic description with available_skills
+        include = self.settings.skills_include or None
+        if include is not None and len(self.settings.skills_include) == 0:
+            include = None
+        skill_tool = create_skill_tool(self._get_skills_dirs, include)
+        self.agent.register_tool(
+            name=skill_tool["name"],
+            description=skill_tool["description"],
+            parameters=skill_tool["parameters"],
+            execute_fn=skill_tool["execute_fn"],
+        )
+        # Task tool: delegate to subagents (only when at least one subagent is configured)
+        configs = self._get_subagent_configs()
+        if configs:
+            task_tool = create_task_tool(self)
+            self.agent.register_tool(
+                name=task_tool["name"],
+                description=task_tool["description"],
+                parameters=task_tool["parameters"],
+                execute_fn=task_tool["execute_fn"],
             )
 
     def _setup_event_handlers(self) -> None:
@@ -508,6 +613,18 @@ Environment variables:
         return 0
 
     # Serve subcommands: resident assistant gateway (start / stop / status / attach)
+    def _build_serve_channel_config():
+        """Build channel_config from settings.json (serve). Assistant does not interpret channel schema; gateway/channels do."""
+        cfg = {"websocket": True, "feishu": None}
+        try:
+            sm = SettingsManager()
+            settings = sm.load()
+            if getattr(settings, "serve", None) and isinstance(settings.serve, dict):
+                cfg.update(settings.serve)
+        except Exception as e:
+            logger.debug("Loading serve channel config: %s", e)
+        return cfg
+
     if len(args) >= 2 and args[0] == "serve" and args[1] in ("start", "stop", "status", "attach"):
         sub = args[1]
         rest = args[2:]
@@ -536,7 +653,13 @@ Environment variables:
             if not foreground:
                 print("Starting assistant in foreground. Use Ctrl+C to stop.")
                 print("Tip: run with 'nohup basket serve start &' or systemd for background.")
-            await run_gateway(host="127.0.0.1", port=port)
+            channel_config = _build_serve_channel_config()
+            await run_gateway(
+                host="127.0.0.1",
+                port=port,
+                agent_factory=CodingAgent,
+                channel_config=channel_config,
+            )
             return 0
         if sub == "stop":
             try:

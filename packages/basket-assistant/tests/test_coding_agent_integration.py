@@ -13,7 +13,7 @@ import pytest
 from basket_ai.types import AssistantMessage, Context, TextContent, UserMessage
 
 from basket_assistant.main import CodingAgent
-from basket_assistant.core import SettingsManager
+from basket_assistant.core import SettingsManager, SubAgentConfig
 
 
 @pytest.mark.integration
@@ -53,13 +53,13 @@ class TestCodingAgentIntegration:
 
     @pytest.mark.asyncio
     async def test_tool_registration(self, mock_coding_agent):
-        """Test that all 5 built-in tools are registered."""
+        """Test that built-in tools (read, write, edit, bash, grep) and skill tool are registered."""
         # Get registered tools from agent
         tools = mock_coding_agent.agent.tools
 
-        # Verify all 5 tools are registered
+        # Verify built-in + skill tools are registered
         tool_names = {tool["name"] for tool in tools}
-        expected_tools = {"read", "write", "edit", "bash", "grep"}
+        expected_tools = {"read", "write", "edit", "bash", "grep", "skill"}
         assert expected_tools.issubset(tool_names), f"Missing tools: {expected_tools - tool_names}"
 
         # Verify each tool has required fields
@@ -69,6 +69,27 @@ class TestCodingAgentIntegration:
                 assert "parameters" in tool
                 assert "execute_fn" in tool
                 assert callable(tool["execute_fn"])
+
+    @pytest.mark.asyncio
+    async def test_task_tool_registered_when_agents_configured(self, tmp_path, mock_settings_manager, monkeypatch):
+        """When settings contain agents, the task tool is registered."""
+        from basket_assistant.core.settings import Settings
+        mock_model = MagicMock()
+        mock_model.provider = "mock"
+        mock_model.model_id = "mock-model"
+        monkeypatch.setattr("basket_ai.api.get_model", lambda *args, **kwargs: mock_model)
+        settings = mock_settings_manager.load()
+        settings.sessions_dir = str(tmp_path / "sessions")
+        settings.agents = {
+            "general": SubAgentConfig(
+                description="General research",
+                prompt="You are a research assistant.",
+            ),
+        }
+        mock_settings_manager.save(settings)
+        agent = CodingAgent(settings_manager=mock_settings_manager, load_extensions=False)
+        tool_names = {t.name for t in agent.agent.tools}
+        assert "task" in tool_names
 
     @pytest.mark.asyncio
     async def test_single_turn_conversation(self, mock_coding_agent, monkeypatch):
