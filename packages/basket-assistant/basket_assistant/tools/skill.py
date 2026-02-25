@@ -53,7 +53,7 @@ def create_skill_tool(
         dirs_inner = dirs_getter()
         content = get_skill_full_content(name, dirs_inner)
         if not content:
-            index = get_skills_index(dirs_inner, include_ids=None)
+            index = get_skills_index(dirs_inner, include_ids=include_ids)
             available = ", ".join(n for n, _ in index) if index else "none"
             return f'Skill "{name}" not found. Available skills: {available}'
         base_dir = get_skill_base_dir(name, dirs_inner)

@@ -123,7 +123,7 @@ class CodingAgent:
         tools = self._get_registerable_tools()
         if cfg.tools is None:
             return tools
-        return [t for t in tools if cfg.tools.get(t["name"], True)]
+        return [t for t in tools if cfg.tools.get(t["name"], False)]
 
     async def run_subagent(self, subagent_name: str, user_prompt: str) -> str:
         """Run a subagent with the given prompt; returns last assistant text."""

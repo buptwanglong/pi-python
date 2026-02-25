@@ -71,6 +71,18 @@ class TestCodingAgentIntegration:
                 assert callable(tool["execute_fn"])
 
     @pytest.mark.asyncio
+    async def test_filter_tools_for_subagent_whitelist(self, mock_coding_agent):
+        """SubAgentConfig.tools whitelist: only explicitly enabled tools are returned."""
+        cfg = SubAgentConfig(
+            description="Explore",
+            prompt="You explore.",
+            tools={"read": True, "grep": True},
+        )
+        filtered = mock_coding_agent._filter_tools_for_subagent(cfg)
+        names = [t["name"] for t in filtered]
+        assert set(names) == {"read", "grep"}, "Only whitelisted read and grep should be enabled"
+
+    @pytest.mark.asyncio
     async def test_task_tool_registered_when_agents_configured(self, tmp_path, mock_settings_manager, monkeypatch):
         """When settings contain agents, the task tool is registered."""
         from basket_assistant.core.settings import Settings

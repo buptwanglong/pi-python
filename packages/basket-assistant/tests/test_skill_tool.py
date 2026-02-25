@@ -71,3 +71,21 @@ async def test_skill_tool_no_skills_description(skill_dir):
     result = await execute_fn(name="any")
     assert "not found" in result.lower()
     assert "none" in result or "Available" in result
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_not_found_respects_include_ids(skill_dir):
+    """When skill not found, error message lists only filtered skills (include_ids), not all."""
+    (skill_dir / "other").mkdir()
+    (skill_dir / "other" / "SKILL.md").write_text(
+        "---\nname: other\ndescription: Other skill\n---\n\n# Other",
+        encoding="utf-8",
+    )
+    def dirs_getter():
+        return [skill_dir]
+    tool = create_skill_tool(dirs_getter, include_ids=["refactor"])
+    execute_fn = tool["execute_fn"]
+    result = await execute_fn(name="nonexistent")
+    assert "not found" in result.lower()
+    assert "refactor" in result
+    assert "other" not in result
