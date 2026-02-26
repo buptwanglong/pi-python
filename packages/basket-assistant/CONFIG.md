@@ -18,6 +18,11 @@
 
 API Key 可通过 `api_keys` 写入配置，或使用环境变量：`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GOOGLE_API_KEY`。
 
+## Web Search（网页搜索）
+
+- **默认**：使用 duckduckgo-search，无需 API key。
+- **可选 Serper**：在 `settings.json` 中设置 `web_search_provider` 为 `"serper"`，并在 `api_keys` 中配置 `SERPER_API_KEY`（或环境变量 `SERPER_API_KEY`），则使用 Serper Google 搜索 API。
+
 ## 示例（自建 Anthropic 端点）
 
 ```json
@@ -30,8 +35,10 @@ API Key 可通过 `api_keys` 写入配置，或使用环境变量：`ANTHROPIC_A
     "base_url": "https://your-internal-api.example.com"
   },
   "api_keys": {
-    "ANTHROPIC_API_KEY": "sk-ant-xxx"
+    "ANTHROPIC_API_KEY": "sk-ant-xxx",
+    "SERPER_API_KEY": ""
   },
+  "web_search_provider": null,
   "agent": { "max_turns": 10, "auto_save": true, "verbose": false },
   "sessions_dir": "~/.basket/sessions"
 }
