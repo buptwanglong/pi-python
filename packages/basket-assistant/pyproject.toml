@@ -21,6 +21,9 @@ basket-trajectory = {path = "../basket-trajectory", develop = true}
 basket-tui = {path = "../basket-tui", develop = true, optional = true}
 basket-remote = {path = "../basket-remote", develop = true, optional = true}
 aiofiles = "^23.2"
+httpx = "^0.27.0"
+html2text = "^2024.2.26"
+duckduckgo-search = "^6.3.0"
 starlette = "^0.37.0"
 uvicorn = {extras = ["standard"], version = "^0.30.0"}
 websockets = "^14.0"
