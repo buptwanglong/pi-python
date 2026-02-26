@@ -59,6 +59,8 @@ class Settings(BaseModel):
     skills_include: List[str] = Field(default_factory=list)  # Empty => load all; else only these skill ids
     agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)  # Subagents for Task tool
     agents_dirs: List[str] = Field(default_factory=list)  # Empty => ~/.basket/agents and ./.basket/agents
+    # Web search: "serper" to use Serper API (requires api_keys["SERPER_API_KEY"]); else duckduckgo-search
+    web_search_provider: Optional[str] = None
     # Opaque channel config for basket serve; schema owned by basket-gateway/channels, assistant only passes through
     serve: Optional[Dict[str, Any]] = None
     custom: Dict[str, Any] = Field(default_factory=dict)

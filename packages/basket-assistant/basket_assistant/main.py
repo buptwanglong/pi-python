@@ -19,7 +19,7 @@ from basket_ai.types import Context, UserMessage
 from .core import SettingsManager, SessionManager, SubAgentConfig, load_agents_from_dirs
 from .extensions import ExtensionLoader
 from .core import get_skill_full_content, get_skills_index
-from .tools import BUILT_IN_TOOLS, create_skill_tool, create_task_tool
+from .tools import BUILT_IN_TOOLS, create_skill_tool, create_task_tool, create_web_search_tool
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +251,14 @@ Always explain what you're doing before using tools.
                 parameters=task_tool["parameters"],
                 execute_fn=task_tool["execute_fn"],
             )
+        # Web Search: duckduckgo by default; Serper when web_search_provider=serper and key set
+        web_search_tool = create_web_search_tool(self.settings)
+        self.agent.register_tool(
+            name=web_search_tool["name"],
+            description=web_search_tool["description"],
+            parameters=web_search_tool["parameters"],
+            execute_fn=web_search_tool["execute_fn"],
+        )
 
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for agent events."""

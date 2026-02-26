@@ -71,6 +71,12 @@ Execute shell commands with timeout support.
 ### Grep
 Search for patterns in files using regex.
 
+### Web Fetch
+Fetch content from a URL via GET. Returns readable text or Markdown (HTML is converted). Read-only, no authentication.
+
+### Web Search
+Search the web for real-time information. Returns snippets and URLs. Default: duckduckgo-search (no API key). Optional: set `web_search_provider` to `"serper"` and `api_keys["SERPER_API_KEY"]` in `~/.basket/settings.json` to use Serper API. See [CONFIG.md](CONFIG.md).
+
 ## Skills
 
 OpenCode/Claude-style layout: **one directory per skill with `SKILL.md` inside**. Same directories work with OpenCode and Claude Code.
