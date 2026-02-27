@@ -112,6 +112,79 @@ async def test_list_sessions(session_manager):
 
 
 @pytest.mark.asyncio
+async def test_save_todos_and_load_todos(session_manager):
+    """Test saving and loading todos for a session."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    todos = [
+        {"id": "1", "content": "First task", "status": "pending"},
+        {"id": "2", "content": "Second", "status": "in_progress"},
+    ]
+    await session_manager.save_todos(session_id, todos)
+    loaded = await session_manager.load_todos(session_id)
+    assert loaded == todos
+    assert session_manager._get_todos_path(session_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_load_todos_nonexistent_returns_empty(session_manager):
+    """Load todos for session with no todo file returns []."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    loaded = await session_manager.load_todos(session_id)
+    assert loaded == []
+    # Session exists but no .todos.json
+    assert not session_manager._get_todos_path(session_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_session_removes_todos_file(session_manager):
+    """Deleting a session also removes its .todos.json file."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    await session_manager.save_todos(session_id, [{"id": "1", "content": "x", "status": "pending"}])
+    todos_path = session_manager._get_todos_path(session_id)
+    assert todos_path.exists()
+    await session_manager.delete_session(session_id)
+    assert not session_manager._get_session_path(session_id).exists()
+    assert not todos_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_save_pending_asks_and_load_pending_asks(session_manager):
+    """Test saving and loading pending asks (list of tool_call_id, question, options)."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    pending = [
+        {"tool_call_id": "call_1", "question": "Q1?", "options": [{"id": "a", "label": "A"}]},
+        {"tool_call_id": "call_2", "question": "Q2?", "options": []},
+    ]
+    await session_manager.save_pending_asks(session_id, pending)
+    loaded = await session_manager.load_pending_asks(session_id)
+    assert loaded == pending
+    assert session_manager._get_pending_ask_path(session_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_load_pending_asks_nonexistent_returns_empty(session_manager):
+    """Load pending_asks for session with no file returns []."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    loaded = await session_manager.load_pending_asks(session_id)
+    assert loaded == []
+    assert not session_manager._get_pending_ask_path(session_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_session_removes_pending_ask_file(session_manager):
+    """Deleting a session also removes its .pending_ask.json file."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    await session_manager.save_pending_asks(
+        session_id, [{"tool_call_id": "call_x", "question": "Q?", "options": []}]
+    )
+    pending_path = session_manager._get_pending_ask_path(session_id)
+    assert pending_path.exists()
+    await session_manager.delete_session(session_id)
+    assert not session_manager._get_session_path(session_id).exists()
+    assert not pending_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_delete_session(session_manager):
     """Test deleting a session."""
     session_id = await session_manager.create_session("gpt-4o-mini")

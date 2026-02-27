@@ -15,7 +15,7 @@ import asyncio
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Header, Footer, TextArea, OptionList
+from textual.widgets import Header, Footer, TextArea, OptionList, Static
 from textual.widget import Widget
 from textual.binding import Binding
 from textual.message import Message
@@ -25,7 +25,7 @@ from textual import on
 
 from .components.multiline_input import MultiLineInput
 from .core.message_renderer import MessageRenderer
-from .constants import OUTPUT_CONTAINER_ID, OUTPUT_ID, INPUT_ID
+from .constants import OUTPUT_CONTAINER_ID, OUTPUT_ID, TODO_PANEL_ID, PLAN_MODE_PANEL_ID, INPUT_ID
 from .state import AppState
 
 # Configure logging
@@ -118,6 +118,8 @@ class PiCodingAgentApp(App):
         Binding("ctrl+g", "stop_agent", "Stop", priority=True),
         Binding("ctrl+l", "clear", "Clear"),
         Binding("ctrl+d", "toggle_dark", "Toggle Dark Mode"),
+        Binding("ctrl+t", "toggle_todo_full", "Todo expand/collapse"),
+        Binding("ctrl+p", "toggle_plan_mode", "Plan mode"),
         Binding("ctrl+end", "scroll_to_bottom", "To bottom"),
         Binding("pageup", "scroll_output_up", "Scroll up", show=False),
         Binding("pagedown", "scroll_output_down", "Scroll down", show=False),
@@ -126,16 +128,21 @@ class PiCodingAgentApp(App):
     # Load CSS from external file
     CSS_PATH = "styles/app.tcss"
 
-    def __init__(self, agent=None, **kwargs):
+    def __init__(self, agent=None, coding_agent=None, **kwargs):
         """
         Initialize the TUI app.
 
         Args:
             agent: Optional Pi Agent instance to connect to
+            coding_agent: Optional CodingAgent (has _current_todos); when None (e.g. attach), todos come via update_todo_panel only
             **kwargs: Additional arguments for Textual App
         """
         super().__init__(**kwargs)
         self.agent = agent
+        self.coding_agent = coding_agent
+        self._todo_show_full = False
+        self._last_todos: list = []  # last todos passed to update_todo_panel (for attach mode toggle)
+        self._plan_mode = False  # attach mode: set by plan_mode message; local: mirrors coding_agent.get_plan_mode()
         self._input_handler = None
         self._menu_source = None
         self._pending_user_inputs: list[str] = []
@@ -155,6 +162,8 @@ class PiCodingAgentApp(App):
                 id=OUTPUT_ID,
                 read_only=True,
             )
+        yield Static("", id=TODO_PANEL_ID)
+        yield Static("", id=PLAN_MODE_PANEL_ID)
         yield MultiLineInput(id=INPUT_ID)
         yield Footer()
 
@@ -167,6 +176,55 @@ class PiCodingAgentApp(App):
             pass  # main thread only / Windows
         self.state.output_blocks = [self.WELCOME_LINE]
         self.query_one(f"#{INPUT_ID}", MultiLineInput).focus()
+        if self.coding_agent is not None:
+            todos = getattr(self.coding_agent, "_current_todos", [])
+            self.update_todo_panel(todos)
+            self._plan_mode = self.coding_agent.get_plan_mode()
+        self._refresh_plan_mode_panel()
+
+    def _refresh_plan_mode_panel(self) -> None:
+        """Update the plan mode panel from _plan_mode or coding_agent."""
+        on = self._plan_mode
+        if self.coding_agent is not None:
+            on = self.coding_agent.get_plan_mode()
+        try:
+            panel = self.query_one(f"#{PLAN_MODE_PANEL_ID}", Static)
+            panel.update("⏸ Plan mode" if on else "")
+        except NoMatches:
+            pass
+
+    def update_plan_mode(self, on: bool) -> None:
+        """Set plan mode state (attach mode: from gateway plan_mode message) and refresh panel."""
+        self._plan_mode = on
+        self._refresh_plan_mode_panel()
+
+    def update_todo_panel(self, todos: list) -> None:
+        """Update the todo panel text from a list of todo dicts (id, content, status). Works without coding_agent (e.g. attach)."""
+        self._last_todos = list(todos)
+        try:
+            panel = self.query_one(f"#{TODO_PANEL_ID}", Static)
+        except NoMatches:
+            return
+        if not todos:
+            panel.update("")
+            return
+        total = len(todos)
+        done = sum(1 for t in todos if t.get("status") == "completed")
+        in_progress = [t for t in todos if t.get("status") == "in_progress"]
+        icons = {"completed": "✓", "pending": "○", "in_progress": "→", "cancelled": "✗"}
+        if self._todo_show_full:
+            lines = []
+            for t in todos:
+                icon = icons.get(t.get("status", "pending"), "○")
+                content = (t.get("content") or "").strip()
+                lines.append(f"{icon} {content}")
+            panel.update("\n".join(lines))
+        else:
+            if in_progress:
+                content = (in_progress[0].get("content") or "").strip()
+                panel.update(f"[Todo {done}/{total}] → {content}")
+            else:
+                panel.update(f"[Todo {total} items]")
 
     @on(Click)
     def _on_click(self, event: Click) -> None:
@@ -321,6 +379,29 @@ class PiCodingAgentApp(App):
     def action_stop_agent(self) -> None:
         """Cancel the currently running agent task."""
         self.state.cancel_agent_task()
+
+    def action_toggle_todo_full(self) -> None:
+        """Toggle todo panel between compact and full list (Ctrl+T)."""
+        self._todo_show_full = not self._todo_show_full
+        todos = (
+            getattr(self.coding_agent, "_current_todos", [])
+            if self.coding_agent is not None
+            else self._last_todos
+        )
+        self.update_todo_panel(todos)
+
+    async def action_toggle_plan_mode(self) -> None:
+        """Toggle plan mode (Ctrl+P). Local: set on coding_agent; attach: send /plan to gateway."""
+        if self.coding_agent is not None:
+            self.coding_agent.set_plan_mode(not self.coding_agent.get_plan_mode())
+            self._refresh_plan_mode_panel()
+            self.notify(
+                f"Plan mode {'on' if self.coding_agent.get_plan_mode() else 'off'}",
+                severity="information",
+                timeout=2,
+            )
+        elif self._input_handler is not None:
+            await self._input_handler("/plan")
 
     async def on_multi_line_input_submitted(
         self, event: MultiLineInput.Submitted

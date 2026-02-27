@@ -78,6 +78,29 @@ async def run_tui_mode_attach(ws_url: str) -> None:
                 app.show_tool_result(msg["error"], success=False)
             else:
                 app.show_tool_result(msg.get("result", ""), success=True)
+        elif typ == "todos":
+            app.update_todo_panel(msg.get("todos", []))
+        elif typ == "ask_user_question":
+            question = msg.get("question", "")
+            options = msg.get("options") or []
+            tool_call_id = msg.get("tool_call_id", "")
+            parts = [f"Question: {question}"]
+            if options:
+                parts.append("Options: " + ", ".join(str(o.get("label", o.get("id", o))) for o in options))
+            parts.append("(Reply in your next message.)")
+            if tool_call_id:
+                parts.append(f"[tool_call_id: {tool_call_id}]")
+            app.show_tool_result("\n".join(parts), success=True)
+        elif typ == "plan_mode":
+            app.update_plan_mode(msg.get("value", False))
+            dispatch._in_thinking = False
+            app.finalize_assistant_block()
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+            app.set_agent_task(None)
+            agent_done_future = None
+            agent_placeholder_task = None
+            app.post_message(ProcessPendingInputs())
         elif typ == "agent_complete":
             dispatch._in_thinking = False
             app.finalize_assistant_block()
