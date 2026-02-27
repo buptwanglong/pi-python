@@ -7,7 +7,7 @@ Handles loading and saving user settings.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,12 @@ class AgentSettings(BaseModel):
     verbose: bool = False
 
 
+class PermissionsSettings(BaseModel):
+    """Permission mode settings (e.g. plan mode = read-only)."""
+
+    default_mode: Literal["default", "plan"] = "default"
+
+
 class SubAgentConfig(BaseModel):
     """Configuration for a subagent (used by the Task tool)."""
 
@@ -52,6 +58,7 @@ class Settings(BaseModel):
 
     model: ModelSettings = Field(default_factory=ModelSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    permissions: PermissionsSettings = Field(default_factory=PermissionsSettings)
     api_keys: Dict[str, str] = Field(default_factory=dict)
     sessions_dir: str = "~/.basket/sessions"
     trajectory_dir: Optional[str] = "~/.basket/trajectories"  # Record task trajectories for RL/tuning; set to null/empty to disable
@@ -196,6 +203,7 @@ class SettingsManager:
 __all__ = [
     "ModelSettings",
     "AgentSettings",
+    "PermissionsSettings",
     "SubAgentConfig",
     "Settings",
     "SettingsManager",

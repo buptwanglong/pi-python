@@ -33,6 +33,11 @@ class ExtensionLoader:
         self._api = ExtensionAPI(agent)
         self._loaded_extensions: Dict[str, Any] = {}
 
+    @property
+    def extension_api(self) -> ExtensionAPI:
+        """Public access to the extension API (for tests and callers)."""
+        return self._api
+
     def load_extension(self, path: Path) -> bool:
         """
         Load an extension from a file path.

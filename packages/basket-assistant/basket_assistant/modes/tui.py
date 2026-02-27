@@ -127,13 +127,13 @@ def _format_tool_result(tool_name: str, result: any) -> str:
     return result_str
 
 
-def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
+def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_agent=None) -> None:
     """
     Connect agent event handlers to app display methods (same-thread direct calls).
 
     Used by run_tui_mode. Event handlers call app methods directly because
     agent runs in the same asyncio loop as the TUI; call_from_thread must not
-    be used from the app thread.
+    be used from the app thread. coding_agent is used to refresh the todo panel on todo_write.
     """
     def on_text_delta(event):
         delta = event.get("delta", "")
@@ -162,6 +162,9 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict) -> None:
             result = event.get("result")
             formatted_result = _format_tool_result(tool_name, result)
             app.show_tool_result(formatted_result, success=True)
+        if tool_name == "todo_write" and coding_agent is not None:
+            todos = getattr(coding_agent, "_current_todos", [])
+            app.update_todo_panel(todos)
 
     def on_agent_complete(event):
         # Run finished: finalize current assistant block so the next user message gets a new block
@@ -198,18 +201,44 @@ async def run_tui_mode(coding_agent) -> None:
     4. Runs the TUI application
     """
     agent = coding_agent.agent
-    app = PiCodingAgentApp(agent=agent)
+    app = PiCodingAgentApp(agent=agent, coding_agent=coding_agent)
     current_response = {"text": "", "thinking": "", "in_thinking": False}
-    _connect_agent_handlers(app, agent, current_response)
+    _connect_agent_handlers(app, agent, current_response, coding_agent=coding_agent)
 
     async def handle_user_input(user_input: str):
         """
         Handle user input by forwarding to the agent.
+        If there are pending ask_user_question(s), treat input as answer (FIFO) and resume.
 
         Args:
             user_input: The user's message
         """
         from basket_ai.types import UserMessage
+
+        # Pending ask_user_question: treat this input as the answer (FIFO)
+        pending = getattr(coding_agent, "_pending_asks", None) or []
+        if len(pending) > 0:
+            await app.ensure_assistant_block()
+            task = asyncio.create_task(
+                coding_agent.try_resume_pending_ask(user_input, stream_llm_events=True)
+            )
+            app.set_agent_task(task)
+            try:
+                resumed = await task
+                if resumed:
+                    return
+            except asyncio.CancelledError:
+                logger.debug("Resume task cancelled")
+                app.append_message("system", "Stopped by user.")
+                return
+            except Exception as e:
+                logger.exception("Resume pending ask failed")
+                coding_agent.context.messages = coding_agent.context.messages  # no-op, keep context
+                app.append_message("system", f"Error: {e}")
+                return
+            finally:
+                app.set_agent_task(None)
+            # If not resumed, fall through to normal append + run
 
         # Add user message to context
         coding_agent.context.messages.append(

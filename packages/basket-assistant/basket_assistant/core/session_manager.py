@@ -61,6 +61,91 @@ class SessionManager:
         """Get the file path for a session."""
         return self.sessions_dir / f"{session_id}.jsonl"
 
+    def _get_todos_path(self, session_id: str) -> Path:
+        """Get the file path for a session's todo list."""
+        return self.sessions_dir / f"{session_id}.todos.json"
+
+    def _get_pending_ask_path(self, session_id: str) -> Path:
+        """Get the file path for a session's pending ask list."""
+        return self.sessions_dir / f"{session_id}.pending_ask.json"
+
+    async def save_pending_asks(
+        self, session_id: str, pending_asks: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Save pending ask list for a session (overwrites existing file).
+        Each item must have tool_call_id, question, options.
+
+        Args:
+            session_id: Session ID
+            pending_asks: List of dicts with tool_call_id, question, options
+        """
+        path = self._get_pending_ask_path(session_id)
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(pending_asks, ensure_ascii=False, indent=2))
+
+    async def load_pending_asks(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Load pending ask list for a session. Returns [] if file does not exist or is invalid.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of dicts with tool_call_id, question, options
+        """
+        path = self._get_pending_ask_path(session_id)
+        if not path.exists():
+            return []
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+            if not content.strip():
+                return []
+            data = json.loads(content)
+            if not isinstance(data, list):
+                return []
+            return [x for x in data if isinstance(x, dict) and "tool_call_id" in x]
+        except Exception as e:
+            logger.debug("Failed to load pending_asks for %s: %s", session_id, e)
+            return []
+
+    async def save_todos(self, session_id: str, todos: List[Dict[str, Any]]) -> None:
+        """
+        Save todo list for a session (overwrites existing file).
+
+        Args:
+            session_id: Session ID
+            todos: List of todo items, each dict with id, content, status
+        """
+        path = self._get_todos_path(session_id)
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(todos, ensure_ascii=False, indent=2))
+
+    async def load_todos(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Load todo list for a session. Returns [] if file does not exist or is invalid.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of todo items (dicts with id, content, status)
+        """
+        path = self._get_todos_path(session_id)
+        if not path.exists():
+            return []
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+            if not content.strip():
+                return []
+            data = json.loads(content)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.debug("Failed to load todos for %s: %s", session_id, e)
+            return []
+
     async def create_session(self, model_id: str) -> str:
         """
         Create a new session.
@@ -166,15 +251,20 @@ class SessionManager:
 
     async def delete_session(self, session_id: str) -> None:
         """
-        Delete a session.
+        Delete a session and its todo file.
 
         Args:
             session_id: Session ID
         """
         path = self._get_session_path(session_id)
-
         if path.exists():
             path.unlink()
+        todos_path = self._get_todos_path(session_id)
+        if todos_path.exists():
+            todos_path.unlink()
+        pending_ask_path = self._get_pending_ask_path(session_id)
+        if pending_ask_path.exists():
+            pending_ask_path.unlink()
 
     async def update_metadata(
         self, session_id: str, updates: Dict[str, Any]

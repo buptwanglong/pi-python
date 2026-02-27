@@ -14,14 +14,39 @@ from typing import Dict, List, Optional
 
 from basket_agent import Agent
 from basket_ai.api import get_model
-from basket_ai.types import Context, UserMessage
+from basket_ai.types import Context, TextContent, UserMessage
 
 from .core import SettingsManager, SessionManager, SubAgentConfig, load_agents_from_dirs
 from .extensions import ExtensionLoader
 from .core import get_skill_full_content, get_skills_index
-from .tools import BUILT_IN_TOOLS, create_skill_tool, create_task_tool, create_web_search_tool
+from .tools import (
+    BUILT_IN_TOOLS,
+    create_ask_user_question_tool,
+    create_skill_tool,
+    create_task_tool,
+    create_todo_write_tool,
+    create_web_search_tool,
+)
 
 logger = logging.getLogger(__name__)
+
+# Tools disabled in plan mode (read-only: read, grep, web_fetch, web_search, skill)
+PLAN_MODE_FORBIDDEN_TOOLS = frozenset({"write", "edit", "bash", "todo_write"})
+
+PLAN_MODE_DISABLED_MESSAGE = (
+    "Plan mode is on. This action is disabled. Only analysis and planning are allowed."
+)
+
+
+def _wrap_execute_fn_for_plan_mode(original_fn, get_plan_mode):
+    """Return an async wrapper that runs original_fn unless plan mode is on."""
+
+    async def wrapped(**kwargs):
+        if get_plan_mode():
+            return PLAN_MODE_DISABLED_MESSAGE
+        return await original_fn(**kwargs)
+
+    return wrapped
 
 
 class CodingAgent:
@@ -79,6 +104,21 @@ class CodingAgent:
         self.agent = Agent(self.model, self.context)
         self.agent.max_turns = self.settings.agent.max_turns
 
+        # Todo list state (updated by todo_write tool)
+        self._current_todos: List[dict] = []
+        # Session id for todo persistence; set by set_session_id() or run_interactive/gateway
+        self._session_id: Optional[str] = None
+        # CLI: whether to show full todo list above prompt (toggle via /todos)
+        self._todo_show_full: bool = False
+        # Plan mode: read-only analysis and planning; no write/edit/bash/todo_write
+        self._plan_mode: bool = getattr(
+            self.settings.permissions, "default_mode", "default"
+        ) == "plan"
+        # Pending asks (ask_user_question): list of {tool_call_id, question, options}
+        self._pending_asks: List[dict] = []
+        # Last ask payload before tool_call_id is known (set by tool, merged in tool_call_end)
+        self._last_ask_user_question: Optional[dict] = None
+
         # Register tools
         self._register_tools()
 
@@ -91,6 +131,73 @@ class CodingAgent:
             num_loaded = self.extension_loader.load_default_extensions()
             if num_loaded > 0:
                 print(f"📦 Loaded {num_loaded} extension(s)")
+
+    async def set_session_id(self, session_id: Optional[str]) -> None:
+        """
+        Set the current session id and load its todo list and pending_asks from disk.
+        When session_id is None, clear _session_id, _current_todos, and _pending_asks.
+        """
+        self._session_id = session_id
+        if session_id:
+            self._current_todos = await self.session_manager.load_todos(session_id)
+            self._pending_asks = await self.session_manager.load_pending_asks(session_id)
+        else:
+            self._current_todos = []
+            self._pending_asks = []
+
+    def set_plan_mode(self, on: bool) -> None:
+        """Enable or disable plan mode (read-only analysis and planning)."""
+        self._plan_mode = on
+
+    def get_plan_mode(self) -> bool:
+        """Return True if plan mode is on."""
+        return self._plan_mode
+
+    async def try_resume_pending_ask(
+        self,
+        user_content: str,
+        tool_call_id: Optional[str] = None,
+        *,
+        stream_llm_events: bool = True,
+        invoked_skill_id: Optional[str] = None,
+    ) -> bool:
+        """
+        If there is a pending_ask, treat user_content as the answer: replace the
+        corresponding ToolResultMessage content, remove that pending, and run agent.
+        Returns True if a pending was consumed and run started; False otherwise.
+
+        If tool_call_id is given, use that entry; else FIFO (oldest).
+        """
+        if not self._pending_asks:
+            return False
+        if tool_call_id:
+            entry = next(
+                (p for p in self._pending_asks if p.get("tool_call_id") == tool_call_id),
+                None,
+            )
+        else:
+            entry = self._pending_asks[0]
+        if not entry:
+            return False
+        target_id = entry["tool_call_id"]
+        for msg in self.context.messages:
+            if getattr(msg, "role", None) == "toolResult" and getattr(
+                msg, "tool_call_id", None
+            ) == target_id:
+                msg.content = [TextContent(type="text", text=user_content)]
+                break
+        else:
+            return False
+        self._pending_asks = [p for p in self._pending_asks if p.get("tool_call_id") != target_id]
+        if self._session_id:
+            await self.session_manager.save_pending_asks(
+                self._session_id, self._pending_asks
+            )
+        await self._run_with_trajectory_if_enabled(
+            stream_llm_events=stream_llm_events,
+            invoked_skill_id=invoked_skill_id,
+        )
+        return True
 
     def _get_agents_dirs(self) -> list[Path]:
         """Resolve agents directories; default ~/.basket/agents and ./.basket/agents."""
@@ -210,25 +317,48 @@ Always explain what you're doing before using tools.
 """
         return base
 
+    def _get_plan_mode_prompt_suffix(self) -> str:
+        """Append this to system prompt when plan mode is on."""
+        return """
+
+---
+## Plan mode (read-only)
+
+You are in **Plan mode**. You must only analyze and plan; do not modify files, run shell commands, or change session state.
+
+- **Allowed:** read files, grep, web search/fetch, load skills. Use these to research the codebase and produce a plan.
+- **Forbidden:** write, edit, bash, todo_write. If you attempt them, the tool will return a message that the action is disabled.
+
+Your response must include:
+1. **Analysis:** Findings and reasoning (what you inspected, current architecture, relevant docs).
+2. **Plan:** A numbered list of implementation steps. The **last step** must be to present the plan for user approval. Do not implement the plan until the user has approved it.
+"""
+
     def get_system_prompt_for_run(self, invoked_skill_id: Optional[str] = None) -> str:
         """System prompt for this run; if invoked_skill_id set, append that skill's full content."""
         prompt = self._default_system_prompt
-        if not invoked_skill_id:
-            return prompt
-        dirs = self._get_skills_dirs()
-        full = get_skill_full_content(invoked_skill_id, dirs)
-        if not full:
-            return prompt
-        return prompt + "\n\n---\n\n## Active skill: " + invoked_skill_id + "\n\n" + full
+        if invoked_skill_id:
+            dirs = self._get_skills_dirs()
+            full = get_skill_full_content(invoked_skill_id, dirs)
+            if full:
+                prompt = prompt + "\n\n---\n\n## Active skill: " + invoked_skill_id + "\n\n" + full
+        if self._plan_mode:
+            prompt = prompt + self._get_plan_mode_prompt_suffix()
+        return prompt
 
     def _register_tools(self) -> None:
-        """Register all built-in tools with the agent."""
+        """Register all built-in tools with the agent. In plan mode, write/edit/bash/todo_write are no-ops."""
+        get_plan = lambda: self._plan_mode
         for tool in BUILT_IN_TOOLS:
+            name = tool["name"]
+            fn = tool["execute_fn"]
+            if name in PLAN_MODE_FORBIDDEN_TOOLS:
+                fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
             self.agent.register_tool(
-                name=tool["name"],
+                name=name,
                 description=tool["description"],
                 parameters=tool["parameters"],
-                execute_fn=tool["execute_fn"],
+                execute_fn=fn,
             )
         # Skill tool: dynamic description with available_skills
         include = self.settings.skills_include or None
@@ -259,6 +389,25 @@ Always explain what you're doing before using tools.
             parameters=web_search_tool["parameters"],
             execute_fn=web_search_tool["execute_fn"],
         )
+        # TodoWrite: session task list (replaced in full on each call)
+        todo_tool = create_todo_write_tool(self)
+        todo_fn = todo_tool["execute_fn"]
+        if "todo_write" in PLAN_MODE_FORBIDDEN_TOOLS:
+            todo_fn = _wrap_execute_fn_for_plan_mode(todo_fn, get_plan)
+        self.agent.register_tool(
+            name=todo_tool["name"],
+            description=todo_tool["description"],
+            parameters=todo_tool["parameters"],
+            execute_fn=todo_fn,
+        )
+        # AskUserQuestion: ask user; answer comes in next message (session resume)
+        ask_tool = create_ask_user_question_tool(self)
+        self.agent.register_tool(
+            name=ask_tool["name"],
+            description=ask_tool["description"],
+            parameters=ask_tool["parameters"],
+            execute_fn=ask_tool["execute_fn"],
+        )
 
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for agent events."""
@@ -274,10 +423,40 @@ Always explain what you're doing before using tools.
             if self.settings.agent.verbose:
                 print(f"\n[Tool: {event['tool_name']}]", flush=True)
 
-        def on_tool_call_end(event):
+        async def on_tool_call_end(event):
             """Handle tool call end events."""
             if event.get("error"):
                 print(f"[Error: {event['error']}]", flush=True)
+            elif event.get("tool_name") == "todo_write" and self._current_todos:
+                in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
+                if in_progress and self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items; in progress: {in_progress[0].get('content', '')[:50]!r}]", flush=True)
+                elif self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items]", flush=True)
+            elif event.get("tool_name") == "ask_user_question" and getattr(self, "_last_ask_user_question", None):
+                last = self._last_ask_user_question
+                self._last_ask_user_question = None
+                tool_call_id = event.get("tool_call_id") or ""
+                if tool_call_id:
+                    entry = {
+                        "tool_call_id": tool_call_id,
+                        "question": last.get("question", ""),
+                        "options": last.get("options") or [],
+                    }
+                    self._pending_asks.append(entry)
+                    if self._session_id:
+                        await self.session_manager.save_pending_asks(
+                            self._session_id, self._pending_asks
+                        )
+                    q = entry.get("question", "") or "Question"
+                    if len(q) > 60:
+                        q = q[:57] + "..."
+                    n = len(self._pending_asks)
+                    print(
+                        f"\n[Ask: {q}] Reply in your next message"
+                        + (f" ({n} pending)" if n > 1 else ""),
+                        flush=True,
+                    )
 
         self.agent.on("text_delta", on_text_delta)
         self.agent.on("agent_tool_call_start", on_tool_call_start)
@@ -313,10 +492,8 @@ Always explain what you're doing before using tools.
         self, stream_llm_events: bool = True, invoked_skill_id: Optional[str] = None
     ):
         """Run agent; if trajectory_dir is set, record trajectory and write to disk."""
-        old_system = None
-        if invoked_skill_id:
-            old_system = self.context.systemPrompt
-            self.context.systemPrompt = self.get_system_prompt_for_run(invoked_skill_id)
+        old_system = self.context.system_prompt
+        self.context.system_prompt = self.get_system_prompt_for_run(invoked_skill_id)
         try:
             trajectory_dir = self._get_trajectory_dir()
             if not trajectory_dir:
@@ -354,8 +531,7 @@ Always explain what you're doing before using tools.
 
             return state
         finally:
-            if old_system is not None:
-                self.context.systemPrompt = old_system
+            self.context.system_prompt = old_system
 
     async def run_interactive(self) -> None:
         """
@@ -363,12 +539,21 @@ Always explain what you're doing before using tools.
 
         Continuously prompts for user input and runs the agent.
         """
+        if self._session_id is None:
+            session_id = await self.session_manager.create_session(self.model.id)
+            await self.set_session_id(session_id)
+
         print("Basket - Interactive Mode")
         print("Type 'exit' or 'quit' to quit, 'help' for help")
         print("-" * 50)
 
         while True:
             try:
+                # Todo region above prompt
+                if self._current_todos:
+                    block = self._format_todo_block()
+                    if block:
+                        print(block, flush=True)
                 # Get user input
                 user_input = input("\n> ").strip()
 
@@ -387,6 +572,32 @@ Always explain what you're doing before using tools.
                 if user_input.lower() == "settings":
                     self._print_settings()
                     continue
+
+                if user_input.lower() == "/todos":
+                    self._todo_show_full = not self._todo_show_full
+                    print(f"Todo list: {'full' if self._todo_show_full else 'compact'}", flush=True)
+                    continue
+
+                if user_input.strip().lower() in ("/plan", "/plan on", "/plan off"):
+                    on = user_input.strip().lower() != "/plan off"
+                    self.set_plan_mode(on)
+                    print(f"Plan mode {'on' if on else 'off'}", flush=True)
+                    continue
+
+                # Pending ask_user_question: treat this input as the answer (FIFO)
+                if self._pending_asks:
+                    print()  # newline before agent output
+                    try:
+                        resumed = await self.try_resume_pending_ask(
+                            user_input, stream_llm_events=True
+                        )
+                        if resumed:
+                            print()  # newline after agent output
+                            continue
+                    except Exception as resume_err:
+                        logger.exception("Resume pending ask failed")
+                        print(f"\n❌ Error: {resume_err}", flush=True)
+                        continue
 
                 invoked_skill_id: Optional[str] = None
                 message_content = user_input
@@ -486,12 +697,34 @@ Always explain what you're doing before using tools.
 
         return ""
 
+    def _format_todo_block(self) -> str:
+        """Format _current_todos for CLI display above prompt. Compact: one line; full: one line per item with icon."""
+        if not self._current_todos:
+            return ""
+        total = len(self._current_todos)
+        done = sum(1 for t in self._current_todos if t.get("status") == "completed")
+        in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
+        if self._todo_show_full:
+            icons = {"completed": "✓", "pending": "○", "in_progress": "→", "cancelled": "✗"}
+            lines = []
+            for t in self._current_todos:
+                icon = icons.get(t.get("status", "pending"), "○")
+                content = (t.get("content") or "").strip()
+                lines.append(f"  {icon} {content}")
+            return "\n".join(lines)
+        if in_progress:
+            content = (in_progress[0].get("content") or "").strip()
+            return f"[Todo {done}/{total}] → {content}"
+        return f"[Todo {total} items]"
+
     def _print_help(self) -> None:
         """Print help information."""
         print("""
 Available commands:
   help      - Show this help message
   settings  - Show current settings
+  /todos    - Toggle full/compact todo list above prompt
+  /plan     - Toggle plan mode (read-only analysis and planning); /plan on, /plan off
   exit/quit - Exit the program
   /skill <id> - Load full instructions for a skill for this turn (e.g. /skill refactor)
 
@@ -562,6 +795,15 @@ async def main_async(args: Optional[list] = None) -> int:
     if use_tui:
         args = [a for a in args if a != "--tui"]
 
+    use_plan_mode = "--plan" in args
+    if use_plan_mode:
+        args = [a for a in args if a != "--plan"]
+    if "--permission-mode" in args:
+        i = args.index("--permission-mode")
+        if i + 1 < len(args) and args[i + 1] == "plan":
+            use_plan_mode = True
+        args = args[:i] + args[i + 2:] if i + 1 < len(args) else args[:i]
+
     use_remote = "--remote" in args
     if use_remote:
         args = [a for a in args if a != "--remote"]
@@ -594,6 +836,7 @@ Usage:
   basket --tui           - Start TUI mode (terminal UI)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
+  basket --plan          - Run in plan mode (read-only; same as --permission-mode plan)
   basket serve start     - Start resident assistant (gateway)
   basket serve stop      - Stop resident assistant
   basket serve status    - Show assistant status
@@ -784,6 +1027,9 @@ Environment variables:
         logger.exception("Failed to initialize agent")
         print(f"Error initializing agent: {e}")
         return 1
+
+    if use_plan_mode:
+        agent.set_plan_mode(True)
 
     # Run mode
     if len(args) == 0:

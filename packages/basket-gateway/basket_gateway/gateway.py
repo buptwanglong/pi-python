@@ -5,6 +5,7 @@ Agent is injected via agent_factory; channels are mounted per channel_config.
 """
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -137,18 +138,28 @@ class AgentGateway:
                 "arguments": e.get("arguments", {}),
             }),
         )
-        agent.agent.on(
-            "agent_tool_call_end",
-            lambda e: make_send(
-                {"type": "tool_call_end", "tool_name": e.get("tool_name", "unknown"), "error": str(e["error"])}
-                if e.get("error") is not None
-                else {
+        def on_tool_call_end(e: dict) -> None:
+            tool_name = e.get("tool_name", "unknown")
+            if e.get("error") is not None:
+                make_send({"type": "tool_call_end", "tool_name": tool_name, "error": str(e["error"])})
+            else:
+                make_send({
                     "type": "tool_call_end",
-                    "tool_name": e.get("tool_name", "unknown"),
-                    "result": format_tool_result(e.get("tool_name", "unknown"), e.get("result")),
-                }
-            ),
-        )
+                    "tool_name": tool_name,
+                    "result": format_tool_result(tool_name, e.get("result")),
+                })
+            if tool_name == "todo_write" and hasattr(agent, "_current_todos"):
+                make_send({"type": "todos", "todos": list(agent._current_todos)})
+            if tool_name == "ask_user_question" and getattr(agent, "_pending_asks", None):
+                last = agent._pending_asks[-1]
+                make_send({
+                    "type": "ask_user_question",
+                    "tool_call_id": last.get("tool_call_id", ""),
+                    "question": last.get("question", ""),
+                    "options": last.get("options") or [],
+                })
+
+        agent.agent.on("agent_tool_call_end", on_tool_call_end)
         agent.agent.on("agent_complete", lambda _: make_send({"type": "agent_complete"}))
         agent.agent.on(
             "agent_error",
@@ -170,13 +181,55 @@ class AgentGateway:
         from basket_ai.types import UserMessage
 
         agent = self._get_agent(session_id)
-        agent.context.messages.append(
-            UserMessage(role="user", content=user_content, timestamp=int(time.time() * 1000))
-        )
+        if hasattr(agent, "set_session_id") and asyncio.iscoroutinefunction(agent.set_session_id):
+            await agent.set_session_id(session_id)
+
+        stripped = user_content.strip().lower()
+        if stripped in ("/plan", "/plan on", "/plan off"):
+            on = stripped != "/plan off"
+            if hasattr(agent, "set_plan_mode"):
+                agent.set_plan_mode(on)
+            if event_sink is not None:
+                await event_sink({"type": "plan_mode", "value": on})
+            return f"Plan mode {'on' if on else 'off'}"
 
         if event_sink is not None:
             self._ensure_event_sink_handlers(agent)
             agent._gateway_event_sink_ref[0] = event_sink
+
+        # Pending ask_user_question: treat message as answer (FIFO or with tool_call_id in JSON)
+        pending = getattr(agent, "_pending_asks", None) or []
+        if len(pending) > 0:
+            answer = user_content
+            tool_call_id = None
+            try:
+                parsed = json.loads(user_content)
+                if isinstance(parsed, dict) and "answer" in parsed:
+                    answer = parsed.get("answer", user_content)
+                    tool_call_id = parsed.get("tool_call_id")
+            except (ValueError, TypeError):
+                pass
+            try:
+                resumed = await agent.try_resume_pending_ask(
+                    answer,
+                    tool_call_id=tool_call_id,
+                    stream_llm_events=(event_sink is not None),
+                )
+                if resumed:
+                    if event_sink is not None and getattr(agent, "_gateway_event_sink_ref", None) is not None:
+                        agent._gateway_event_sink_ref[0] = None
+                    return _extract_last_assistant_text(agent)
+            except Exception as e:
+                logger.exception("Resume pending ask failed")
+                if event_sink is not None:
+                    await event_sink({"type": "agent_error", "error": str(e)})
+                if event_sink is not None and getattr(agent, "_gateway_event_sink_ref", None) is not None:
+                    agent._gateway_event_sink_ref[0] = None
+                return f"Error: {e}"
+
+        agent.context.messages.append(
+            UserMessage(role="user", content=user_content, timestamp=int(time.time() * 1000))
+        )
         try:
             await agent._run_with_trajectory_if_enabled(stream_llm_events=(event_sink is not None))
         except Exception as e:
