@@ -494,6 +494,17 @@ class PiCodingAgentApp(App):
         self.state.current_tool_args = None
         self._refresh_output()
 
+    def show_ask_question(self, question: str, options: Optional[list] = None) -> None:
+        """
+        Append a dedicated 'Agent asks you' block (not a tool call). Use for ask_user_question.
+        """
+        self.finalize_assistant_block()
+        line = self.renderer.render_ask_question_block(
+            question or "", options or []
+        ).plain
+        self.state.output_blocks.append(line)
+        self._refresh_output()
+
     def finalize_assistant_block(self, full_text: Optional[str] = None) -> None:
         """Push streaming buffer to output_blocks and clear streaming state (TextArea mode)."""
         content = (full_text if full_text is not None else self.state.streaming_buffer).strip()

@@ -7,6 +7,15 @@ from pathlib import Path
 import tempfile
 import json
 
+from basket_ai.types import (
+    AssistantMessage,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+    Usage,
+)
+from basket_ai.types import StopReason
+
 from basket_assistant.core.session_manager import (
     SessionManager,
     SessionEntry,
@@ -274,6 +283,81 @@ async def test_concurrent_appends(session_manager):
     entries = await session_manager.read_entries(session_id)
     message_entries = [e for e in entries if e.type == "message"]
     assert len(message_entries) == 10
+
+
+@pytest.mark.asyncio
+async def test_append_messages_and_load_messages(session_manager):
+    """append_messages then load_messages returns identical Message list (user/assistant/toolResult)."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    user_msg = UserMessage(role="user", content="Hello", timestamp=1000)
+    assistant_msg = AssistantMessage(
+        role="assistant",
+        content=[TextContent(type="text", text="Hi")],
+        api="anthropic-messages",
+        provider="anthropic",
+        model="claude-3-5-sonnet",
+        usage=Usage(),
+        stop_reason=StopReason.STOP,
+        timestamp=2000,
+    )
+    tool_msg = ToolResultMessage(
+        role="toolResult",
+        tool_call_id="call_1",
+        tool_name="read",
+        content=[TextContent(type="text", text="file content")],
+        timestamp=3000,
+    )
+    messages = [user_msg, assistant_msg, tool_msg]
+    await session_manager.append_messages(session_id, messages)
+    loaded = await session_manager.load_messages(session_id)
+    assert len(loaded) == 3
+    assert loaded[0].role == "user" and loaded[0].content == "Hello"
+    assert loaded[1].role == "assistant"
+    assert loaded[1].content[0].text == "Hi"
+    assert loaded[2].role == "toolResult"
+    assert loaded[2].tool_call_id == "call_1" and loaded[2].tool_name == "read"
+
+
+@pytest.mark.asyncio
+async def test_load_messages_nonexistent_returns_empty(session_manager):
+    """load_messages for nonexistent session returns []."""
+    loaded = await session_manager.load_messages("nonexistent-session-id")
+    assert loaded == []
+
+
+@pytest.mark.asyncio
+async def test_load_messages_empty_session_returns_empty(session_manager):
+    """load_messages for session with only metadata returns []."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    loaded = await session_manager.load_messages(session_id)
+    assert loaded == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_creates_file_if_missing(session_manager):
+    """ensure_session(session_id, model_id) creates session file with metadata when missing."""
+    session_id = "default"
+    assert not session_manager._get_session_path(session_id).exists()
+    await session_manager.ensure_session(session_id, "gpt-4o-mini")
+    assert session_manager._get_session_path(session_id).exists()
+    entries = await session_manager.read_entries(session_id)
+    assert len(entries) == 1
+    assert entries[0].type == "metadata"
+    assert entries[0].data["model_id"] == "gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_idempotent(session_manager):
+    """ensure_session does nothing when session file already exists."""
+    session_id = await session_manager.create_session("gpt-4o-mini")
+    await session_manager.append_entry(
+        session_id,
+        SessionEntry(timestamp=2000, type="message", data={"role": "user", "payload": {}}),
+    )
+    n_before = len(await session_manager.read_entries(session_id))
+    await session_manager.ensure_session(session_id, "other-model")
+    n_after = len(await session_manager.read_entries(session_id))
+    assert n_after == n_before
 
 
 if __name__ == "__main__":

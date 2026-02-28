@@ -6,7 +6,7 @@ formatting and rendering of different message types in the TUI.
 """
 
 import json
-from typing import Any, Union
+from typing import Any, List, Optional, Union
 from rich.text import Text
 from rich.markdown import Markdown
 
@@ -172,6 +172,29 @@ class MessageRenderer:
         if not success:
             return f"Error: {result}"
         return result
+
+    @staticmethod
+    def render_ask_question_block(question: str, options: Optional[List[Any]] = None) -> Text:
+        """
+        Render a dedicated block for Agent asking the user a question (not a tool call).
+
+        Args:
+            question: The question text
+            options: Optional list of choices, e.g. [{"id": "a", "label": "Option A"}]
+
+        Returns:
+            Rich Text for the question block (distinct from tool blocks)
+        """
+        t = Text()
+        t.append("❓ ", style="bold cyan")
+        t.append("Agent 向您提问\n", style="bold cyan")
+        t.append(question.strip() or "(无问题内容)\n", style="")
+        if options:
+            for o in options:
+                label = o.get("label", o.get("id", str(o)))
+                t.append(f"  • {label}\n", style="dim")
+        t.append("请在下一句消息中回复。", style="dim italic")
+        return t
 
 
 def _format_args_minimal(tool_name: str, args: dict) -> str:
