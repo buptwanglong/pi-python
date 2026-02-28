@@ -116,8 +116,6 @@ class CodingAgent:
         ) == "plan"
         # Pending asks (ask_user_question): list of {tool_call_id, question, options}
         self._pending_asks: List[dict] = []
-        # Last ask payload before tool_call_id is known (set by tool, merged in tool_call_end)
-        self._last_ask_user_question: Optional[dict] = None
 
         # Register tools
         self._register_tools()
@@ -132,18 +130,40 @@ class CodingAgent:
             if num_loaded > 0:
                 print(f"📦 Loaded {num_loaded} extension(s)")
 
-    async def set_session_id(self, session_id: Optional[str]) -> None:
+    async def set_session_id(
+        self, session_id: Optional[str], load_history: bool = True
+    ) -> None:
         """
         Set the current session id and load its todo list and pending_asks from disk.
-        When session_id is None, clear _session_id, _current_todos, and _pending_asks.
+        When session_id is non-empty and load_history is True, load messages into context.messages.
+        When session_id is None, clear _session_id, _current_todos, _pending_asks, and context.messages.
         """
         self._session_id = session_id
         if session_id:
             self._current_todos = await self.session_manager.load_todos(session_id)
             self._pending_asks = await self.session_manager.load_pending_asks(session_id)
+            if load_history:
+                self.context.messages = await self.session_manager.load_messages(
+                    session_id
+                )
+                logger.info(
+                    "Session context initialized: session_id=%s, loaded_messages=%d, todos=%d, pending_asks=%d",
+                    session_id,
+                    len(self.context.messages),
+                    len(self._current_todos),
+                    len(self._pending_asks),
+                )
+            else:
+                logger.info(
+                    "Session set (no history load): session_id=%s, context.messages=%d",
+                    session_id,
+                    len(self.context.messages),
+                )
         else:
             self._current_todos = []
             self._pending_asks = []
+            self.context.messages = []
+            logger.info("Session cleared: context.messages=0")
 
     def set_plan_mode(self, on: bool) -> None:
         """Enable or disable plan mode (read-only analysis and planning)."""
@@ -418,30 +438,25 @@ Your response must include:
             if delta:
                 print(delta, end="", flush=True)
 
-        def on_tool_call_start(event):
+        async def on_tool_call_start(event):
             """Handle tool call start events."""
+            tool_name = event.get("tool_name", "unknown")
+            logger.info("Tool call start: %s", tool_name)
+            args = event.get("arguments", {})
+            if args:
+                args_str = str(args)
+                logger.debug("Tool call args: %s", args_str[:500] + "..." if len(args_str) > 500 else args_str)
             if self.settings.agent.verbose:
                 print(f"\n[Tool: {event['tool_name']}]", flush=True)
-
-        async def on_tool_call_end(event):
-            """Handle tool call end events."""
-            if event.get("error"):
-                print(f"[Error: {event['error']}]", flush=True)
-            elif event.get("tool_name") == "todo_write" and self._current_todos:
-                in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
-                if in_progress and self.settings.agent.verbose:
-                    print(f"\n[Todo: {len(self._current_todos)} items; in progress: {in_progress[0].get('content', '')[:50]!r}]", flush=True)
-                elif self.settings.agent.verbose:
-                    print(f"\n[Todo: {len(self._current_todos)} items]", flush=True)
-            elif event.get("tool_name") == "ask_user_question" and getattr(self, "_last_ask_user_question", None):
-                last = self._last_ask_user_question
-                self._last_ask_user_question = None
+            if tool_name == "ask_user_question":
                 tool_call_id = event.get("tool_call_id") or ""
                 if tool_call_id:
+                    question = (args or {}).get("question", "")
+                    options = (args or {}).get("options") if isinstance((args or {}).get("options"), list) else []
                     entry = {
                         "tool_call_id": tool_call_id,
-                        "question": last.get("question", ""),
-                        "options": last.get("options") or [],
+                        "question": question,
+                        "options": options or [],
                     }
                     self._pending_asks.append(entry)
                     if self._session_id:
@@ -457,6 +472,31 @@ Your response must include:
                         + (f" ({n} pending)" if n > 1 else ""),
                         flush=True,
                     )
+
+        async def on_tool_call_end(event):
+            """Handle tool call end events."""
+            tool_name = event.get("tool_name", "unknown")
+            err = event.get("error")
+            logger.info("Tool call end: %s error=%s", tool_name, bool(err))
+            if not err and event.get("result") is not None:
+                result_str = str(event.get("result", ""))
+                logger.debug("Tool call result: %s", result_str[:500] + "..." if len(result_str) > 500 else result_str)
+            if err:
+                print(f"[Error: {event['error']}]", flush=True)
+                if tool_name == "ask_user_question":
+                    tid = event.get("tool_call_id")
+                    if tid:
+                        self._pending_asks = [p for p in self._pending_asks if p.get("tool_call_id") != tid]
+                        if self._session_id:
+                            await self.session_manager.save_pending_asks(
+                                self._session_id, self._pending_asks
+                            )
+            elif tool_name == "todo_write" and self._current_todos:
+                in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
+                if in_progress and self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items; in progress: {in_progress[0].get('content', '')[:50]!r}]", flush=True)
+                elif self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items]", flush=True)
 
         self.agent.on("text_delta", on_text_delta)
         self.agent.on("agent_tool_call_start", on_tool_call_start)
@@ -584,6 +624,34 @@ Your response must include:
                     print(f"Plan mode {'on' if on else 'off'}", flush=True)
                     continue
 
+                if user_input.strip().lower() == "/sessions":
+                    sessions = await self.session_manager.list_sessions()
+                    if not sessions:
+                        print("No sessions yet.")
+                    else:
+                        for m in sessions:
+                            print(
+                                f"  {m.session_id}  created={m.created_at}  model={m.model_id}  messages={m.total_messages}"
+                            )
+                    continue
+
+                if user_input.strip().lower().startswith("/open "):
+                    session_id = user_input.split(maxsplit=1)[1].strip()
+                    if not session_id:
+                        print("Usage: /open <session_id>")
+                        continue
+                    sessions = await self.session_manager.list_sessions()
+                    if not any(s.session_id == session_id for s in sessions):
+                        print(f"Session not found: {session_id}")
+                        continue
+                    await self.set_session_id(session_id, load_history=True)
+                    n = len(self.context.messages)
+                    print(
+                        f"Switched to session {session_id}, loaded {n} messages.",
+                        flush=True,
+                    )
+                    continue
+
                 # Pending ask_user_question: treat this input as the answer (FIFO)
                 if self._pending_asks:
                     print()  # newline before agent output
@@ -628,6 +696,9 @@ Your response must include:
                             print(f"Available commands: {', '.join(available)}")
                         continue
 
+                # Record message count before appending (for persisting new messages after run)
+                n_before = len(self.context.messages)
+
                 # Add user message to context
                 self.context.messages.append(
                     UserMessage(
@@ -646,6 +717,13 @@ Your response must include:
                     await self._run_with_trajectory_if_enabled(
                         stream_llm_events=True, invoked_skill_id=invoked_skill_id
                     )
+                    # Persist new messages to session
+                    if self._session_id:
+                        new_messages = self.context.messages[n_before:]
+                        if new_messages:
+                            await self.session_manager.append_messages(
+                                self._session_id, new_messages
+                            )
                 except Exception as agent_error:
                     logger.exception("Agent run failed")
                     # Restore context on agent failure
@@ -725,6 +803,8 @@ Available commands:
   settings  - Show current settings
   /todos    - Toggle full/compact todo list above prompt
   /plan     - Toggle plan mode (read-only analysis and planning); /plan on, /plan off
+  /sessions - List all sessions (id, created_at, model, message count)
+  /open <session_id> - Switch to a session and load its history
   exit/quit - Exit the program
   /skill <id> - Load full instructions for a skill for this turn (e.g. /skill refactor)
 
@@ -768,11 +848,18 @@ async def main_async(args: Optional[list] = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
-    # Configure logging: default write to ~/.basket/logs/ (INFO); LOG_LEVEL overrides level
+    # Parse --debug early so we can enable DEBUG logging before other logic
+    use_debug = "--debug" in args
+    if use_debug:
+        args = [a for a in args if a != "--debug"]
+
+    # Configure logging: default write to ~/.basket/logs/ (INFO); --debug or LOG_LEVEL overrides level
     fmt = "%(asctime)s %(name)s: %(levelname)s: %(message)s"
     log_level_name = (os.environ.get("LOG_LEVEL") or "").upper()
     level = logging.INFO
-    if log_level_name:
+    if use_debug:
+        level = logging.DEBUG
+    elif log_level_name:
         level = getattr(logging, log_level_name, level) or level
     log_dir = Path.home() / ".basket" / "logs"
     try:
@@ -786,6 +873,7 @@ async def main_async(args: Optional[list] = None) -> int:
         root.addHandler(file_handler)
         for name in ("basket_tui.app", "basket_assistant.modes.tui"):
             logging.getLogger(name).setLevel(level)
+        logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
         logger.info("Log file: %s", log_file)
     except OSError as e:
         logger.debug("Could not create log file: %s", e)
@@ -798,6 +886,16 @@ async def main_async(args: Optional[list] = None) -> int:
     use_plan_mode = "--plan" in args
     if use_plan_mode:
         args = [a for a in args if a != "--plan"]
+
+    session_id_arg: Optional[str] = None
+    if "--session" in args:
+        i = args.index("--session")
+        if i + 1 < len(args):
+            session_id_arg = args[i + 1]
+            args = args[:i] + args[i + 2:]
+        else:
+            args = [a for a in args if a != "--session"]
+
     if "--permission-mode" in args:
         i = args.index("--permission-mode")
         if i + 1 < len(args) and args[i + 1] == "plan":
@@ -834,6 +932,7 @@ Basket - AI-powered personal assistant
 Usage:
   basket                 - Start interactive mode
   basket --tui           - Start TUI mode (terminal UI)
+  basket --session <id> - Start with session loaded (use with interactive or --tui)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
   basket --plan          - Run in plan mode (read-only; same as --permission-mode plan)
@@ -843,6 +942,7 @@ Usage:
   basket serve attach    - Attach TUI to running assistant
   basket --help          - Show this help
   basket --version       - Show version
+  basket --debug         - Enable DEBUG logging (to log file only)
 
 Interactive mode commands:
   help      - Show help
@@ -853,6 +953,7 @@ Environment variables:
   OPENAI_API_KEY        - OpenAI API key
   ANTHROPIC_API_KEY     - Anthropic API key
   GOOGLE_API_KEY        - Google API key
+  LOG_LEVEL             - Log level (e.g. DEBUG); overridden by --debug
   BASKET_REMOTE_BIND    - Bind address for --remote (default: 0.0.0.0)
   BASKET_REMOTE_PORT    - Port for --remote (default: 7681)
   BASKET_SERVE_PORT     - Port for resident assistant (default: 7682)
@@ -1030,6 +1131,13 @@ Environment variables:
 
     if use_plan_mode:
         agent.set_plan_mode(True)
+
+    if session_id_arg:
+        sessions = await agent.session_manager.list_sessions()
+        if not any(s.session_id == session_id_arg for s in sessions):
+            print(f"Session not found: {session_id_arg}")
+            return 1
+        await agent.set_session_id(session_id_arg, load_history=True)
 
     # Run mode
     if len(args) == 0:

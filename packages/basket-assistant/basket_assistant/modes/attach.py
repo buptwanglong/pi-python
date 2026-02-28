@@ -68,13 +68,18 @@ async def run_tui_mode_attach(ws_url: str) -> None:
             app.append_thinking(delta)
         elif typ == "tool_call_start":
             dispatch._in_thinking = False
-            app.show_tool_call(
-                msg.get("tool_name", "unknown"),
-                msg.get("arguments") or {},
-            )
+            if msg.get("tool_name") in ("ask_user_question", "todo_write"):
+                pass
+            else:
+                app.show_tool_call(
+                    msg.get("tool_name", "unknown"),
+                    msg.get("arguments") or {},
+                )
         elif typ == "tool_call_end":
             tool_name = msg.get("tool_name", "unknown")
-            if "error" in msg:
+            if tool_name in ("ask_user_question", "todo_write"):
+                pass
+            elif "error" in msg:
                 app.show_tool_result(msg["error"], success=False)
             else:
                 app.show_tool_result(msg.get("result", ""), success=True)
@@ -83,14 +88,7 @@ async def run_tui_mode_attach(ws_url: str) -> None:
         elif typ == "ask_user_question":
             question = msg.get("question", "")
             options = msg.get("options") or []
-            tool_call_id = msg.get("tool_call_id", "")
-            parts = [f"Question: {question}"]
-            if options:
-                parts.append("Options: " + ", ".join(str(o.get("label", o.get("id", o))) for o in options))
-            parts.append("(Reply in your next message.)")
-            if tool_call_id:
-                parts.append(f"[tool_call_id: {tool_call_id}]")
-            app.show_tool_result("\n".join(parts), success=True)
+            app.show_ask_question(question, options)
         elif typ == "plan_mode":
             app.update_plan_mode(msg.get("value", False))
             dispatch._in_thinking = False

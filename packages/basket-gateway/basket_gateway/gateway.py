@@ -183,6 +183,11 @@ class AgentGateway:
         agent = self._get_agent(session_id)
         if hasattr(agent, "set_session_id") and asyncio.iscoroutinefunction(agent.set_session_id):
             await agent.set_session_id(session_id)
+        # Ensure session file exists (e.g. for "default") so append_messages can persist
+        session_manager = getattr(agent, "session_manager", None)
+        if session_manager is not None and hasattr(session_manager, "ensure_session"):
+            model_id = getattr(getattr(agent, "model", None), "id", "") or "default"
+            await session_manager.ensure_session(session_id, model_id)
 
         stripped = user_content.strip().lower()
         if stripped in ("/plan", "/plan on", "/plan off"):
@@ -227,11 +232,18 @@ class AgentGateway:
                     agent._gateway_event_sink_ref[0] = None
                 return f"Error: {e}"
 
+        n_before = len(agent.context.messages)
         agent.context.messages.append(
             UserMessage(role="user", content=user_content, timestamp=int(time.time() * 1000))
         )
         try:
             await agent._run_with_trajectory_if_enabled(stream_llm_events=(event_sink is not None))
+            # Persist new messages to session
+            session_manager = getattr(agent, "session_manager", None)
+            if session_id and session_manager and hasattr(session_manager, "append_messages"):
+                new_messages = agent.context.messages[n_before:]
+                if new_messages:
+                    await session_manager.append_messages(session_id, new_messages)
         except Exception as e:
             logger.exception("Agent run failed in gateway")
             if event_sink is not None:

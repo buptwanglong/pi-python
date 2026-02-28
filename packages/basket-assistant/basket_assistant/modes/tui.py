@@ -8,13 +8,53 @@ import asyncio
 import copy
 import logging
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from basket_agent import Agent
+from basket_ai.types import Message
 from basket_tui import PiCodingAgentApp
 from basket_tui.app import ProcessPendingInputs
 
 logger = logging.getLogger(__name__)
+
+
+def _message_to_display(msg: Message) -> Tuple[str, str]:
+    """
+    Convert a Message to (role, display_text) for TUI output.
+    user: content as string; assistant: text blocks joined; toolResult: "[tool: name] result".
+    """
+    role = getattr(msg, "role", "user")
+    if role == "user":
+        content = getattr(msg, "content", "")
+        if isinstance(content, str):
+            return "user", content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if hasattr(block, "text"):
+                    parts.append(block.text)
+            return "user", "\n".join(parts) if parts else ""
+        return "user", str(content)
+    if role == "assistant":
+        content = getattr(msg, "content", []) or []
+        texts = []
+        for block in content:
+            if hasattr(block, "text"):
+                texts.append(block.text)
+            elif hasattr(block, "thinking"):
+                t = getattr(block, "thinking", "") or ""
+                texts.append(f"[thinking] {t[:200]}..." if len(t) > 200 else f"[thinking] {t}")
+        return "assistant", "\n".join(texts) if texts else ""
+    if role == "toolResult":
+        name = getattr(msg, "tool_name", "tool")
+        content_list = getattr(msg, "content", []) or []
+        first_text = ""
+        for block in content_list:
+            if hasattr(block, "text"):
+                first_text = block.text[:500] + "..." if len(block.text) > 500 else block.text
+                break
+        return "system", f"[tool: {name}] {first_text or 'ok'}"
+    return "system", str(msg)
 
 
 def _format_tool_result(tool_name: str, result: any) -> str:
@@ -150,21 +190,32 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
 
     def on_tool_call_start(event):
         tool_name = event.get("tool_name", "unknown")
-        arguments = event.get("arguments", {})
+        arguments = event.get("arguments", {}) or {}
+        if tool_name == "ask_user_question":
+            question = arguments.get("question", "")
+            options = arguments.get("options") if isinstance(arguments.get("options"), list) else []
+            app.show_ask_question(question, options or [])
+            return
+        if tool_name == "todo_write":
+            return  # Don't show tool block; todo panel is updated in on_tool_call_end
         app.show_tool_call(tool_name, arguments)
 
     def on_tool_call_end(event):
         error = event.get("error")
         tool_name = event.get("tool_name", "unknown")
+        if tool_name == "ask_user_question":
+            return
+        if tool_name == "todo_write":
+            if coding_agent is not None:
+                todos = getattr(coding_agent, "_current_todos", [])
+                app.update_todo_panel(todos)
+            return  # Don't show tool block or result in conversation
         if error:
             app.show_tool_result(str(error), success=False)
         else:
             result = event.get("result")
             formatted_result = _format_tool_result(tool_name, result)
             app.show_tool_result(formatted_result, success=True)
-        if tool_name == "todo_write" and coding_agent is not None:
-            todos = getattr(coding_agent, "_current_todos", [])
-            app.update_todo_panel(todos)
 
     def on_agent_complete(event):
         # Run finished: finalize current assistant block so the next user message gets a new block
@@ -200,6 +251,20 @@ async def run_tui_mode(coding_agent) -> None:
     3. Sets up input handling to forward messages to the agent
     4. Runs the TUI application
     """
+    # Create session if none (same as run_interactive) so messages are persisted
+    if getattr(coding_agent, "_session_id", None) is None:
+        session_id = await coding_agent.session_manager.create_session(
+            coding_agent.model.id
+        )
+        await coding_agent.set_session_id(session_id)
+        logger.info("TUI: created new session session_id=%s", session_id)
+    else:
+        logger.info(
+            "TUI: using existing session session_id=%s, context.messages=%d",
+            getattr(coding_agent, "_session_id", None),
+            len(coding_agent.context.messages),
+        )
+
     agent = coding_agent.agent
     app = PiCodingAgentApp(agent=agent, coding_agent=coding_agent)
     current_response = {"text": "", "thinking": "", "in_thinking": False}
@@ -240,6 +305,7 @@ async def run_tui_mode(coding_agent) -> None:
                 app.set_agent_task(None)
             # If not resumed, fall through to normal append + run
 
+        n_before = len(coding_agent.context.messages)
         # Add user message to context
         coding_agent.context.messages.append(
             UserMessage(
@@ -261,6 +327,14 @@ async def run_tui_mode(coding_agent) -> None:
         app.set_agent_task(task)
         try:
             await task
+            # Persist new messages to session
+            session_id = getattr(coding_agent, "_session_id", None)
+            if session_id and hasattr(coding_agent, "session_manager"):
+                new_messages = coding_agent.context.messages[n_before:]
+                if new_messages:
+                    await coding_agent.session_manager.append_messages(
+                        session_id, new_messages
+                    )
         except asyncio.CancelledError:
             logger.debug("Agent task cancelled by user")
             app.append_message("system", "Stopped by user.")
@@ -274,6 +348,12 @@ async def run_tui_mode(coding_agent) -> None:
 
     # Set input handler
     app.set_input_handler(handle_user_input)
+
+    # Render loaded session history into TUI so user sees past messages
+    for msg in coding_agent.context.messages:
+        role, display_text = _message_to_display(msg)
+        if display_text:
+            app.append_message(role, display_text)
 
     # Run the app
     await app.run_async()

@@ -9,11 +9,16 @@ import asyncio
 import json
 import logging
 import uuid
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
 from pydantic import BaseModel, Field
+
+from basket_ai.types import Message
+
+from .messages_io import entry_data_to_message_safe, message_to_entry_data
 
 logger = logging.getLogger(__name__)
 
@@ -156,8 +161,6 @@ class SessionManager:
         Returns:
             Session ID
         """
-        import time
-
         session_id = str(uuid.uuid4())
         timestamp = int(time.time() * 1000)
 
@@ -180,6 +183,32 @@ class SessionManager:
         await self.append_entry(session_id, entry)
 
         return session_id
+
+    async def ensure_session(self, session_id: str, model_id: str) -> None:
+        """
+        Ensure a session file exists with metadata. If the file already exists, do nothing.
+        Used by gateway (and other modes) when session_id is fixed (e.g. "default").
+
+        Args:
+            session_id: Session ID to use
+            model_id: ID of the model being used
+        """
+        path = self._get_session_path(session_id)
+        if path.exists():
+            return
+        timestamp = int(time.time() * 1000)
+        metadata = SessionMetadata(
+            session_id=session_id,
+            created_at=timestamp,
+            updated_at=timestamp,
+            model_id=model_id,
+        )
+        entry = SessionEntry(
+            timestamp=timestamp,
+            type="metadata",
+            data=metadata.model_dump(),
+        )
+        await self.append_entry(session_id, entry)
 
     async def append_entry(self, session_id: str, entry: SessionEntry) -> None:
         """
@@ -219,6 +248,50 @@ class SessionManager:
                     entries.append(SessionEntry(**data))
 
         return entries
+
+    async def append_messages(self, session_id: str, messages: List[Message]) -> None:
+        """
+        Append conversation messages to a session as type="message" entries.
+
+        Args:
+            session_id: Session ID
+            messages: List of UserMessage, AssistantMessage, ToolResultMessage
+        """
+        for msg in messages:
+            ts = getattr(msg, "timestamp", None)
+            if ts is None:
+                ts = int(time.time() * 1000)
+            data = message_to_entry_data(msg)
+            entry = SessionEntry(
+                timestamp=ts,
+                type="message",
+                data=data,
+            )
+            await self.append_entry(session_id, entry)
+
+    async def load_messages(self, session_id: str) -> List[Message]:
+        """
+        Load all message entries from a session and return as Message list.
+        Returns [] if session does not exist or has no message entries.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of UserMessage, AssistantMessage, ToolResultMessage in order
+        """
+        try:
+            entries = await self.read_entries(session_id)
+        except FileNotFoundError:
+            return []
+        out: List[Message] = []
+        for e in entries:
+            if e.type != "message":
+                continue
+            msg = entry_data_to_message_safe(e.data)
+            if msg is not None:
+                out.append(msg)
+        return out
 
     async def list_sessions(self) -> List[SessionMetadata]:
         """
@@ -278,8 +351,6 @@ class SessionManager:
             session_id: Session ID
             updates: Metadata fields to update
         """
-        import time
-
         entries = await self.read_entries(session_id)
 
         # Find latest metadata

@@ -457,10 +457,8 @@ class TestAskUserQuestionAndResume:
     """ask_user_question tool and pending_asks resume flow."""
 
     @pytest.mark.asyncio
-    async def test_ask_user_question_tool_sets_last_and_returns_placeholder(
-        self, mock_coding_agent
-    ):
-        """Tool sets _last_ask_user_question and returns placeholder string."""
+    async def test_ask_user_question_tool_returns_placeholder(self, mock_coding_agent):
+        """Tool returns placeholder string (pending_asks are filled from agent_tool_call_start)."""
         from basket_assistant.tools.ask_user_question import ASK_USER_QUESTION_PLACEHOLDER
 
         tool = next(
@@ -472,18 +470,39 @@ class TestAskUserQuestionAndResume:
             question="Which option?", options=[{"id": "a", "label": "A"}]
         )
         assert out == ASK_USER_QUESTION_PLACEHOLDER
-        assert mock_coding_agent._last_ask_user_question == {
-            "question": "Which option?",
-            "options": [{"id": "a", "label": "A"}],
-        }
 
     @pytest.mark.asyncio
-    async def test_tool_call_end_merge_appends_pending_ask(self, mock_coding_agent):
-        """When agent_tool_call_end fires for ask_user_question, merge tool_call_id and append to _pending_asks."""
-        mock_coding_agent._last_ask_user_question = {
+    async def test_tool_call_start_appends_pending_ask(self, mock_coding_agent):
+        """When agent_tool_call_start fires for ask_user_question, append entry to _pending_asks."""
+        handlers = mock_coding_agent.agent.event_handlers.get(
+            "agent_tool_call_start", []
+        )
+        for h in handlers:
+            if asyncio.iscoroutinefunction(h):
+                await h({
+                    "tool_name": "ask_user_question",
+                    "tool_call_id": "call_abc",
+                    "arguments": {"question": "Q?", "options": []},
+                })
+            else:
+                h({
+                    "tool_name": "ask_user_question",
+                    "tool_call_id": "call_abc",
+                    "arguments": {"question": "Q?", "options": []},
+                })
+        assert len(mock_coding_agent._pending_asks) == 1
+        assert mock_coding_agent._pending_asks[0] == {
+            "tool_call_id": "call_abc",
             "question": "Q?",
             "options": [],
         }
+
+    @pytest.mark.asyncio
+    async def test_tool_call_end_error_removes_pending_ask(self, mock_coding_agent):
+        """When agent_tool_call_end fires for ask_user_question with error, remove that entry from _pending_asks."""
+        mock_coding_agent._pending_asks = [
+            {"tool_call_id": "call_xyz", "question": "Q?", "options": []}
+        ]
         handlers = mock_coding_agent.agent.event_handlers.get(
             "agent_tool_call_end", []
         )
@@ -491,24 +510,18 @@ class TestAskUserQuestionAndResume:
             if asyncio.iscoroutinefunction(h):
                 await h({
                     "tool_name": "ask_user_question",
-                    "tool_call_id": "call_abc",
-                    "result": "placeholder",
-                    "error": None,
+                    "tool_call_id": "call_xyz",
+                    "result": None,
+                    "error": "Tool failed",
                 })
             else:
                 h({
                     "tool_name": "ask_user_question",
-                    "tool_call_id": "call_abc",
-                    "result": "placeholder",
-                    "error": None,
+                    "tool_call_id": "call_xyz",
+                    "result": None,
+                    "error": "Tool failed",
                 })
-        assert mock_coding_agent._last_ask_user_question is None
-        assert len(mock_coding_agent._pending_asks) == 1
-        assert mock_coding_agent._pending_asks[0] == {
-            "tool_call_id": "call_abc",
-            "question": "Q?",
-            "options": [],
-        }
+        assert len(mock_coding_agent._pending_asks) == 0
 
     @pytest.mark.asyncio
     async def test_try_resume_pending_ask_replaces_content_and_runs(
