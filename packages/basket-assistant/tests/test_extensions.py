@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from unittest.mock import Mock, AsyncMock, patch
 
 from basket_assistant.extensions import ExtensionAPI, ExtensionLoader
+from basket_assistant.extensions.hook_runner import HookRunner
 
 
 class MockCodingAgent:
@@ -33,7 +34,7 @@ def test_extension_api_init():
 
 
 def test_extension_api_register_tool():
-    """Test tool registration via decorator."""
+    """Test tool registration via decorator (no hook runner)."""
     agent = MockCodingAgent()
     api = ExtensionAPI(agent)
 
@@ -54,6 +55,38 @@ def test_extension_api_register_tool():
     assert call_args.kwargs["name"] == "test_tool"
     assert call_args.kwargs["description"] == "A test tool"
     assert call_args.kwargs["parameters"] == TestParams
+
+
+@pytest.mark.asyncio
+async def test_extension_api_register_tool_with_hook_deny():
+    """When hook_runner run returns deny for tool.execute.before, wrapped tool returns error and does not call original."""
+    agent = MockCodingAgent()
+    mock_runner = AsyncMock(spec=HookRunner)
+    mock_runner.run.return_value = {"permission": "deny", "reason": "Blocked by hook."}
+    api = ExtensionAPI(agent, mock_runner)
+
+    class TestParams(BaseModel):
+        name: str = Field(..., description="Name parameter")
+
+    called = []
+
+    @api.register_tool(
+        name="test_tool",
+        description="A test tool",
+        parameters=TestParams,
+    )
+    async def test_tool(name: str) -> str:
+        called.append(name)
+        return f"Hello, {name}!"
+
+    agent.agent.register_tool.assert_called_once()
+    execute_fn = agent.agent.register_tool.call_args.kwargs["execute_fn"]
+    result = await execute_fn(name="world")
+    assert result == "Error: Blocked by hook."
+    assert called == []
+    mock_runner.run.assert_called()
+    before_calls = [c for c in mock_runner.run.call_args_list if c[0][0] == "tool.execute.before"]
+    assert len(before_calls) >= 1
 
 
 def test_extension_api_register_command():

@@ -102,6 +102,10 @@ def test_tui_handlers_update_ui_directly_no_call_from_thread():
             """Must not be called when handlers run in app thread."""
             self._record("call_from_thread", fn, *args, **kwargs)
 
+        def post_message(self, message):
+            """Process pending inputs / post message (used by on_agent_complete)."""
+            self._record("post_message", message)
+
     class MockAgent:
         def __init__(self):
             self.context = Context(systemPrompt="", messages=[])

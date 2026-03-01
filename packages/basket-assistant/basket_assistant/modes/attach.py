@@ -1,5 +1,8 @@
 """
 TUI attach mode: connect to a resident assistant gateway via WebSocket and run the TUI.
+
+Same protocol works for (1) local gateway ws://127.0.0.1:7682/ws and (2) relay client
+URL (e.g. wss://relay-host/relay/client?session_id=xxx from `basket relay <url>`).
 """
 
 import asyncio
@@ -20,7 +23,8 @@ async def run_tui_mode_attach(ws_url: str) -> None:
     rendered in the TUI. Exiting the TUI closes the connection; the gateway keeps running.
 
     Args:
-        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws)
+        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws or relay client URL
+                wss://host/relay/client?session_id=xxx)
     """
     try:
         import websockets
@@ -68,16 +72,37 @@ async def run_tui_mode_attach(ws_url: str) -> None:
             app.append_thinking(delta)
         elif typ == "tool_call_start":
             dispatch._in_thinking = False
-            app.show_tool_call(
-                msg.get("tool_name", "unknown"),
-                msg.get("arguments") or {},
-            )
+            if msg.get("tool_name") in ("ask_user_question", "todo_write"):
+                pass
+            else:
+                app.show_tool_call(
+                    msg.get("tool_name", "unknown"),
+                    msg.get("arguments") or {},
+                )
         elif typ == "tool_call_end":
             tool_name = msg.get("tool_name", "unknown")
-            if "error" in msg:
+            if tool_name in ("ask_user_question", "todo_write"):
+                pass
+            elif "error" in msg:
                 app.show_tool_result(msg["error"], success=False)
             else:
                 app.show_tool_result(msg.get("result", ""), success=True)
+        elif typ == "todos":
+            app.update_todo_panel(msg.get("todos", []))
+        elif typ == "ask_user_question":
+            question = msg.get("question", "")
+            options = msg.get("options") or []
+            app.show_ask_question(question, options)
+        elif typ == "plan_mode":
+            app.update_plan_mode(msg.get("value", False))
+            dispatch._in_thinking = False
+            app.finalize_assistant_block()
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+            app.set_agent_task(None)
+            agent_done_future = None
+            agent_placeholder_task = None
+            app.post_message(ProcessPendingInputs())
         elif typ == "agent_complete":
             dispatch._in_thinking = False
             app.finalize_assistant_block()
@@ -87,6 +112,12 @@ async def run_tui_mode_attach(ws_url: str) -> None:
             agent_done_future = None
             agent_placeholder_task = None
             app.post_message(ProcessPendingInputs())
+        elif typ == "ready":
+            pass
+        elif typ == "agent_disconnected":
+            app.append_message("system", "Agent disconnected from relay.")
+        elif typ == "error":
+            app.append_message("system", msg.get("error", "Relay error"))
         elif typ == "agent_error":
             dispatch._in_thinking = False
             app.append_message("system", f"Error: {msg.get('error', 'Unknown error')}")

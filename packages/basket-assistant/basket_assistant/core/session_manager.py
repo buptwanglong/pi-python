@@ -9,11 +9,16 @@ import asyncio
 import json
 import logging
 import uuid
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
 from pydantic import BaseModel, Field
+
+from basket_ai.types import Message
+
+from .messages_io import entry_data_to_message_safe, message_to_entry_data
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,91 @@ class SessionManager:
         """Get the file path for a session."""
         return self.sessions_dir / f"{session_id}.jsonl"
 
+    def _get_todos_path(self, session_id: str) -> Path:
+        """Get the file path for a session's todo list."""
+        return self.sessions_dir / f"{session_id}.todos.json"
+
+    def _get_pending_ask_path(self, session_id: str) -> Path:
+        """Get the file path for a session's pending ask list."""
+        return self.sessions_dir / f"{session_id}.pending_ask.json"
+
+    async def save_pending_asks(
+        self, session_id: str, pending_asks: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Save pending ask list for a session (overwrites existing file).
+        Each item must have tool_call_id, question, options.
+
+        Args:
+            session_id: Session ID
+            pending_asks: List of dicts with tool_call_id, question, options
+        """
+        path = self._get_pending_ask_path(session_id)
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(pending_asks, ensure_ascii=False, indent=2))
+
+    async def load_pending_asks(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Load pending ask list for a session. Returns [] if file does not exist or is invalid.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of dicts with tool_call_id, question, options
+        """
+        path = self._get_pending_ask_path(session_id)
+        if not path.exists():
+            return []
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+            if not content.strip():
+                return []
+            data = json.loads(content)
+            if not isinstance(data, list):
+                return []
+            return [x for x in data if isinstance(x, dict) and "tool_call_id" in x]
+        except Exception as e:
+            logger.debug("Failed to load pending_asks for %s: %s", session_id, e)
+            return []
+
+    async def save_todos(self, session_id: str, todos: List[Dict[str, Any]]) -> None:
+        """
+        Save todo list for a session (overwrites existing file).
+
+        Args:
+            session_id: Session ID
+            todos: List of todo items, each dict with id, content, status
+        """
+        path = self._get_todos_path(session_id)
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(todos, ensure_ascii=False, indent=2))
+
+    async def load_todos(self, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Load todo list for a session. Returns [] if file does not exist or is invalid.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of todo items (dicts with id, content, status)
+        """
+        path = self._get_todos_path(session_id)
+        if not path.exists():
+            return []
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+            if not content.strip():
+                return []
+            data = json.loads(content)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.debug("Failed to load todos for %s: %s", session_id, e)
+            return []
+
     async def create_session(self, model_id: str) -> str:
         """
         Create a new session.
@@ -71,8 +161,6 @@ class SessionManager:
         Returns:
             Session ID
         """
-        import time
-
         session_id = str(uuid.uuid4())
         timestamp = int(time.time() * 1000)
 
@@ -95,6 +183,32 @@ class SessionManager:
         await self.append_entry(session_id, entry)
 
         return session_id
+
+    async def ensure_session(self, session_id: str, model_id: str) -> None:
+        """
+        Ensure a session file exists with metadata. If the file already exists, do nothing.
+        Used by gateway (and other modes) when session_id is fixed (e.g. "default").
+
+        Args:
+            session_id: Session ID to use
+            model_id: ID of the model being used
+        """
+        path = self._get_session_path(session_id)
+        if path.exists():
+            return
+        timestamp = int(time.time() * 1000)
+        metadata = SessionMetadata(
+            session_id=session_id,
+            created_at=timestamp,
+            updated_at=timestamp,
+            model_id=model_id,
+        )
+        entry = SessionEntry(
+            timestamp=timestamp,
+            type="metadata",
+            data=metadata.model_dump(),
+        )
+        await self.append_entry(session_id, entry)
 
     async def append_entry(self, session_id: str, entry: SessionEntry) -> None:
         """
@@ -135,6 +249,50 @@ class SessionManager:
 
         return entries
 
+    async def append_messages(self, session_id: str, messages: List[Message]) -> None:
+        """
+        Append conversation messages to a session as type="message" entries.
+
+        Args:
+            session_id: Session ID
+            messages: List of UserMessage, AssistantMessage, ToolResultMessage
+        """
+        for msg in messages:
+            ts = getattr(msg, "timestamp", None)
+            if ts is None:
+                ts = int(time.time() * 1000)
+            data = message_to_entry_data(msg)
+            entry = SessionEntry(
+                timestamp=ts,
+                type="message",
+                data=data,
+            )
+            await self.append_entry(session_id, entry)
+
+    async def load_messages(self, session_id: str) -> List[Message]:
+        """
+        Load all message entries from a session and return as Message list.
+        Returns [] if session does not exist or has no message entries.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of UserMessage, AssistantMessage, ToolResultMessage in order
+        """
+        try:
+            entries = await self.read_entries(session_id)
+        except FileNotFoundError:
+            return []
+        out: List[Message] = []
+        for e in entries:
+            if e.type != "message":
+                continue
+            msg = entry_data_to_message_safe(e.data)
+            if msg is not None:
+                out.append(msg)
+        return out
+
     async def list_sessions(self) -> List[SessionMetadata]:
         """
         List all sessions.
@@ -166,15 +324,20 @@ class SessionManager:
 
     async def delete_session(self, session_id: str) -> None:
         """
-        Delete a session.
+        Delete a session and its todo file.
 
         Args:
             session_id: Session ID
         """
         path = self._get_session_path(session_id)
-
         if path.exists():
             path.unlink()
+        todos_path = self._get_todos_path(session_id)
+        if todos_path.exists():
+            todos_path.unlink()
+        pending_ask_path = self._get_pending_ask_path(session_id)
+        if pending_ask_path.exists():
+            pending_ask_path.unlink()
 
     async def update_metadata(
         self, session_id: str, updates: Dict[str, Any]
@@ -188,8 +351,6 @@ class SessionManager:
             session_id: Session ID
             updates: Metadata fields to update
         """
-        import time
-
         entries = await self.read_entries(session_id)
 
         # Find latest metadata

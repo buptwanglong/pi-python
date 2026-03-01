@@ -51,6 +51,23 @@
     padding: 1 2;
 }
 
+#todo-panel {
+    height: auto;
+    min-height: 1;
+    max-height: 8;
+    padding: 0 1;
+    border: none;
+    color: $text-muted;
+}
+
+#plan-mode-panel {
+    height: auto;
+    min-height: 1;
+    padding: 0 1;
+    border: none;
+    color: $text-muted;
+}
+
 #input {
     dock: bottom;
     height: auto;

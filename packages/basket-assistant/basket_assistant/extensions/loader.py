@@ -2,6 +2,7 @@
 Extension Loader
 
 Dynamically loads and manages extensions for the coding agent.
+Creates HookRunner from hooks.json and settings.hooks for subprocess-based hooks.
 """
 
 import importlib.util
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .api import ExtensionAPI
+from .hook_runner import HookRunner
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ class ExtensionLoader:
     Manages loading and lifecycle of extensions.
 
     Extensions are Python modules with a `setup(pi: ExtensionAPI)` function.
+    Also creates and holds HookRunner for subprocess-based hooks (loaded from
+    hooks.json and settings.hooks).
     """
 
     def __init__(self, agent):
@@ -30,8 +34,25 @@ class ExtensionLoader:
             agent: The CodingAgent instance
         """
         self._agent = agent
-        self._api = ExtensionAPI(agent)
+        project_root = Path.cwd()
+        settings = getattr(agent, "settings", None)
+        settings_hooks = getattr(settings, "hooks", None) if settings else None
+        self._hook_runner = HookRunner(
+            project_root=project_root,
+            settings_hooks=settings_hooks or {},
+        )
+        self._api = ExtensionAPI(agent, self._hook_runner)
         self._loaded_extensions: Dict[str, Any] = {}
+
+    @property
+    def extension_api(self) -> ExtensionAPI:
+        """Public access to the extension API (for tests and callers)."""
+        return self._api
+
+    @property
+    def hook_runner(self) -> HookRunner:
+        """Public access to the hook runner (for tool wrapper and session hooks)."""
+        return self._hook_runner
 
     def load_extension(self, path: Path) -> bool:
         """
