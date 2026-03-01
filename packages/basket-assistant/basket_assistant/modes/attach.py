@@ -1,5 +1,8 @@
 """
 TUI attach mode: connect to a resident assistant gateway via WebSocket and run the TUI.
+
+Same protocol works for (1) local gateway ws://127.0.0.1:7682/ws and (2) relay client
+URL (e.g. wss://relay-host/relay/client?session_id=xxx from `basket relay <url>`).
 """
 
 import asyncio
@@ -20,7 +23,8 @@ async def run_tui_mode_attach(ws_url: str) -> None:
     rendered in the TUI. Exiting the TUI closes the connection; the gateway keeps running.
 
     Args:
-        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws)
+        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws or relay client URL
+                wss://host/relay/client?session_id=xxx)
     """
     try:
         import websockets
@@ -108,6 +112,12 @@ async def run_tui_mode_attach(ws_url: str) -> None:
             agent_done_future = None
             agent_placeholder_task = None
             app.post_message(ProcessPendingInputs())
+        elif typ == "ready":
+            pass
+        elif typ == "agent_disconnected":
+            app.append_message("system", "Agent disconnected from relay.")
+        elif typ == "error":
+            app.append_message("system", msg.get("error", "Relay error"))
         elif typ == "agent_error":
             dispatch._in_thinking = False
             app.append_message("system", f"Error: {msg.get('error', 'Unknown error')}")
