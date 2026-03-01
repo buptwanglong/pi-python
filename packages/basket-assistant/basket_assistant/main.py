@@ -14,14 +14,40 @@ from typing import Dict, List, Optional
 
 from basket_agent import Agent
 from basket_ai.api import get_model
-from basket_ai.types import Context, UserMessage
+from basket_ai.types import Context, TextContent, UserMessage
 
 from .core import SettingsManager, SessionManager, SubAgentConfig, load_agents_from_dirs
 from .extensions import ExtensionLoader
+from .extensions.api import _wrap_tool_execute_with_hooks
 from .core import get_skill_full_content, get_skills_index
-from .tools import BUILT_IN_TOOLS, create_skill_tool, create_task_tool, create_web_search_tool
+from .tools import (
+    BUILT_IN_TOOLS,
+    create_ask_user_question_tool,
+    create_skill_tool,
+    create_task_tool,
+    create_todo_write_tool,
+    create_web_search_tool,
+)
 
 logger = logging.getLogger(__name__)
+
+# Tools disabled in plan mode (read-only: read, grep, web_fetch, web_search, skill)
+PLAN_MODE_FORBIDDEN_TOOLS = frozenset({"write", "edit", "bash", "todo_write"})
+
+PLAN_MODE_DISABLED_MESSAGE = (
+    "Plan mode is on. This action is disabled. Only analysis and planning are allowed."
+)
+
+
+def _wrap_execute_fn_for_plan_mode(original_fn, get_plan_mode):
+    """Return an async wrapper that runs original_fn unless plan mode is on."""
+
+    async def wrapped(**kwargs):
+        if get_plan_mode():
+            return PLAN_MODE_DISABLED_MESSAGE
+        return await original_fn(**kwargs)
+
+    return wrapped
 
 
 class CodingAgent:
@@ -79,18 +105,132 @@ class CodingAgent:
         self.agent = Agent(self.model, self.context)
         self.agent.max_turns = self.settings.agent.max_turns
 
-        # Register tools
-        self._register_tools()
+        # Todo list state (updated by todo_write tool)
+        self._current_todos: List[dict] = []
+        # Session id for todo persistence; set by set_session_id() or run_interactive/gateway
+        self._session_id: Optional[str] = None
+        # CLI: whether to show full todo list above prompt (toggle via /todos)
+        self._todo_show_full: bool = False
+        # Plan mode: read-only analysis and planning; no write/edit/bash/todo_write
+        self._plan_mode: bool = getattr(
+            self.settings.permissions, "default_mode", "default"
+        ) == "plan"
+        # Pending asks (ask_user_question): list of {tool_call_id, question, options}
+        self._pending_asks: List[dict] = []
 
         # Setup event handlers
         self._setup_event_handlers()
 
-        # Load extensions
+        # Load extensions (and HookRunner from hooks.json / settings.hooks)
         self.extension_loader = ExtensionLoader(self)
         if load_extensions:
             num_loaded = self.extension_loader.load_default_extensions()
             if num_loaded > 0:
                 print(f"📦 Loaded {num_loaded} extension(s)")
+
+        # Register tools (after extensions so built-in tools use same hook wrapper)
+        self._register_tools()
+
+    async def set_session_id(
+        self, session_id: Optional[str], load_history: bool = True
+    ) -> None:
+        """
+        Set the current session id and load its todo list and pending_asks from disk.
+        When session_id is non-empty and load_history is True, load messages into context.messages.
+        When session_id is None, clear _session_id, _current_todos, _pending_asks, and context.messages.
+        """
+        self._session_id = session_id
+        if session_id:
+            self._current_todos = await self.session_manager.load_todos(session_id)
+            self._pending_asks = await self.session_manager.load_pending_asks(session_id)
+            if load_history:
+                self.context.messages = await self.session_manager.load_messages(
+                    session_id
+                )
+                logger.info(
+                    "Session context initialized: session_id=%s, loaded_messages=%d, todos=%d, pending_asks=%d",
+                    session_id,
+                    len(self.context.messages),
+                    len(self._current_todos),
+                    len(self._pending_asks),
+                )
+            else:
+                logger.info(
+                    "Session set (no history load): session_id=%s, context.messages=%d",
+                    session_id,
+                    len(self.context.messages),
+                )
+            # Run session.created hooks (subprocess; language-agnostic)
+            hook_runner = getattr(self.extension_loader, "hook_runner", None)
+            if hook_runner is not None:
+                await hook_runner.run(
+                    "session.created",
+                    {
+                        "session_id": session_id,
+                        "directory": str(Path.cwd()),
+                        "workspace_roots": [str(Path.cwd())],
+                    },
+                    cwd=Path.cwd(),
+                )
+        else:
+            self._current_todos = []
+            self._pending_asks = []
+            self.context.messages = []
+            logger.info("Session cleared: context.messages=0")
+
+    def set_plan_mode(self, on: bool) -> None:
+        """Enable or disable plan mode (read-only analysis and planning)."""
+        self._plan_mode = on
+
+    def get_plan_mode(self) -> bool:
+        """Return True if plan mode is on."""
+        return self._plan_mode
+
+    async def try_resume_pending_ask(
+        self,
+        user_content: str,
+        tool_call_id: Optional[str] = None,
+        *,
+        stream_llm_events: bool = True,
+        invoked_skill_id: Optional[str] = None,
+    ) -> bool:
+        """
+        If there is a pending_ask, treat user_content as the answer: replace the
+        corresponding ToolResultMessage content, remove that pending, and run agent.
+        Returns True if a pending was consumed and run started; False otherwise.
+
+        If tool_call_id is given, use that entry; else FIFO (oldest).
+        """
+        if not self._pending_asks:
+            return False
+        if tool_call_id:
+            entry = next(
+                (p for p in self._pending_asks if p.get("tool_call_id") == tool_call_id),
+                None,
+            )
+        else:
+            entry = self._pending_asks[0]
+        if not entry:
+            return False
+        target_id = entry["tool_call_id"]
+        for msg in self.context.messages:
+            if getattr(msg, "role", None) == "toolResult" and getattr(
+                msg, "tool_call_id", None
+            ) == target_id:
+                msg.content = [TextContent(type="text", text=user_content)]
+                break
+        else:
+            return False
+        self._pending_asks = [p for p in self._pending_asks if p.get("tool_call_id") != target_id]
+        if self._session_id:
+            await self.session_manager.save_pending_asks(
+                self._session_id, self._pending_asks
+            )
+        await self._run_with_trajectory_if_enabled(
+            stream_llm_events=stream_llm_events,
+            invoked_skill_id=invoked_skill_id,
+        )
+        return True
 
     def _get_agents_dirs(self) -> list[Path]:
         """Resolve agents directories; default ~/.basket/agents and ./.basket/agents."""
@@ -210,54 +350,114 @@ Always explain what you're doing before using tools.
 """
         return base
 
+    def _get_plan_mode_prompt_suffix(self) -> str:
+        """Append this to system prompt when plan mode is on."""
+        return """
+
+---
+## Plan mode (read-only)
+
+You are in **Plan mode**. You must only analyze and plan; do not modify files, run shell commands, or change session state.
+
+- **Allowed:** read files, grep, web search/fetch, load skills. Use these to research the codebase and produce a plan.
+- **Forbidden:** write, edit, bash, todo_write. If you attempt them, the tool will return a message that the action is disabled.
+
+Your response must include:
+1. **Analysis:** Findings and reasoning (what you inspected, current architecture, relevant docs).
+2. **Plan:** A numbered list of implementation steps. The **last step** must be to present the plan for user approval. Do not implement the plan until the user has approved it.
+"""
+
     def get_system_prompt_for_run(self, invoked_skill_id: Optional[str] = None) -> str:
         """System prompt for this run; if invoked_skill_id set, append that skill's full content."""
         prompt = self._default_system_prompt
-        if not invoked_skill_id:
-            return prompt
-        dirs = self._get_skills_dirs()
-        full = get_skill_full_content(invoked_skill_id, dirs)
-        if not full:
-            return prompt
-        return prompt + "\n\n---\n\n## Active skill: " + invoked_skill_id + "\n\n" + full
+        if invoked_skill_id:
+            dirs = self._get_skills_dirs()
+            full = get_skill_full_content(invoked_skill_id, dirs)
+            if full:
+                prompt = prompt + "\n\n---\n\n## Active skill: " + invoked_skill_id + "\n\n" + full
+        if self._plan_mode:
+            prompt = prompt + self._get_plan_mode_prompt_suffix()
+        return prompt
+
+    def _wrap_tool_with_hooks(self, name: str, execute_fn):
+        """Wrap execute_fn with tool.execute.before / after hooks if HookRunner is present."""
+        runner = getattr(self.extension_loader, "hook_runner", None)
+        if runner is None:
+            return execute_fn
+        return _wrap_tool_execute_with_hooks(
+            name,
+            execute_fn,
+            runner,
+            get_cwd=lambda: Path.cwd(),
+        )
 
     def _register_tools(self) -> None:
-        """Register all built-in tools with the agent."""
+        """Register all built-in tools with the agent. In plan mode, write/edit/bash/todo_write are no-ops."""
+        get_plan = lambda: self._plan_mode
         for tool in BUILT_IN_TOOLS:
+            name = tool["name"]
+            fn = tool["execute_fn"]
+            fn = self._wrap_tool_with_hooks(name, fn)
+            if name in PLAN_MODE_FORBIDDEN_TOOLS:
+                fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
             self.agent.register_tool(
-                name=tool["name"],
+                name=name,
                 description=tool["description"],
                 parameters=tool["parameters"],
-                execute_fn=tool["execute_fn"],
+                execute_fn=fn,
             )
         # Skill tool: dynamic description with available_skills
         include = self.settings.skills_include or None
         if include is not None and len(self.settings.skills_include) == 0:
             include = None
         skill_tool = create_skill_tool(self._get_skills_dirs, include)
+        fn = self._wrap_tool_with_hooks(skill_tool["name"], skill_tool["execute_fn"])
         self.agent.register_tool(
             name=skill_tool["name"],
             description=skill_tool["description"],
             parameters=skill_tool["parameters"],
-            execute_fn=skill_tool["execute_fn"],
+            execute_fn=fn,
         )
         # Task tool: delegate to subagents (only when at least one subagent is configured)
         configs = self._get_subagent_configs()
         if configs:
             task_tool = create_task_tool(self)
+            fn = self._wrap_tool_with_hooks(task_tool["name"], task_tool["execute_fn"])
             self.agent.register_tool(
                 name=task_tool["name"],
                 description=task_tool["description"],
                 parameters=task_tool["parameters"],
-                execute_fn=task_tool["execute_fn"],
+                execute_fn=fn,
             )
         # Web Search: duckduckgo by default; Serper when web_search_provider=serper and key set
         web_search_tool = create_web_search_tool(self.settings)
+        fn = self._wrap_tool_with_hooks(web_search_tool["name"], web_search_tool["execute_fn"])
         self.agent.register_tool(
             name=web_search_tool["name"],
             description=web_search_tool["description"],
             parameters=web_search_tool["parameters"],
-            execute_fn=web_search_tool["execute_fn"],
+            execute_fn=fn,
+        )
+        # TodoWrite: session task list (replaced in full on each call)
+        todo_tool = create_todo_write_tool(self)
+        todo_fn = todo_tool["execute_fn"]
+        todo_fn = self._wrap_tool_with_hooks(todo_tool["name"], todo_fn)
+        if "todo_write" in PLAN_MODE_FORBIDDEN_TOOLS:
+            todo_fn = _wrap_execute_fn_for_plan_mode(todo_fn, get_plan)
+        self.agent.register_tool(
+            name=todo_tool["name"],
+            description=todo_tool["description"],
+            parameters=todo_tool["parameters"],
+            execute_fn=todo_fn,
+        )
+        # AskUserQuestion: ask user; answer comes in next message (session resume)
+        ask_tool = create_ask_user_question_tool(self)
+        fn = self._wrap_tool_with_hooks(ask_tool["name"], ask_tool["execute_fn"])
+        self.agent.register_tool(
+            name=ask_tool["name"],
+            description=ask_tool["description"],
+            parameters=ask_tool["parameters"],
+            execute_fn=fn,
         )
 
     def _setup_event_handlers(self) -> None:
@@ -269,15 +469,65 @@ Always explain what you're doing before using tools.
             if delta:
                 print(delta, end="", flush=True)
 
-        def on_tool_call_start(event):
+        async def on_tool_call_start(event):
             """Handle tool call start events."""
+            tool_name = event.get("tool_name", "unknown")
+            logger.info("Tool call start: %s", tool_name)
+            args = event.get("arguments", {})
+            if args:
+                args_str = str(args)
+                logger.debug("Tool call args: %s", args_str[:500] + "..." if len(args_str) > 500 else args_str)
             if self.settings.agent.verbose:
                 print(f"\n[Tool: {event['tool_name']}]", flush=True)
+            if tool_name == "ask_user_question":
+                tool_call_id = event.get("tool_call_id") or ""
+                if tool_call_id:
+                    question = (args or {}).get("question", "")
+                    options = (args or {}).get("options") if isinstance((args or {}).get("options"), list) else []
+                    entry = {
+                        "tool_call_id": tool_call_id,
+                        "question": question,
+                        "options": options or [],
+                    }
+                    self._pending_asks.append(entry)
+                    if self._session_id:
+                        await self.session_manager.save_pending_asks(
+                            self._session_id, self._pending_asks
+                        )
+                    q = entry.get("question", "") or "Question"
+                    if len(q) > 60:
+                        q = q[:57] + "..."
+                    n = len(self._pending_asks)
+                    print(
+                        f"\n[Ask: {q}] Reply in your next message"
+                        + (f" ({n} pending)" if n > 1 else ""),
+                        flush=True,
+                    )
 
-        def on_tool_call_end(event):
+        async def on_tool_call_end(event):
             """Handle tool call end events."""
-            if event.get("error"):
+            tool_name = event.get("tool_name", "unknown")
+            err = event.get("error")
+            logger.info("Tool call end: %s error=%s", tool_name, bool(err))
+            if not err and event.get("result") is not None:
+                result_str = str(event.get("result", ""))
+                logger.debug("Tool call result: %s", result_str[:500] + "..." if len(result_str) > 500 else result_str)
+            if err:
                 print(f"[Error: {event['error']}]", flush=True)
+                if tool_name == "ask_user_question":
+                    tid = event.get("tool_call_id")
+                    if tid:
+                        self._pending_asks = [p for p in self._pending_asks if p.get("tool_call_id") != tid]
+                        if self._session_id:
+                            await self.session_manager.save_pending_asks(
+                                self._session_id, self._pending_asks
+                            )
+            elif tool_name == "todo_write" and self._current_todos:
+                in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
+                if in_progress and self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items; in progress: {in_progress[0].get('content', '')[:50]!r}]", flush=True)
+                elif self.settings.agent.verbose:
+                    print(f"\n[Todo: {len(self._current_todos)} items]", flush=True)
 
         self.agent.on("text_delta", on_text_delta)
         self.agent.on("agent_tool_call_start", on_tool_call_start)
@@ -313,10 +563,8 @@ Always explain what you're doing before using tools.
         self, stream_llm_events: bool = True, invoked_skill_id: Optional[str] = None
     ):
         """Run agent; if trajectory_dir is set, record trajectory and write to disk."""
-        old_system = None
-        if invoked_skill_id:
-            old_system = self.context.systemPrompt
-            self.context.systemPrompt = self.get_system_prompt_for_run(invoked_skill_id)
+        old_system = self.context.system_prompt
+        self.context.system_prompt = self.get_system_prompt_for_run(invoked_skill_id)
         try:
             trajectory_dir = self._get_trajectory_dir()
             if not trajectory_dir:
@@ -354,8 +602,7 @@ Always explain what you're doing before using tools.
 
             return state
         finally:
-            if old_system is not None:
-                self.context.systemPrompt = old_system
+            self.context.system_prompt = old_system
 
     async def run_interactive(self) -> None:
         """
@@ -363,12 +610,21 @@ Always explain what you're doing before using tools.
 
         Continuously prompts for user input and runs the agent.
         """
+        if self._session_id is None:
+            session_id = await self.session_manager.create_session(self.model.id)
+            await self.set_session_id(session_id)
+
         print("Basket - Interactive Mode")
         print("Type 'exit' or 'quit' to quit, 'help' for help")
         print("-" * 50)
 
         while True:
             try:
+                # Todo region above prompt
+                if self._current_todos:
+                    block = self._format_todo_block()
+                    if block:
+                        print(block, flush=True)
                 # Get user input
                 user_input = input("\n> ").strip()
 
@@ -387,6 +643,60 @@ Always explain what you're doing before using tools.
                 if user_input.lower() == "settings":
                     self._print_settings()
                     continue
+
+                if user_input.lower() == "/todos":
+                    self._todo_show_full = not self._todo_show_full
+                    print(f"Todo list: {'full' if self._todo_show_full else 'compact'}", flush=True)
+                    continue
+
+                if user_input.strip().lower() in ("/plan", "/plan on", "/plan off"):
+                    on = user_input.strip().lower() != "/plan off"
+                    self.set_plan_mode(on)
+                    print(f"Plan mode {'on' if on else 'off'}", flush=True)
+                    continue
+
+                if user_input.strip().lower() == "/sessions":
+                    sessions = await self.session_manager.list_sessions()
+                    if not sessions:
+                        print("No sessions yet.")
+                    else:
+                        for m in sessions:
+                            print(
+                                f"  {m.session_id}  created={m.created_at}  model={m.model_id}  messages={m.total_messages}"
+                            )
+                    continue
+
+                if user_input.strip().lower().startswith("/open "):
+                    session_id = user_input.split(maxsplit=1)[1].strip()
+                    if not session_id:
+                        print("Usage: /open <session_id>")
+                        continue
+                    sessions = await self.session_manager.list_sessions()
+                    if not any(s.session_id == session_id for s in sessions):
+                        print(f"Session not found: {session_id}")
+                        continue
+                    await self.set_session_id(session_id, load_history=True)
+                    n = len(self.context.messages)
+                    print(
+                        f"Switched to session {session_id}, loaded {n} messages.",
+                        flush=True,
+                    )
+                    continue
+
+                # Pending ask_user_question: treat this input as the answer (FIFO)
+                if self._pending_asks:
+                    print()  # newline before agent output
+                    try:
+                        resumed = await self.try_resume_pending_ask(
+                            user_input, stream_llm_events=True
+                        )
+                        if resumed:
+                            print()  # newline after agent output
+                            continue
+                    except Exception as resume_err:
+                        logger.exception("Resume pending ask failed")
+                        print(f"\n❌ Error: {resume_err}", flush=True)
+                        continue
 
                 invoked_skill_id: Optional[str] = None
                 message_content = user_input
@@ -417,6 +727,9 @@ Always explain what you're doing before using tools.
                             print(f"Available commands: {', '.join(available)}")
                         continue
 
+                # Record message count before appending (for persisting new messages after run)
+                n_before = len(self.context.messages)
+
                 # Add user message to context
                 self.context.messages.append(
                     UserMessage(
@@ -435,6 +748,13 @@ Always explain what you're doing before using tools.
                     await self._run_with_trajectory_if_enabled(
                         stream_llm_events=True, invoked_skill_id=invoked_skill_id
                     )
+                    # Persist new messages to session
+                    if self._session_id:
+                        new_messages = self.context.messages[n_before:]
+                        if new_messages:
+                            await self.session_manager.append_messages(
+                                self._session_id, new_messages
+                            )
                 except Exception as agent_error:
                     logger.exception("Agent run failed")
                     # Restore context on agent failure
@@ -486,12 +806,36 @@ Always explain what you're doing before using tools.
 
         return ""
 
+    def _format_todo_block(self) -> str:
+        """Format _current_todos for CLI display above prompt. Compact: one line; full: one line per item with icon."""
+        if not self._current_todos:
+            return ""
+        total = len(self._current_todos)
+        done = sum(1 for t in self._current_todos if t.get("status") == "completed")
+        in_progress = [t for t in self._current_todos if t.get("status") == "in_progress"]
+        if self._todo_show_full:
+            icons = {"completed": "✓", "pending": "○", "in_progress": "→", "cancelled": "✗"}
+            lines = []
+            for t in self._current_todos:
+                icon = icons.get(t.get("status", "pending"), "○")
+                content = (t.get("content") or "").strip()
+                lines.append(f"  {icon} {content}")
+            return "\n".join(lines)
+        if in_progress:
+            content = (in_progress[0].get("content") or "").strip()
+            return f"[Todo {done}/{total}] → {content}"
+        return f"[Todo {total} items]"
+
     def _print_help(self) -> None:
         """Print help information."""
         print("""
 Available commands:
   help      - Show this help message
   settings  - Show current settings
+  /todos    - Toggle full/compact todo list above prompt
+  /plan     - Toggle plan mode (read-only analysis and planning); /plan on, /plan off
+  /sessions - List all sessions (id, created_at, model, message count)
+  /open <session_id> - Switch to a session and load its history
   exit/quit - Exit the program
   /skill <id> - Load full instructions for a skill for this turn (e.g. /skill refactor)
 
@@ -535,11 +879,18 @@ async def main_async(args: Optional[list] = None) -> int:
     if args is None:
         args = sys.argv[1:]
 
-    # Configure logging: default write to ~/.basket/logs/ (INFO); LOG_LEVEL overrides level
+    # Parse --debug early so we can enable DEBUG logging before other logic
+    use_debug = "--debug" in args
+    if use_debug:
+        args = [a for a in args if a != "--debug"]
+
+    # Configure logging: default write to ~/.basket/logs/ (INFO); --debug or LOG_LEVEL overrides level
     fmt = "%(asctime)s %(name)s: %(levelname)s: %(message)s"
     log_level_name = (os.environ.get("LOG_LEVEL") or "").upper()
     level = logging.INFO
-    if log_level_name:
+    if use_debug:
+        level = logging.DEBUG
+    elif log_level_name:
         level = getattr(logging, log_level_name, level) or level
     log_dir = Path.home() / ".basket" / "logs"
     try:
@@ -553,6 +904,7 @@ async def main_async(args: Optional[list] = None) -> int:
         root.addHandler(file_handler)
         for name in ("basket_tui.app", "basket_assistant.modes.tui"):
             logging.getLogger(name).setLevel(level)
+        logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
         logger.info("Log file: %s", log_file)
     except OSError as e:
         logger.debug("Could not create log file: %s", e)
@@ -561,6 +913,25 @@ async def main_async(args: Optional[list] = None) -> int:
     use_tui = "--tui" in args
     if use_tui:
         args = [a for a in args if a != "--tui"]
+
+    use_plan_mode = "--plan" in args
+    if use_plan_mode:
+        args = [a for a in args if a != "--plan"]
+
+    session_id_arg: Optional[str] = None
+    if "--session" in args:
+        i = args.index("--session")
+        if i + 1 < len(args):
+            session_id_arg = args[i + 1]
+            args = args[:i] + args[i + 2:]
+        else:
+            args = [a for a in args if a != "--session"]
+
+    if "--permission-mode" in args:
+        i = args.index("--permission-mode")
+        if i + 1 < len(args) and args[i + 1] == "plan":
+            use_plan_mode = True
+        args = args[:i] + args[i + 2:] if i + 1 < len(args) else args[:i]
 
     use_remote = "--remote" in args
     if use_remote:
@@ -592,14 +963,18 @@ Basket - AI-powered personal assistant
 Usage:
   basket                 - Start interactive mode
   basket --tui           - Start TUI mode (terminal UI)
+  basket --session <id> - Start with session loaded (use with interactive or --tui)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
+  basket --plan          - Run in plan mode (read-only; same as --permission-mode plan)
   basket serve start     - Start resident assistant (gateway)
   basket serve stop      - Stop resident assistant
   basket serve status    - Show assistant status
   basket serve attach    - Attach TUI to running assistant
+  basket relay [url]      - Connect to relay (outbound only); url from settings.json relay_url or arg
   basket --help          - Show this help
   basket --version       - Show version
+  basket --debug         - Enable DEBUG logging (to log file only)
 
 Interactive mode commands:
   help      - Show help
@@ -610,6 +985,7 @@ Environment variables:
   OPENAI_API_KEY        - OpenAI API key
   ANTHROPIC_API_KEY     - Anthropic API key
   GOOGLE_API_KEY        - Google API key
+  LOG_LEVEL             - Log level (e.g. DEBUG); overridden by --debug
   BASKET_REMOTE_BIND    - Bind address for --remote (default: 0.0.0.0)
   BASKET_REMOTE_PORT    - Port for --remote (default: 7681)
   BASKET_SERVE_PORT     - Port for resident assistant (default: 7682)
@@ -777,6 +1153,28 @@ Environment variables:
             return 1
         return 0
 
+    # Relay mode: outbound-only, no local port
+    if len(args) >= 1 and args[0] == "relay":
+        relay_url = args[1] if len(args) >= 2 else None
+        if not relay_url:
+            _settings = SettingsManager().load()
+            relay_url = getattr(_settings, "relay_url", None) or (
+                (_settings.serve or {}).get("relay_url") if _settings.serve else None
+            )
+        if not relay_url:
+            print("Usage: basket relay <relay_url>  (or set relay_url in ~/.basket/settings.json)")
+            print("Example: basket relay wss://your-vps:7683/relay/agent")
+            return 1
+        try:
+            from .modes.relay_client import run_relay_client
+        except ImportError as e:
+            logger.warning("relay_client import failed: %s", e)
+            print("Error: basket relay requires 'websockets' package.")
+            print("Install with: poetry add websockets")
+            return 1
+        await run_relay_client(relay_url)
+        return 0
+
     # Create agent
     try:
         agent = CodingAgent()
@@ -784,6 +1182,16 @@ Environment variables:
         logger.exception("Failed to initialize agent")
         print(f"Error initializing agent: {e}")
         return 1
+
+    if use_plan_mode:
+        agent.set_plan_mode(True)
+
+    if session_id_arg:
+        sessions = await agent.session_manager.list_sessions()
+        if not any(s.session_id == session_id_arg for s in sessions):
+            print(f"Session not found: {session_id_arg}")
+            return 1
+        await agent.set_session_id(session_id_arg, load_history=True)
 
     # Run mode
     if len(args) == 0:

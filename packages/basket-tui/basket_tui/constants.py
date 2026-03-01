@@ -8,6 +8,8 @@ and message prefixes/emojis used throughout the application.
 # CSS Selector IDs
 OUTPUT_CONTAINER_ID = "output-container"
 OUTPUT_ID = "output"
+TODO_PANEL_ID = "todo-panel"
+PLAN_MODE_PANEL_ID = "plan-mode-panel"
 INPUT_ID = "input"
 
 # CSS Classes
