@@ -18,6 +18,7 @@ from basket_ai.types import Context, TextContent, UserMessage
 
 from .core import SettingsManager, SessionManager, SubAgentConfig, load_agents_from_dirs
 from .extensions import ExtensionLoader
+from .extensions.api import _wrap_tool_execute_with_hooks
 from .core import get_skill_full_content, get_skills_index
 from .tools import (
     BUILT_IN_TOOLS,
@@ -117,18 +118,18 @@ class CodingAgent:
         # Pending asks (ask_user_question): list of {tool_call_id, question, options}
         self._pending_asks: List[dict] = []
 
-        # Register tools
-        self._register_tools()
-
         # Setup event handlers
         self._setup_event_handlers()
 
-        # Load extensions
+        # Load extensions (and HookRunner from hooks.json / settings.hooks)
         self.extension_loader = ExtensionLoader(self)
         if load_extensions:
             num_loaded = self.extension_loader.load_default_extensions()
             if num_loaded > 0:
                 print(f"📦 Loaded {num_loaded} extension(s)")
+
+        # Register tools (after extensions so built-in tools use same hook wrapper)
+        self._register_tools()
 
     async def set_session_id(
         self, session_id: Optional[str], load_history: bool = True
@@ -158,6 +159,18 @@ class CodingAgent:
                     "Session set (no history load): session_id=%s, context.messages=%d",
                     session_id,
                     len(self.context.messages),
+                )
+            # Run session.created hooks (subprocess; language-agnostic)
+            hook_runner = getattr(self.extension_loader, "hook_runner", None)
+            if hook_runner is not None:
+                await hook_runner.run(
+                    "session.created",
+                    {
+                        "session_id": session_id,
+                        "directory": str(Path.cwd()),
+                        "workspace_roots": [str(Path.cwd())],
+                    },
+                    cwd=Path.cwd(),
                 )
         else:
             self._current_todos = []
@@ -366,12 +379,25 @@ Your response must include:
             prompt = prompt + self._get_plan_mode_prompt_suffix()
         return prompt
 
+    def _wrap_tool_with_hooks(self, name: str, execute_fn):
+        """Wrap execute_fn with tool.execute.before / after hooks if HookRunner is present."""
+        runner = getattr(self.extension_loader, "hook_runner", None)
+        if runner is None:
+            return execute_fn
+        return _wrap_tool_execute_with_hooks(
+            name,
+            execute_fn,
+            runner,
+            get_cwd=lambda: Path.cwd(),
+        )
+
     def _register_tools(self) -> None:
         """Register all built-in tools with the agent. In plan mode, write/edit/bash/todo_write are no-ops."""
         get_plan = lambda: self._plan_mode
         for tool in BUILT_IN_TOOLS:
             name = tool["name"]
             fn = tool["execute_fn"]
+            fn = self._wrap_tool_with_hooks(name, fn)
             if name in PLAN_MODE_FORBIDDEN_TOOLS:
                 fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
             self.agent.register_tool(
@@ -385,33 +411,37 @@ Your response must include:
         if include is not None and len(self.settings.skills_include) == 0:
             include = None
         skill_tool = create_skill_tool(self._get_skills_dirs, include)
+        fn = self._wrap_tool_with_hooks(skill_tool["name"], skill_tool["execute_fn"])
         self.agent.register_tool(
             name=skill_tool["name"],
             description=skill_tool["description"],
             parameters=skill_tool["parameters"],
-            execute_fn=skill_tool["execute_fn"],
+            execute_fn=fn,
         )
         # Task tool: delegate to subagents (only when at least one subagent is configured)
         configs = self._get_subagent_configs()
         if configs:
             task_tool = create_task_tool(self)
+            fn = self._wrap_tool_with_hooks(task_tool["name"], task_tool["execute_fn"])
             self.agent.register_tool(
                 name=task_tool["name"],
                 description=task_tool["description"],
                 parameters=task_tool["parameters"],
-                execute_fn=task_tool["execute_fn"],
+                execute_fn=fn,
             )
         # Web Search: duckduckgo by default; Serper when web_search_provider=serper and key set
         web_search_tool = create_web_search_tool(self.settings)
+        fn = self._wrap_tool_with_hooks(web_search_tool["name"], web_search_tool["execute_fn"])
         self.agent.register_tool(
             name=web_search_tool["name"],
             description=web_search_tool["description"],
             parameters=web_search_tool["parameters"],
-            execute_fn=web_search_tool["execute_fn"],
+            execute_fn=fn,
         )
         # TodoWrite: session task list (replaced in full on each call)
         todo_tool = create_todo_write_tool(self)
         todo_fn = todo_tool["execute_fn"]
+        todo_fn = self._wrap_tool_with_hooks(todo_tool["name"], todo_fn)
         if "todo_write" in PLAN_MODE_FORBIDDEN_TOOLS:
             todo_fn = _wrap_execute_fn_for_plan_mode(todo_fn, get_plan)
         self.agent.register_tool(
@@ -422,11 +452,12 @@ Your response must include:
         )
         # AskUserQuestion: ask user; answer comes in next message (session resume)
         ask_tool = create_ask_user_question_tool(self)
+        fn = self._wrap_tool_with_hooks(ask_tool["name"], ask_tool["execute_fn"])
         self.agent.register_tool(
             name=ask_tool["name"],
             description=ask_tool["description"],
             parameters=ask_tool["parameters"],
-            execute_fn=ask_tool["execute_fn"],
+            execute_fn=fn,
         )
 
     def _setup_event_handlers(self) -> None:
@@ -940,6 +971,7 @@ Usage:
   basket serve stop      - Stop resident assistant
   basket serve status    - Show assistant status
   basket serve attach    - Attach TUI to running assistant
+  basket relay [url]      - Connect to relay (outbound only); url from settings.json relay_url or arg
   basket --help          - Show this help
   basket --version       - Show version
   basket --debug         - Enable DEBUG logging (to log file only)
@@ -1119,6 +1151,28 @@ Environment variables:
         except RuntimeError as e:
             print(f"Error: {e}")
             return 1
+        return 0
+
+    # Relay mode: outbound-only, no local port
+    if len(args) >= 1 and args[0] == "relay":
+        relay_url = args[1] if len(args) >= 2 else None
+        if not relay_url:
+            _settings = SettingsManager().load()
+            relay_url = getattr(_settings, "relay_url", None) or (
+                (_settings.serve or {}).get("relay_url") if _settings.serve else None
+            )
+        if not relay_url:
+            print("Usage: basket relay <relay_url>  (or set relay_url in ~/.basket/settings.json)")
+            print("Example: basket relay wss://your-vps:7683/relay/agent")
+            return 1
+        try:
+            from .modes.relay_client import run_relay_client
+        except ImportError as e:
+            logger.warning("relay_client import failed: %s", e)
+            print("Error: basket relay requires 'websockets' package.")
+            print("Install with: poetry add websockets")
+            return 1
+        await run_relay_client(relay_url)
         return 0
 
     # Create agent

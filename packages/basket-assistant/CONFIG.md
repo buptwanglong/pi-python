@@ -46,6 +46,53 @@ API Key 可通过 `api_keys` 写入配置，或使用环境变量：`ANTHROPIC_A
 
 复制 `settings.json.example` 到 `~/.basket/settings.json` 后按需修改。
 
+## Hooks（子进程式，语言无关）
+
+Hooks 在工具执行前后、会话创建等节点以 **子进程** 方式运行，stdin 收一行 JSON、stdout 回一行 JSON，与实现语言无关（bash/Python/Go 等均可）。
+
+### 配置位置与优先级
+
+1. **独立文件**：项目 `./.basket/hooks.json`、用户 `~/.basket/hooks.json`（先项目后用户，同事件多定义按顺序执行）。
+2. **settings.json**：可选 `hooks` 段（与文件合并，缺项用 settings 补）。
+
+### hooks.json 格式
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "tool.execute.before": [
+      {
+        "command": "~/.basket/hooks/block_env_read.sh",
+        "timeout": 10,
+        "matcher": "read"
+      }
+    ],
+    "tool.execute.after": [
+      { "command": "python ~/.basket/hooks/audit.py", "timeout": 5 }
+    ],
+    "session.created": [
+      { "command": "~/.basket/hooks/session_init.sh", "timeout": 5 }
+    ]
+  }
+}
+```
+
+- **command**（必填）：要执行的命令或脚本路径；路径中的 `~` 会展开。
+- **timeout**（可选）：超时秒数，默认 30；超时视为拒绝（deny）。
+- **matcher**（可选）：仅当匹配时执行。对 `tool.execute.before`/`after` 为工具名或正则（对 `bash` 工具还会匹配命令字符串）。
+
+### 子进程协议
+
+- **输入**：Runner 向 stdin 写入一行 JSON，包含 `hook_event_name`、`cwd` 及事件专属字段（如 `tool_name`、`arguments`、`session_id` 等）。
+- **输出**：脚本向 stdout 写入一行 JSON。`tool.execute.before` 可返回：
+  - `permission`: `"allow"` | `"deny"` | `"ask"`；
+  - `reason`：拒绝时给 agent 的说明；
+  - `modified_arguments`：若允许但需改参，提供新的 arguments 对象。
+- **退出码**：`0` 正常；`2` 表示拒绝（等价于 `permission: "deny"`）。
+
+详见 `docs/hooks_protocol.md`（如有）。
+
 ## Skills（技能）
 
 采用 OpenCode/Claude 式布局：**每技能一个目录，目录内放 `SKILL.md`**。与 OpenCode、Claude Code 共用同一套目录即可复用技能。
@@ -94,6 +141,17 @@ API Key 可通过 `api_keys` 写入配置，或使用环境变量：`ANTHROPIC_A
 - 也可用环境变量 `DINGTALK_CLIENT_ID`、`DINGTALK_CLIENT_SECRET` 覆盖或补全。
 - 需在钉钉开放平台创建应用并开通机器人、Stream 模式能力；单聊直接发消息即可，群聊需 AT 机器人。
 - 需安装可选依赖：`pip install basket-gateway[dingtalk]`（即 dingtalk-stream）。
+
+## Relay（中继，本机不开放端口）
+
+使用自建消息中继时，可在 `settings.json` 中配置 **`relay_url`**，则运行 `basket relay` 时无需再写 URL（命令行参数仍可覆盖配置）：
+
+```json
+"relay_url": "wss://your-vps:7683/relay/agent"
+```
+
+- 不配置或为空时，需执行 `basket relay <relay_url>` 显式传入地址。
+- 也可写在 `serve.relay_url`，与顶层 `relay_url` 二选一即可。
 
 ## SubAgent 与 Task 工具
 
