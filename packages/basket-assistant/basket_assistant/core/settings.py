@@ -70,6 +70,10 @@ class Settings(BaseModel):
     web_search_provider: Optional[str] = None
     # Opaque channel config for basket serve; schema owned by basket-gateway/channels, assistant only passes through
     serve: Optional[Dict[str, Any]] = None
+    # Relay (outbound-only): agent URL for "basket relay"; e.g. wss://your-vps:7683/relay/agent
+    relay_url: Optional[str] = None
+    # Hooks: subprocess-based (see docs). event_name -> list of {command, timeout?, matcher?}
+    hooks: Optional[Dict[str, List[Dict[str, Any]]]] = None
     custom: Dict[str, Any] = Field(default_factory=dict)
 
 

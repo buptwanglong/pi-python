@@ -2,10 +2,70 @@
 Extension API for Pi Coding Agent
 
 Provides a clean API for extensions to register tools, commands, and event handlers.
+Tools registered via register_tool are wrapped with hook execution (tool.execute.before / after).
 """
 
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel
+
+from .hook_runner import HookRunner
+
+
+def _wrap_tool_execute_with_hooks(
+    tool_name: str,
+    execute_fn: Callable,
+    hook_runner: HookRunner,
+    get_cwd: Callable[[], Path],
+) -> Callable:
+    """Wrap an execute_fn to run tool.execute.before and tool.execute.after hooks (subprocess)."""
+
+    async def wrapped(**kwargs: Any) -> Any:
+        input_before = {
+            "tool_name": tool_name,
+            "tool_call_id": "",
+            "arguments": dict(kwargs),
+            "cwd": str(get_cwd()),
+        }
+        output_before: Dict[str, Any] = {"modified_arguments": None}
+        result_before = await hook_runner.run(
+            "tool.execute.before",
+            input_before,
+            output=output_before,
+            cwd=get_cwd(),
+        )
+        if result_before.get("permission") == "deny":
+            reason = result_before.get("reason") or "Blocked by hook."
+            return f"Error: {reason}"
+        args = output_before.get("modified_arguments") or kwargs
+        if not isinstance(args, dict):
+            args = kwargs
+        exc_raised: Optional[BaseException] = None
+        try:
+            result = await execute_fn(**args)
+            error_msg = None
+        except Exception as e:
+            result = None
+            error_msg = str(e)
+            exc_raised = e
+        input_after = {
+            "tool_name": tool_name,
+            "tool_call_id": "",
+            "arguments": args,
+            "result": result,
+            "error": error_msg,
+            "cwd": str(get_cwd()),
+        }
+        await hook_runner.run(
+            "tool.execute.after",
+            input_after,
+            cwd=get_cwd(),
+        )
+        if exc_raised is not None:
+            raise exc_raised
+        return result
+
+    return wrapped
 
 
 class ExtensionAPI:
@@ -19,14 +79,16 @@ class ExtensionAPI:
     - Access agent context and settings
     """
 
-    def __init__(self, agent):
+    def __init__(self, agent, hook_runner: Optional[HookRunner] = None):
         """
         Initialize the extension API.
 
         Args:
             agent: The CodingAgent instance
+            hook_runner: Optional HookRunner for wrapping tool execution with before/after hooks
         """
         self._agent = agent
+        self._hook_runner = hook_runner
         self._commands: Dict[str, Callable] = {}
         self._event_handlers: Dict[str, List[Callable]] = {}
 
@@ -55,12 +117,19 @@ class ExtensionAPI:
         """
 
         def decorator(func: Callable):
-            # Register with the agent
+            execute_fn = func
+            if self._hook_runner is not None:
+                execute_fn = _wrap_tool_execute_with_hooks(
+                    name,
+                    func,
+                    self._hook_runner,
+                    get_cwd=lambda: Path.cwd(),
+                )
             self._agent.agent.register_tool(
                 name=name,
                 description=description,
                 parameters=parameters,
-                execute_fn=func,
+                execute_fn=execute_fn,
             )
             return func
 
