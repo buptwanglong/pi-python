@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "basket-relay"
+version = "0.1.0"
+description = "Message relay server for basket assistant (no local port; outbound-only agent)"
+authors = ["Pi Python Team"]
+readme = "README.md"
+packages = [{include = "basket_relay"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+starlette = "^0.37.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
