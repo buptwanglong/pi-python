@@ -85,6 +85,16 @@ Manage project-specific knowledge:
 /context-clear
 ```
 
+### 5. Memory (`memory_extension.py`)
+Pluggable long-term memory via basket-memory: injects relevant memories before each run and adds new messages after each turn. Memory is **not** isolated by session: by default all conversations share the namespace `"default"`. Optionally set `memory_namespace` in config to use a custom namespace.
+
+**Config** (in `settings.json` under `custom.memory`):
+- `backends`: list of backend configs (e.g. `[{"provider": "basket"}]`).
+- `max_search_results`: max items to inject (default 10).
+- `memory_namespace`: optional; when set, use this string as the namespace; when unset, use `"default"`.
+
+**Usage:** Install basket-memory and configure backends; then say e.g. "I like apples" in one conversation and "What do I like?" in another—the assistant should recall apples.
+
 ## Creating Your Own Extension
 
 ### Basic Structure

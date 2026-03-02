@@ -200,6 +200,14 @@ class HookRunner:
 
         defs = self._hooks.get(hook_name, [])
         run_cwd = Path(cwd) if cwd else self._project_root
+        matched = [d for d in defs if d.matches(hook_name, input_data)]
+        if defs:
+            logger.info(
+                "hook run event=%s defs=%d matched=%d",
+                hook_name,
+                len(defs),
+                len(matched),
+            )
 
         # Ensure input is JSON-serializable (Path -> str, Pydantic -> dict, etc.)
         input_copy = _to_json_safe(input_data)
@@ -211,6 +219,7 @@ class HookRunner:
         for hook_def in defs:
             if not hook_def.matches(hook_name, input_data):
                 continue
+            logger.info("hook exec event=%s command=%s", hook_name, hook_def.command)
             try:
                 out_json, exit_code = await self._run_one(
                     hook_def, input_json, run_cwd
@@ -229,6 +238,11 @@ class HookRunner:
             if exit_code == HOOK_EXIT_DENY:
                 result["permission"] = "deny"
                 result["reason"] = (out_json or {}).get("reason") or "Hook returned deny (exit 2)."
+                logger.info(
+                    "hook result event=%s permission=deny reason=%s",
+                    hook_name,
+                    result["reason"],
+                )
                 return result
 
             if out_json:
@@ -236,12 +250,19 @@ class HookRunner:
                 if perm == "deny":
                     result["permission"] = "deny"
                     result["reason"] = out_json.get("reason") or "Hook returned permission deny."
+                    logger.info(
+                        "hook result event=%s permission=deny reason=%s",
+                        hook_name,
+                        result["reason"],
+                    )
                     return result
                 if out_json.get("modified_arguments") is not None:
                     result["modified_arguments"] = out_json["modified_arguments"]
                     if output is not None:
                         output["modified_arguments"] = out_json["modified_arguments"]
 
+        if defs:
+            logger.info("hook result event=%s permission=allow", hook_name)
         return result
 
     async def _run_one(

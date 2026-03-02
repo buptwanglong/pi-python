@@ -6,7 +6,7 @@ This example demonstrates how to use the TUI mode with the coding agent.
 
 import asyncio
 import os
-from basket_assistant.main import CodingAgent
+from basket_assistant.agent import CodingAgent
 
 
 async def main():
