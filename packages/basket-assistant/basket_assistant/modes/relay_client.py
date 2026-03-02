@@ -25,7 +25,7 @@ async def run_relay_client(relay_url: str) -> None:
 
     from basket_gateway.gateway import AgentGateway
 
-    from ..main import CodingAgent
+    from ..agent import CodingAgent
 
     agent = CodingAgent()
     gateway = AgentGateway(agent_factory=lambda: agent)

@@ -174,8 +174,13 @@ class ExtensionAPI:
                 self._event_handlers[event_name] = []
             self._event_handlers[event_name].append(func)
 
-            # Register with agent
-            self._agent.agent.on(event_name, func)
+            # Assistant-level events: register on CodingAgent, not basket_agent
+            if event_name in ("before_run", "turn_done"):
+                if event_name not in self._agent._assistant_event_handlers:
+                    self._agent._assistant_event_handlers[event_name] = []
+                self._agent._assistant_event_handlers[event_name].append(func)
+            else:
+                self._agent.agent.on(event_name, func)
 
             return func
 
