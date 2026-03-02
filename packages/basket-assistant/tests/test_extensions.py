@@ -21,6 +21,7 @@ class MockCodingAgent:
         self.agent.context = Mock()
         self.settings = Mock()
         self.session_manager = Mock()
+        self._assistant_event_handlers = {}
 
 
 def test_extension_api_init():
@@ -118,6 +119,46 @@ def test_extension_api_register_event():
 
     # Verify event handler was registered with agent
     agent.agent.on.assert_called_once_with("test_event", test_handler)
+
+
+def test_extension_api_register_assistant_events_before_run_turn_done():
+    """before_run and turn_done register on _assistant_event_handlers, not agent.agent.on."""
+    agent = MockCodingAgent()
+    api = ExtensionAPI(agent)
+
+    @api.on("before_run")
+    async def on_before_run(event):
+        pass
+
+    @api.on("turn_done")
+    async def on_turn_done(event):
+        pass
+
+    assert "before_run" in agent._assistant_event_handlers
+    assert "turn_done" in agent._assistant_event_handlers
+    assert on_before_run in agent._assistant_event_handlers["before_run"]
+    assert on_turn_done in agent._assistant_event_handlers["turn_done"]
+    # Agent.agent.on should not have been called for these (only for other events)
+    assert agent.agent.on.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_emit_assistant_event_calls_handlers():
+    """emit_assistant_event invokes registered handlers with payload."""
+    from basket_assistant.agent import CodingAgent
+    from basket_assistant.core import SettingsManager
+
+    settings_manager = SettingsManager()
+    agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+    received = []
+
+    async def handler(payload):
+        received.append(payload)
+
+    agent._assistant_event_handlers["test_event"] = [handler]
+    await agent.emit_assistant_event("test_event", {"key": "value"})
+    assert len(received) == 1
+    assert received[0] == {"key": "value"}
 
 
 def test_extension_api_get_context():

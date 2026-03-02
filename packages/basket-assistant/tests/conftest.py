@@ -12,7 +12,7 @@ import pytest
 from basket_agent import Agent
 from basket_ai.types import AssistantMessage, Context, TextContent, ToolCall
 
-from basket_assistant.main import CodingAgent
+from basket_assistant.agent import CodingAgent
 from basket_assistant.core import SettingsManager
 
 

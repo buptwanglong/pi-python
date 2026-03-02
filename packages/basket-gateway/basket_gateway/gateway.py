@@ -244,6 +244,21 @@ class AgentGateway:
                 new_messages = agent.context.messages[n_before:]
                 if new_messages:
                     await session_manager.append_messages(session_id, new_messages)
+                    if hasattr(agent, "emit_assistant_event") and asyncio.iscoroutinefunction(agent.emit_assistant_event):
+                        await agent.emit_assistant_event(
+                            "turn_done",
+                            {"session_id": session_id, "new_messages": new_messages},
+                        )
+                    hook_runner = getattr(getattr(agent, "extension_loader", None), "hook_runner", None)
+                    if hook_runner is not None and hasattr(agent, "_messages_for_hook_payload"):
+                        await hook_runner.run(
+                            "message.turn_done",
+                            {
+                                "session_id": session_id,
+                                "new_messages": agent._messages_for_hook_payload(new_messages),
+                            },
+                            cwd=None,
+                        )
         except Exception as e:
             logger.exception("Agent run failed in gateway")
             if event_sink is not None:

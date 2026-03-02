@@ -66,6 +66,22 @@ Every hook receives at least:
 
 **Output:** Optional; no fields required.
 
+## message.turn_done
+
+**When:** After a conversation turn has been persisted (session messages appended to disk). Fired from TUI, interactive CLI, and gateway after `append_messages` succeeds.
+
+**Input:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | string \| null | Current session id (or null if no session) |
+| `new_messages` | array | Messages added this turn: `[{"role": "user"\|"assistant"\|"toolResult", "content": string}, ...]` |
+| `hook_event_name` | string | `"message.turn_done"` |
+| `cwd` | string | Working directory |
+| `workspace_roots` | string[] | Workspace roots (when present) |
+
+**Output:** Optional; no fields required. Hook is for observation, logging, or forwarding to external systems (e.g. external memory or analytics).
+
 ## Example script (bash): block reading .env
 
 ```bash

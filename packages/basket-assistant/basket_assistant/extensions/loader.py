@@ -85,6 +85,7 @@ class ExtensionLoader:
             # Track loaded extension
             self._loaded_extensions[str(path)] = module
 
+            logger.info("Extension loaded from path: %s", path.resolve())
             print(f"✅ Loaded extension: {path.stem}")
             return True
 
@@ -122,21 +123,27 @@ class ExtensionLoader:
         Load extensions from default locations.
 
         Searches:
-        1. ~/.basket/extensions/
-        2. ./extensions/ (current directory)
-        3. Project-specific extension paths from settings
+        1. Package examples/extensions/ (bundled)
+        2. ~/.basket/extensions/
+        3. ./extensions/ (current directory)
 
         Returns:
             Total number of extensions loaded
         """
         total = 0
 
+        # Package bundled examples (e.g. memory_extension)
+        package_root = Path(__file__).resolve().parent.parent.parent
+        examples_ext_dir = package_root / "examples" / "extensions"
+        if examples_ext_dir.exists():
+            total += self.load_extensions_from_dir(examples_ext_dir)
+
         # User extensions
         user_ext_dir = Path.home() / ".basket" / "extensions"
         if user_ext_dir.exists():
             total += self.load_extensions_from_dir(user_ext_dir)
 
-        # Local extensions
+        # Local extensions (cwd)
         local_ext_dir = Path.cwd() / "extensions"
         if local_ext_dir.exists():
             total += self.load_extensions_from_dir(local_ext_dir)
