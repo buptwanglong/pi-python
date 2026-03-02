@@ -8,6 +8,7 @@ import asyncio
 import copy
 import logging
 import time
+from pathlib import Path
 from typing import Optional, Tuple
 
 from basket_agent import Agent
@@ -329,11 +330,36 @@ async def run_tui_mode(coding_agent) -> None:
             await task
             # Persist new messages to session
             session_id = getattr(coding_agent, "_session_id", None)
-            if session_id and hasattr(coding_agent, "session_manager"):
-                new_messages = coding_agent.context.messages[n_before:]
-                if new_messages:
-                    await coding_agent.session_manager.append_messages(
-                        session_id, new_messages
+            new_messages = coding_agent.context.messages[n_before:]
+            if not session_id or not hasattr(coding_agent, "session_manager"):
+                logger.info(
+                    "memory: TUI turn_done skip session_id=%s has_session_manager=%s",
+                    session_id,
+                    hasattr(coding_agent, "session_manager"),
+                )
+            elif not new_messages:
+                logger.info("memory: TUI turn_done skip new_messages empty")
+            else:
+                await coding_agent.session_manager.append_messages(
+                    session_id, new_messages
+                )
+                await coding_agent.emit_assistant_event(
+                    "turn_done",
+                    {"session_id": session_id, "new_messages": new_messages},
+                )
+                hook_runner = getattr(
+                    getattr(coding_agent, "extension_loader", None),
+                    "hook_runner",
+                    None,
+                )
+                if hook_runner is not None:
+                    await hook_runner.run(
+                        "message.turn_done",
+                        {
+                            "session_id": session_id,
+                            "new_messages": coding_agent._messages_for_hook_payload(new_messages),
+                        },
+                        cwd=Path.cwd(),
                     )
         except asyncio.CancelledError:
             logger.debug("Agent task cancelled by user")

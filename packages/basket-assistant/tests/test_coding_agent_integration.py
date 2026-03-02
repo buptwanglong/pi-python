@@ -19,7 +19,7 @@ from basket_ai.types import (
     UserMessage,
 )
 
-from basket_assistant.main import (
+from basket_assistant.agent import (
     CodingAgent,
     PLAN_MODE_DISABLED_MESSAGE,
     PLAN_MODE_FORBIDDEN_TOOLS,
@@ -40,10 +40,10 @@ class TestCodingAgentIntegration:
         mock_model.provider = "test"
         mock_model.model_id = "test-model"
 
-        # Patch get_model on the main module (basket_assistant.main is a module; get_model is used in CodingAgent)
+        # Patch get_model on the agent module (CodingAgent uses get_model in __init__)
         import sys
-        main_module = sys.modules["basket_assistant.main"]
-        monkeypatch.setattr(main_module, "get_model", lambda *args, **kwargs: mock_model)
+        agent_module = sys.modules["basket_assistant.agent"]
+        monkeypatch.setattr(agent_module, "get_model", lambda *args, **kwargs: mock_model)
 
         # Create settings manager with temp directory
         settings_dir = tmp_path / "settings"

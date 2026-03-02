@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from basket_assistant.main import CodingAgent
+from basket_assistant.agent import CodingAgent
 
 
 # ============================================================================

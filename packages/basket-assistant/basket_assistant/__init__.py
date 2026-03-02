@@ -2,7 +2,8 @@
 Pi Coding Agent - Interactive CLI coding assistant.
 """
 
-from .main import CodingAgent, main
+from .agent import CodingAgent
+from .main import main
 
 __version__ = "0.1.0"
 
