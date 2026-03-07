@@ -84,7 +84,7 @@ class ExtensionAPI:
         Initialize the extension API.
 
         Args:
-            agent: The CodingAgent instance
+            agent: The AssistantAgent instance
             hook_runner: Optional HookRunner for wrapping tool execution with before/after hooks
         """
         self._agent = agent
@@ -174,7 +174,7 @@ class ExtensionAPI:
                 self._event_handlers[event_name] = []
             self._event_handlers[event_name].append(func)
 
-            # Assistant-level events: register on CodingAgent, not basket_agent
+            # Assistant-level events: register on AssistantAgent, not basket_agent
             if event_name in ("before_run", "turn_done"):
                 if event_name not in self._agent._assistant_event_handlers:
                     self._agent._assistant_event_handlers[event_name] = []

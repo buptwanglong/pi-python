@@ -46,6 +46,45 @@ API Key 可通过 `api_keys` 写入配置，或使用环境变量：`ANTHROPIC_A
 
 复制 `settings.json.example` 到 `~/.basket/settings.json` 后按需修改。
 
+## Agent 工作区与身份文件
+
+可选配置 **工作区目录**（`workspace_dir`），在其中放置 OpenClaw 风格的身份与行为文件，用于组装 Agent 的 base system prompt。未配置或目录不存在时，使用内置的「You are a helpful coding assistant」+ 工具说明。
+
+### 配置项
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `workspace_dir` | string \| null | null | 工作区根目录，如 `"~/.basket/workspace"` 或 `"./.basket/workspace"`。为 null 或空时不加载工作区文件。 |
+| `skip_bootstrap` | boolean | false | 为 true 时不从工作区加载任何身份/行为文件，仅用内置 base prompt。 |
+
+### 工作区文件
+
+在工作区目录下可放置以下 Markdown 文件（UTF-8），缺失的文件会被忽略，仅存在且有内容的文件会参与组装：
+
+| 文件 | 用途 |
+|------|------|
+| **IDENTITY.md** | 身份：名字、风格、emoji 等。 |
+| **SOUL.md** | 人设与边界：语气、价值观、不可妥协的约束。 |
+| **AGENTS.md** | 操作说明与规则：优先级、工作流、如何用 memory 等。 |
+| **USER.md** | 用户信息：用户是谁、如何称呼。 |
+
+组装顺序为：Identity → Soul → Operating instructions → User context，最后固定追加工具使用说明（read/write/edit/bash/grep/skill 等），保证模型始终知道可用工具。
+
+### 与 OpenClaw 的对应关系
+
+设计参考 OpenClaw 的 agent workspace：每个 agent 可有独立 workspace、session 与 memory。当前仅支持全局单一 `workspace_dir`；后续多 Agent 数据隔离时，可为每个 agent 配置独立 `workspace_dir`（如 `agents.list[].workspace`）。
+
+### 示例
+
+在 `settings.json` 中设置：
+
+```json
+"workspace_dir": "~/.basket/workspace",
+"skip_bootstrap": false
+```
+
+然后创建目录并添加文件，例如 `~/.basket/workspace/IDENTITY.md`、`AGENTS.md` 等。不配置 `workspace_dir` 或设 `skip_bootstrap: true` 时，行为与未引入工作区前完全一致。
+
 ## Hooks（子进程式，语言无关）
 
 Hooks 在工具执行前后、会话创建等节点以 **子进程** 方式运行，stdin 收一行 JSON、stdout 回一行 JSON，与实现语言无关（bash/Python/Go 等均可）。

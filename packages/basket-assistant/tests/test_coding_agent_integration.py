@@ -1,7 +1,7 @@
 """
-Integration tests for CodingAgent.
+Integration tests for AssistantAgent.
 
-These tests verify that the CodingAgent class properly integrates
+These tests verify that the AssistantAgent class properly integrates
 with the pi-agent and pi-ai packages to provide full functionality.
 """
 
@@ -20,7 +20,7 @@ from basket_ai.types import (
 )
 
 from basket_assistant.agent import (
-    CodingAgent,
+    AssistantAgent,
     PLAN_MODE_DISABLED_MESSAGE,
     PLAN_MODE_FORBIDDEN_TOOLS,
 )
@@ -29,18 +29,18 @@ from basket_assistant.core.settings import PermissionsSettings
 
 
 @pytest.mark.integration
-class TestCodingAgentIntegration:
-    """Integration tests for CodingAgent class."""
+class TestAssistantAgentIntegration:
+    """Integration tests for AssistantAgent class."""
 
     @pytest.mark.asyncio
     async def test_agent_initialization(self, tmp_path, monkeypatch):
-        """Test that CodingAgent initializes correctly with all components."""
+        """Test that AssistantAgent initializes correctly with all components."""
         # Mock get_model to avoid API calls
         mock_model = MagicMock()
         mock_model.provider = "test"
         mock_model.model_id = "test-model"
 
-        # Patch get_model on the agent module (CodingAgent uses get_model in __init__)
+        # Patch get_model on the agent module (AssistantAgent uses get_model in __init__)
         import sys
         agent_module = sys.modules["basket_assistant.agent"]
         monkeypatch.setattr(agent_module, "get_model", lambda *args, **kwargs: mock_model)
@@ -54,7 +54,7 @@ class TestCodingAgentIntegration:
         settings_manager.save(settings)
 
         # Initialize agent
-        agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
 
         # Verify initialization
         assert agent.settings is not None
@@ -113,7 +113,7 @@ class TestCodingAgentIntegration:
             ),
         }
         mock_settings_manager.save(settings)
-        agent = CodingAgent(settings_manager=mock_settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=mock_settings_manager, load_extensions=False)
         tool_names = {t.name for t in agent.agent.tools}
         assert "task" in tool_names
 
@@ -356,7 +356,7 @@ class TestCodingAgentIntegration:
         settings.sessions_dir = str(sessions_dir)
         settings_manager.save(settings)
 
-        agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
         session_id = await agent.session_manager.create_session(agent.model.id)
         todos = [{"id": "1", "content": "Loaded task", "status": "in_progress"}]
         await agent.session_manager.save_todos(session_id, todos)
@@ -390,7 +390,7 @@ class TestCodingAgentIntegration:
         settings.sessions_dir = str(sessions_dir)
         settings.permissions = PermissionsSettings(default_mode="plan")
         settings_manager.save(settings)
-        agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
         assert agent.get_plan_mode() is True
 
     @pytest.mark.asyncio

@@ -145,6 +145,15 @@ def test_sessions_dir(settings_manager):
     assert loaded.sessions_dir == "/custom/sessions/dir"
 
 
+def test_workspace_dir_and_skip_bootstrap(settings_manager):
+    """Test workspace_dir and skip_bootstrap round-trip."""
+    settings = Settings(workspace_dir="~/.basket/workspace", skip_bootstrap=True)
+    settings_manager.save(settings)
+    loaded = settings_manager.load()
+    assert loaded.workspace_dir == "~/.basket/workspace"
+    assert loaded.skip_bootstrap is True
+
+
 def test_corrupted_file_returns_defaults(settings_manager):
     """Test that corrupted settings file returns defaults."""
     # Write invalid JSON

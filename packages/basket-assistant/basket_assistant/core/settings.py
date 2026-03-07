@@ -1,214 +1,79 @@
-"""
-Settings management for the coding agent.
+"""Load and resolve settings (multi-agent: agents + default_agent main agent)."""
 
-Handles loading and saving user settings.
-"""
+from __future__ import annotations
 
 import json
-import logging
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from basket_assistant.core.agent_config import (
+    AgentConfig,
+    migrate_legacy_to_agents,
+    resolve_agent_config,
+)
 
-logger = logging.getLogger(__name__)
+# Default config path: env BASKET_SETTINGS_PATH or ~/.basket/settings.json
+def _default_settings_path() -> Path:
+    env = os.environ.get("BASKET_SETTINGS_PATH")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".basket" / "settings.json"
 
 
-class ModelSettings(BaseModel):
-    """Model configuration settings."""
+@dataclass
+class Settings:
+    """Settings with multi-agent: agents dict and default_agent (main agent)."""
 
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    default_agent: str = "default"
+    workspace: str | None = None
+    # Legacy top-level options (optional; often mirrored in agents)
     provider: str = "openai"
-    model_id: str = "gpt-4o-mini"
-    temperature: float = 0.7
-    max_tokens: int = 4096
-    base_url: Optional[str] = None  # Override API base URL (e.g. custom Anthropic endpoint)
+    base_url: str = ""
+    api_key: str = ""
+    model: str | None = None
+    temperature: float | None = None
+
+    def resolve_agent(self, name: str | None = None) -> AgentConfig:
+        """Resolve agent by name; None or empty uses default_agent (main agent)."""
+        return resolve_agent_config(self.agents, self.default_agent, name)
+
+    @property
+    def main_agent_config(self) -> AgentConfig:
+        """Config for the main (default) agent."""
+        return self.agents[self.default_agent]
 
 
-class AgentSettings(BaseModel):
-    """Agent behavior settings."""
-
-    max_turns: int = 10
-    auto_save: bool = True
-    verbose: bool = False
-
-
-class PermissionsSettings(BaseModel):
-    """Permission mode settings (e.g. plan mode = read-only)."""
-
-    default_mode: Literal["default", "plan"] = "default"
-
-
-class SubAgentConfig(BaseModel):
-    """Configuration for a subagent (used by the Task tool)."""
-
-    description: str = Field(..., description="Short description for the Task tool list")
-    prompt: str = Field(..., description="System prompt for this subagent")
-    model: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Optional override: e.g. {\"provider\": \"openai\", \"model_id\": \"gpt-4o-mini\"}",
+def load_settings(path: Path | str | None = None) -> Settings:
+    """Load settings.json; requires agents and default_agent (main agent). Migrates legacy top-level api_key/base_url into agents[\"default\"]."""
+    path = Path(path) if path else _default_settings_path()
+    if not path.exists():
+        raise FileNotFoundError(f"Settings file not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        raw: dict[str, Any] = json.load(f)
+    raw = migrate_legacy_to_agents(raw)
+    if not raw.get("agents") or not isinstance(raw["agents"], dict):
+        raise ValueError("settings.json must have non-empty 'agents' (main agent and others).")
+    default_agent = raw.get("default_agent")
+    if not default_agent or not isinstance(default_agent, str):
+        raise ValueError("settings.json must have 'default_agent' (main agent name).")
+    agents: dict[str, AgentConfig] = {}
+    for name, cfg in raw["agents"].items():
+        if not isinstance(cfg, dict):
+            continue
+        agents[name] = AgentConfig.from_dict(cfg)
+    if default_agent not in agents:
+        raise ValueError(f"default_agent {default_agent!r} must exist in agents: {list(agents.keys())}")
+    main = agents[default_agent]
+    return Settings(
+        agents=agents,
+        default_agent=default_agent,
+        workspace=raw.get("workspace"),
+        provider=main.provider,
+        base_url=main.base_url,
+        api_key=main.api_key,
+        model=main.model,
+        temperature=main.temperature,
     )
-    tools: Optional[Dict[str, bool]] = Field(
-        None,
-        description="Optional: tool name -> enabled; unset = all tools like main agent",
-    )
-
-
-class Settings(BaseModel):
-    """Global settings for the coding agent."""
-
-    model: ModelSettings = Field(default_factory=ModelSettings)
-    agent: AgentSettings = Field(default_factory=AgentSettings)
-    permissions: PermissionsSettings = Field(default_factory=PermissionsSettings)
-    api_keys: Dict[str, str] = Field(default_factory=dict)
-    sessions_dir: str = "~/.basket/sessions"
-    trajectory_dir: Optional[str] = "~/.basket/trajectories"  # Record task trajectories for RL/tuning; set to null/empty to disable
-    skills_dirs: List[str] = Field(default_factory=list)  # Empty => use ~/.basket/skills and ./.basket/skills
-    skills_include: List[str] = Field(default_factory=list)  # Empty => load all; else only these skill ids
-    agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)  # Subagents for Task tool
-    agents_dirs: List[str] = Field(default_factory=list)  # Empty => ~/.basket/agents and ./.basket/agents
-    # Web search: "serper" to use Serper API (requires api_keys["SERPER_API_KEY"]); else duckduckgo-search
-    web_search_provider: Optional[str] = None
-    # Opaque channel config for basket serve; schema owned by basket-gateway/channels, assistant only passes through
-    serve: Optional[Dict[str, Any]] = None
-    # Relay (outbound-only): agent URL for "basket relay"; e.g. wss://your-vps:7683/relay/agent
-    relay_url: Optional[str] = None
-    # Hooks: subprocess-based (see docs). event_name -> list of {command, timeout?, matcher?}
-    hooks: Optional[Dict[str, List[Dict[str, Any]]]] = None
-    custom: Dict[str, Any] = Field(default_factory=dict)
-
-
-class SettingsManager:
-    """
-    Manages loading and saving settings.
-
-    Settings are stored in JSON format at ~/.basket/settings.json
-    """
-
-    def __init__(self, config_dir: Optional[Path] = None):
-        """
-        Initialize settings manager.
-
-        Args:
-            config_dir: Configuration directory (default: ~/.basket)
-        """
-        if config_dir is None:
-            config_dir = Path.home() / ".basket"
-
-        self.config_dir = Path(config_dir)
-        self.config_file = self.config_dir / "settings.json"
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-
-    def load(self) -> Settings:
-        """
-        Load settings from file.
-
-        Returns:
-            Settings object (defaults if file doesn't exist)
-        """
-        if not self.config_file.exists():
-            return Settings()
-
-        try:
-            with open(self.config_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return Settings(**data)
-        except Exception as e:
-            logger.warning("Failed to load settings, using defaults: %s", e)
-            return Settings()
-
-    def save(self, settings: Settings) -> None:
-        """
-        Save settings to file.
-
-        Args:
-            settings: Settings to save
-        """
-        with open(self.config_file, "w", encoding="utf-8") as f:
-            json.dump(settings.model_dump(), f, indent=2)
-
-    def update(self, **kwargs: Any) -> Settings:
-        """
-        Update settings and save.
-
-        Args:
-            **kwargs: Settings fields to update
-
-        Returns:
-            Updated settings
-        """
-        settings = self.load()
-
-        for key, value in kwargs.items():
-            if hasattr(settings, key):
-                setattr(settings, key, value)
-
-        self.save(settings)
-        return settings
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """
-        Get a setting value.
-
-        Args:
-            key: Setting key (supports dot notation, e.g., "model.provider")
-            default: Default value if key doesn't exist
-
-        Returns:
-            Setting value or default
-        """
-        settings = self.load()
-
-        # Support dot notation
-        parts = key.split(".")
-        value: Any = settings
-
-        for part in parts:
-            if hasattr(value, part):
-                value = getattr(value, part)
-            elif isinstance(value, dict) and part in value:
-                value = value[part]
-            else:
-                return default
-
-        return value
-
-    def set(self, key: str, value: Any) -> None:
-        """
-        Set a setting value.
-
-        Args:
-            key: Setting key (supports dot notation)
-            value: Value to set
-        """
-        settings = self.load()
-
-        # Support dot notation
-        parts = key.split(".")
-        target: Any = settings
-
-        for part in parts[:-1]:
-            if hasattr(target, part):
-                target = getattr(target, part)
-            elif isinstance(target, dict):
-                if part not in target:
-                    target[part] = {}
-                target = target[part]
-
-        final_key = parts[-1]
-
-        if hasattr(target, final_key):
-            setattr(target, final_key, value)
-        elif isinstance(target, dict):
-            target[final_key] = value
-
-        self.save(settings)
-
-
-__all__ = [
-    "ModelSettings",
-    "AgentSettings",
-    "PermissionsSettings",
-    "SubAgentConfig",
-    "Settings",
-    "SettingsManager",
-]

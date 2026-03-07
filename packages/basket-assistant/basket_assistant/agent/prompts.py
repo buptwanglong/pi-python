@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..core import SubAgentConfig, get_skill_full_content, load_agents_from_dirs
+from ..core.workspace_bootstrap import load_workspace_sections, resolve_workspace_dir
 
 
 def get_agents_dirs(settings: Any) -> List[Path]:
@@ -42,9 +43,8 @@ def get_skills_dirs(settings: Any) -> List[Path]:
     ]
 
 
-def get_system_prompt_base() -> str:
-    """Get the base system prompt for the agent (base + brief skill tool mention)."""
-    return """You are a helpful coding assistant. You have access to tools to read, write, and edit files, execute shell commands, and search for code.
+# Tool usage block appended to every base prompt (with or without workspace).
+_TOOLS_SYSTEM_BLOCK = """You have access to tools to read, write, and edit files, execute shell commands, and search for code.
 
 When using tools:
 - Use 'read' to read file contents
@@ -61,6 +61,44 @@ You have a `skill` tool to discover and load reusable skills by name; use it whe
 
 Always explain what you're doing before using tools.
 """
+
+
+def get_system_prompt_base(settings: Optional[Any] = None) -> str:
+    """
+    Get the base system prompt for the agent.
+
+    When settings is None, loads via default SettingsManager (backward compatibility).
+    When workspace_dir is set and skip_bootstrap is False, composes from AGENTS.md,
+    IDENTITY.md, SOUL.md, USER.md plus the tools block; otherwise returns the
+    built-in coding assistant prompt plus the tools block.
+    """
+    if settings is None:
+        from ..core import SettingsManager
+        settings = SettingsManager().load()
+    if getattr(settings, "skip_bootstrap", False):
+        return _builtin_base_prompt()
+    workspace_dir = resolve_workspace_dir(settings)
+    if workspace_dir is None:
+        return _builtin_base_prompt()
+    sections = load_workspace_sections(workspace_dir, skip_bootstrap=False)
+    if not sections:
+        return _builtin_base_prompt()
+    parts = []
+    for key, title in [
+        ("identity", "Identity"),
+        ("soul", "Soul (persona & boundaries)"),
+        ("agents", "Operating instructions"),
+        ("user", "User context"),
+    ]:
+        if key in sections and sections[key]:
+            parts.append(f"## {title}\n\n{sections[key]}")
+    composed = "\n\n".join(parts)
+    return composed + "\n\n---\n\n" + _TOOLS_SYSTEM_BLOCK
+
+
+def _builtin_base_prompt() -> str:
+    """Built-in prompt when no workspace or skip_bootstrap."""
+    return "You are a helpful coding assistant. " + _TOOLS_SYSTEM_BLOCK
 
 
 def get_plan_mode_prompt_suffix() -> str:

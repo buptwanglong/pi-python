@@ -63,7 +63,7 @@ class CodingAgent:
             self.settings.model.base_url or "(default)",
         )
 
-        system_prompt = prompts.get_system_prompt_base()
+        system_prompt = prompts.get_system_prompt_base(self.settings)
         self.context = Context(systemPrompt=system_prompt, messages=[])
         self._default_system_prompt = system_prompt
 
@@ -90,7 +90,15 @@ class CodingAgent:
         tools.register_tools(self)
 
     def _get_system_prompt(self) -> str:
-        return prompts.get_system_prompt_base()
+        return prompts.get_system_prompt_base(self.settings)
+
+
+# Backward compatibility: use AssistantAgent
+CodingAgent = AssistantAgent
+
+
+# Backward compatibility: use AssistantAgent
+CodingAgent = AssistantAgent
 
     def _get_agents_dirs(self):
         return prompts.get_agents_dirs(self.settings)
