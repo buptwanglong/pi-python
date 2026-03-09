@@ -95,6 +95,12 @@ def test_tui_handlers_update_ui_directly_no_call_from_thread():
         def show_tool_result(self, result, success=True):
             self._record("show_tool_result", result, success)
 
+        def set_phase(self, phase):
+            self._record("set_phase", phase)
+
+        def mark_tool_interrupted_if_any(self):
+            self._record("mark_tool_interrupted_if_any")
+
         def finalize_assistant_block(self, full_text=None):
             self._record("finalize_assistant_block", full_text)
 

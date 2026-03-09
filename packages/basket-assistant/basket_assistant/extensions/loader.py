@@ -31,7 +31,7 @@ class ExtensionLoader:
         Initialize the extension loader.
 
         Args:
-            agent: The CodingAgent instance
+            agent: The AssistantAgent instance
         """
         self._agent = agent
         project_root = Path.cwd()

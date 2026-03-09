@@ -19,7 +19,7 @@ Tests for individual components in isolation:
 
 ### Integration Tests
 Tests for component interactions:
-- `test_coding_agent_integration.py` - CodingAgent class integration with basket-agent and basket-ai
+- `test_coding_agent_integration.py` - AssistantAgent class integration with basket-agent and basket-ai
 
 ### End-to-End Tests
 Tests for complete user workflows:
@@ -65,7 +65,7 @@ poetry run pytest tests/test_bash_tool.py tests/test_read_tool.py -v
 poetry run pytest tests/test_bash_tool.py::test_bash_simple_command -v
 
 # Test all functions in a class
-poetry run pytest tests/test_coding_agent_integration.py::TestCodingAgentIntegration -v
+poetry run pytest tests/test_coding_agent_integration.py::TestAssistantAgentIntegration -v
 ```
 
 ### Run with Coverage
@@ -111,7 +111,7 @@ Shared fixtures are defined in `conftest.py`:
 - `mock_settings_manager` - SettingsManager with temporary settings directory
 
 ### Agent Fixtures
-- `mock_coding_agent` - Fully initialized CodingAgent with mocked LLM (no API calls)
+- `mock_coding_agent` - Fully initialized AssistantAgent with mocked LLM (no API calls)
 - `mock_agent` - Mock Agent instance
 - `mock_model` - Mock Model object
 - `sample_context` - Sample Context with a few messages

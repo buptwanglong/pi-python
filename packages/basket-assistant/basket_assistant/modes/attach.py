@@ -11,7 +11,7 @@ import logging
 from typing import Optional
 
 from basket_tui import PiCodingAgentApp
-from basket_tui.app import ProcessPendingInputs
+from basket_tui.messages import ProcessPendingInputs
 
 logger = logging.getLogger(__name__)
 

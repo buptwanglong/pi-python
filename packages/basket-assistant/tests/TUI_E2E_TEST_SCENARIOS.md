@@ -650,8 +650,8 @@ pytest tests/test_tui_e2e.py -m "slow" -v
 ```python
 def create_real_agent():
     """Create a real agent instance for TUI testing."""
-    from basket_assistant.main import CodingAgent
-    return CodingAgent(load_extensions=False).agent
+    from basket_assistant.agent import AssistantAgent
+    return AssistantAgent(load_extensions=False).agent
 ```
 
 ### 捕获 TUI 输出

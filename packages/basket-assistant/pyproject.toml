@@ -18,7 +18,7 @@ basket-ai = {path = "../basket-ai", develop = true}
 basket-agent = {path = "../basket-agent", develop = true}
 basket-gateway = {path = "../basket-gateway", develop = true}
 basket-trajectory = {path = "../basket-trajectory", develop = true}
-basket-tui = {path = "../basket-tui", develop = true, optional = true}
+basket-tui = {path = "../basket-tui", develop = true}
 basket-remote = {path = "../basket-remote", develop = true, optional = true}
 basket-memory = {path = "../basket-memory", develop = true, optional = true}
 aiofiles = "^23.2"
@@ -30,7 +30,6 @@ uvicorn = {extras = ["standard"], version = "^0.30.0"}
 websockets = "^14.0"
 
 [tool.poetry.extras]
-tui = ["basket-tui"]
 remote = ["basket-remote"]
 memory = ["basket-memory"]
 

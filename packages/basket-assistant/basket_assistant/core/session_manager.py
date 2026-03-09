@@ -33,6 +33,13 @@ class SessionEntry(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
 
 
+def _sanitize_agent_name(name: str) -> str:
+    """Sanitize agent name for use as a path segment (no path traversal)."""
+    if not name:
+        return name
+    return name.replace("/", "_").replace("\\", "_").replace("..", "_").strip() or "_"
+
+
 class SessionMetadata(BaseModel):
     """Metadata about a session."""
 
@@ -42,6 +49,8 @@ class SessionMetadata(BaseModel):
     model_id: str
     total_messages: int = 0
     total_tokens: int = 0
+    parent_session_id: Optional[str] = None
+    agent_name: Optional[str] = None
 
 
 class SessionManager:
@@ -52,14 +61,17 @@ class SessionManager:
     is a JSON object representing a session entry.
     """
 
-    def __init__(self, sessions_dir: Path):
+    def __init__(self, sessions_dir: Path, agent_name: Optional[str] = None):
         """
         Initialize session manager.
 
         Args:
             sessions_dir: Directory to store session files
+            agent_name: Optional main agent name; when set, sessions live under sessions_dir/agent_name
         """
         self.sessions_dir = Path(sessions_dir)
+        if agent_name and _sanitize_agent_name(agent_name):
+            self.sessions_dir = self.sessions_dir / _sanitize_agent_name(agent_name)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_session_path(self, session_id: str) -> Path:
@@ -151,12 +163,19 @@ class SessionManager:
             logger.debug("Failed to load todos for %s: %s", session_id, e)
             return []
 
-    async def create_session(self, model_id: str) -> str:
+    async def create_session(
+        self,
+        model_id: str,
+        parent_session_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+    ) -> str:
         """
         Create a new session.
 
         Args:
             model_id: ID of the model being used
+            parent_session_id: Optional parent session ID (for child sessions)
+            agent_name: Optional agent name to store in metadata
 
         Returns:
             Session ID
@@ -170,6 +189,8 @@ class SessionManager:
             created_at=timestamp,
             updated_at=timestamp,
             model_id=model_id,
+            parent_session_id=parent_session_id,
+            agent_name=agent_name,
         )
 
         entry = SessionEntry(
@@ -184,7 +205,13 @@ class SessionManager:
 
         return session_id
 
-    async def ensure_session(self, session_id: str, model_id: str) -> None:
+    async def ensure_session(
+        self,
+        session_id: str,
+        model_id: str,
+        parent_session_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+    ) -> None:
         """
         Ensure a session file exists with metadata. If the file already exists, do nothing.
         Used by gateway (and other modes) when session_id is fixed (e.g. "default").
@@ -192,6 +219,8 @@ class SessionManager:
         Args:
             session_id: Session ID to use
             model_id: ID of the model being used
+            parent_session_id: Optional parent session ID (for child sessions)
+            agent_name: Optional agent name to store in metadata
         """
         path = self._get_session_path(session_id)
         if path.exists():
@@ -202,6 +231,8 @@ class SessionManager:
             created_at=timestamp,
             updated_at=timestamp,
             model_id=model_id,
+            parent_session_id=parent_session_id,
+            agent_name=agent_name,
         )
         entry = SessionEntry(
             timestamp=timestamp,

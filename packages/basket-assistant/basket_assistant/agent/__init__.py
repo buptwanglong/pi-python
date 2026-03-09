@@ -1,5 +1,5 @@
 """
-CodingAgent: main coding agent class composed from prompts, session, tools, events, run.
+AssistantAgent: main coding agent class composed from prompts, session, tools, events, run.
 """
 
 import logging
@@ -27,7 +27,7 @@ PLAN_MODE_DISABLED_MESSAGE = tools.PLAN_MODE_DISABLED_MESSAGE
 PLAN_MODE_FORBIDDEN_TOOLS = tools.PLAN_MODE_FORBIDDEN_TOOLS
 
 
-class CodingAgent:
+class AssistantAgent:
     """
     Main coding agent class.
     Manages the agent lifecycle, tools, and user interaction.
@@ -37,6 +37,7 @@ class CodingAgent:
         self,
         settings_manager: Optional[SettingsManager] = None,
         load_extensions: bool = True,
+        agent_name: Optional[str] = None,
     ):
         self.settings_manager = settings_manager or SettingsManager()
         self.settings = self.settings_manager.load()
@@ -46,21 +47,47 @@ class CodingAgent:
                 os.environ[key] = str(value)
 
         sessions_dir = Path(self.settings.sessions_dir).expanduser()
-        self.session_manager = SessionManager(sessions_dir)
-
-        model_kwargs: dict = {}
-        if self.settings.model.base_url:
-            model_kwargs["base_url"] = self.settings.model.base_url
-        self.model = get_model(
-            self.settings.model.provider,
-            self.settings.model.model_id,
-            **model_kwargs,
+        # Resolve main agent key: agent_name (e.g. from CLI --agent) or default_agent
+        main_agent_key = (agent_name or "").strip() or getattr(
+            self.settings, "default_agent", None
         )
+        self.session_manager = SessionManager(sessions_dir, agent_name=main_agent_key or None)
+
+        use_agent_model = (
+            main_agent_key
+            and main_agent_key in self.settings.agents
+            and getattr(self.settings.agents[main_agent_key], "model", None)
+            and isinstance(self.settings.agents[main_agent_key].model, dict)
+        )
+        if use_agent_model:
+            m = self.settings.agents[main_agent_key].model
+            top = self.settings.model
+            model_kwargs = {
+                "context_window": m.get("context_window", top.context_window),
+                "max_tokens": m.get("max_tokens", top.max_tokens),
+            }
+            if top.base_url:
+                model_kwargs["base_url"] = top.base_url
+            _provider = m.get("provider", top.provider)
+            _model_id = m.get("model_id", top.model_id)
+            self.model = get_model(_provider, _model_id, **model_kwargs)
+        else:
+            model_kwargs = {
+                "context_window": self.settings.model.context_window,
+                "max_tokens": self.settings.model.max_tokens,
+            }
+            if self.settings.model.base_url:
+                model_kwargs["base_url"] = self.settings.model.base_url
+            _provider = self.settings.model.provider
+            _model_id = self.settings.model.model_id
+            self.model = get_model(_provider, _model_id, **model_kwargs)
         logger.info(
-            "Using model: provider=%s, model_id=%s, base_url=%s",
-            self.settings.model.provider,
-            self.settings.model.model_id,
-            self.settings.model.base_url or "(default)",
+            "Using model: provider=%s, model_id=%s, base_url=%s, context_window=%s, max_tokens=%s",
+            _provider,
+            _model_id,
+            model_kwargs.get("base_url") or "(default)",
+            model_kwargs.get("context_window"),
+            model_kwargs.get("max_tokens"),
         )
 
         system_prompt = prompts.get_system_prompt_base(self.settings)
@@ -71,6 +98,7 @@ class CodingAgent:
         self.agent.max_turns = self.settings.agent.max_turns
 
         self._current_todos: List[dict] = []
+        self._recent_tasks: List[dict] = []  # TaskRecord-like dicts from Task tool
         self._session_id: Optional[str] = None
         self._todo_show_full: bool = False
         self._plan_mode: bool = (
@@ -91,14 +119,6 @@ class CodingAgent:
 
     def _get_system_prompt(self) -> str:
         return prompts.get_system_prompt_base(self.settings)
-
-
-# Backward compatibility: use AssistantAgent
-CodingAgent = AssistantAgent
-
-
-# Backward compatibility: use AssistantAgent
-CodingAgent = AssistantAgent
 
     def _get_agents_dirs(self):
         return prompts.get_agents_dirs(self.settings)
@@ -195,7 +215,7 @@ CodingAgent = AssistantAgent
 
 
 __all__ = [
-    "CodingAgent",
+    "AssistantAgent",
     "PLAN_MODE_DISABLED_MESSAGE",
     "PLAN_MODE_FORBIDDEN_TOOLS",
 ]

@@ -18,12 +18,17 @@ def get_agents_dirs(settings: Any) -> List[Path]:
 
 
 def get_subagent_configs(agent: Any) -> Dict[str, SubAgentConfig]:
-    """Merge settings.agents with agents loaded from .basket/agents/*.md; later overrides."""
+    """Merge settings.agents with agents loaded from .basket/agents/*.md; later overrides.
+    Excludes default_agent so the main agent is not listed as a Task subagent.
+    """
     out: Dict[str, SubAgentConfig] = {}
     for k, v in agent.settings.agents.items():
         out[k] = v
     for k, v in load_agents_from_dirs(get_agents_dirs(agent.settings)).items():
         out[k] = v
+    default_agent = getattr(agent.settings, "default_agent", None)
+    if default_agent and default_agent in out:
+        out = {k: v for k, v in out.items() if k != default_agent}
     return out
 
 
@@ -89,6 +94,8 @@ def get_system_prompt_base(settings: Optional[Any] = None) -> str:
         ("soul", "Soul (persona & boundaries)"),
         ("agents", "Operating instructions"),
         ("user", "User context"),
+        ("tools", "Tools & environment notes"),
+        ("memory", "Memory"),
     ]:
         if key in sections and sections[key]:
             parts.append(f"## {title}\n\n{sections[key]}")

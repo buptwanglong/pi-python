@@ -15,6 +15,8 @@ WORKSPACE_FILES = [
     ("soul", "SOUL.md"),
     ("agents", "AGENTS.md"),
     ("user", "USER.md"),
+    ("tools", "TOOLS.md"),
+    ("memory", "MEMORY.md"),
 ]
 
 

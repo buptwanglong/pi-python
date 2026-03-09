@@ -11,8 +11,8 @@ from basket_assistant.extensions import ExtensionAPI, ExtensionLoader
 from basket_assistant.extensions.hook_runner import HookRunner
 
 
-class MockCodingAgent:
-    """Mock CodingAgent for testing."""
+class MockAssistantAgent:
+    """Mock AssistantAgent for testing."""
 
     def __init__(self):
         self.agent = Mock()
@@ -26,7 +26,7 @@ class MockCodingAgent:
 
 def test_extension_api_init():
     """Test ExtensionAPI initialization."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     assert api._agent == agent
@@ -36,7 +36,7 @@ def test_extension_api_init():
 
 def test_extension_api_register_tool():
     """Test tool registration via decorator (no hook runner)."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     class TestParams(BaseModel):
@@ -61,7 +61,7 @@ def test_extension_api_register_tool():
 @pytest.mark.asyncio
 async def test_extension_api_register_tool_with_hook_deny():
     """When hook_runner run returns deny for tool.execute.before, wrapped tool returns error and does not call original."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     mock_runner = AsyncMock(spec=HookRunner)
     mock_runner.run.return_value = {"permission": "deny", "reason": "Blocked by hook."}
     api = ExtensionAPI(agent, mock_runner)
@@ -92,7 +92,7 @@ async def test_extension_api_register_tool_with_hook_deny():
 
 def test_extension_api_register_command():
     """Test command registration via decorator."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     @api.register_command("/test")
@@ -106,7 +106,7 @@ def test_extension_api_register_command():
 
 def test_extension_api_register_event():
     """Test event handler registration via decorator."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     @api.on("test_event")
@@ -123,7 +123,7 @@ def test_extension_api_register_event():
 
 def test_extension_api_register_assistant_events_before_run_turn_done():
     """before_run and turn_done register on _assistant_event_handlers, not agent.agent.on."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     @api.on("before_run")
@@ -145,11 +145,11 @@ def test_extension_api_register_assistant_events_before_run_turn_done():
 @pytest.mark.asyncio
 async def test_emit_assistant_event_calls_handlers():
     """emit_assistant_event invokes registered handlers with payload."""
-    from basket_assistant.agent import CodingAgent
+    from basket_assistant.agent import AssistantAgent
     from basket_assistant.core import SettingsManager
 
     settings_manager = SettingsManager()
-    agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
     received = []
 
     async def handler(payload):
@@ -163,7 +163,7 @@ async def test_emit_assistant_event_calls_handlers():
 
 def test_extension_api_get_context():
     """Test getting agent context."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     agent.agent.context = {"test": "context"}
     api = ExtensionAPI(agent)
 
@@ -173,7 +173,7 @@ def test_extension_api_get_context():
 
 def test_extension_api_get_settings():
     """Test getting agent settings."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     agent.settings = {"test": "settings"}
     api = ExtensionAPI(agent)
 
@@ -183,7 +183,7 @@ def test_extension_api_get_settings():
 
 def test_extension_api_get_session_manager():
     """Test getting session manager."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     agent.session_manager = Mock()
     api = ExtensionAPI(agent)
 
@@ -193,7 +193,7 @@ def test_extension_api_get_session_manager():
 
 def test_extension_api_execute_command():
     """Test executing registered commands."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     # Register a command
@@ -215,7 +215,7 @@ def test_extension_api_execute_command():
 
 def test_extension_api_get_commands():
     """Test getting list of registered commands."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     api = ExtensionAPI(agent)
 
     @api.register_command("/cmd1")
@@ -232,7 +232,7 @@ def test_extension_api_get_commands():
 
 def test_extension_loader_init():
     """Test ExtensionLoader initialization."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     assert loader._agent == agent
@@ -242,7 +242,7 @@ def test_extension_loader_init():
 
 def test_extension_loader_get_api():
     """Test getting the ExtensionAPI."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     api = loader.get_api()
@@ -251,7 +251,7 @@ def test_extension_loader_get_api():
 
 def test_extension_loader_get_loaded_extensions():
     """Test getting loaded extension list."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Initially empty
@@ -269,7 +269,7 @@ def test_extension_loader_get_loaded_extensions():
 
 def test_extension_loader_load_extension_success(tmp_path, capsys):
     """Test successful extension loading."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Create a test extension file
@@ -295,7 +295,7 @@ def setup(basket):
 
 def test_extension_loader_load_extension_missing_setup(tmp_path, capsys):
     """Test loading extension without setup() function."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Create an extension without setup()
@@ -319,7 +319,7 @@ def not_setup(basket):
 
 def test_extension_loader_load_extension_error(tmp_path, capsys):
     """Test loading extension with syntax error."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Create an extension with error
@@ -344,7 +344,7 @@ def setup(basket):
 
 def test_extension_loader_load_extensions_from_dir(tmp_path, capsys):
     """Test loading all extensions from a directory."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Create test extensions
@@ -368,7 +368,7 @@ def test_extension_loader_load_extensions_from_dir(tmp_path, capsys):
 
 def test_extension_loader_load_extensions_from_nonexistent_dir(tmp_path):
     """Test loading from non-existent directory."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Try to load from non-existent directory
@@ -380,7 +380,7 @@ def test_extension_loader_load_extensions_from_nonexistent_dir(tmp_path):
 
 def test_extension_loader_load_default_extensions(tmp_path, monkeypatch, capsys):
     """Test loading from default locations."""
-    agent = MockCodingAgent()
+    agent = MockAssistantAgent()
     loader = ExtensionLoader(agent)
 
     # Mock home and cwd

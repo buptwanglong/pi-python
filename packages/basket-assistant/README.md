@@ -20,22 +20,22 @@ poetry install
 ## Usage
 
 - `basket` — interactive mode
-- `basket --tui` — terminal UI
+- `basket tui` — terminal UI
 - `basket --remote` — remote web terminal (for phone/LAN access; see below)
 - `basket "message"` — one-shot
 
 ## Resident assistant (gateway)
 
-Run the assistant as a long-lived local service and attach with the TUI when needed. The assistant keeps running after you exit the TUI.
+Run the assistant as a long-lived local service. **`basket tui`** starts the gateway if needed and connects the TUI to it; the gateway keeps running after you exit the TUI.
 
 | Command | Description |
 |---------|-------------|
-| `basket serve start` | Start the resident assistant (HTTP/WebSocket gateway on 127.0.0.1). Runs in foreground; use `nohup basket serve start &` or systemd for background. |
-| `basket serve stop` | Stop the assistant (sends SIGTERM to the gateway process). |
-| `basket serve status` | Show whether the assistant is running (pid, port, uptime). |
-| `basket serve attach` | Open the TUI connected to the running assistant. Exiting the TUI disconnects; the assistant keeps running. |
+| `basket tui` | Start TUI (starts gateway in background if not running, then connect). |
+| `basket gateway start` | Start the resident assistant (HTTP/WebSocket gateway on 127.0.0.1). Runs in foreground; use `nohup basket gateway start &` or systemd for background. |
+| `basket gateway stop` | Stop the assistant (sends SIGTERM to the gateway process). |
+| `basket gateway status` | Show whether the assistant is running (pid, port, uptime). |
 
-Port defaults to **7682**; set `BASKET_SERVE_PORT` to override. State files: `~/.basket/serve.pid`, `~/.basket/serve.port`. Attach uses `ws://127.0.0.1:<port>/ws` by default, or pass `--url ws://...` to `basket serve attach`.
+Port defaults to **7682**; set `BASKET_SERVE_PORT` to override. State files: `~/.basket/serve.pid`, `~/.basket/serve.port`.
 
 ## Remote access (ZeroTier)
 
@@ -52,7 +52,7 @@ Use the agent from your phone or another machine over ZeroTier or LAN:
 
 4. On your phone (on the same ZeroTier network), open a browser and go to `http://<your.ZeroTier.IP>:7681`. You get a web terminal running the TUI.
 
-You can use `BASKET_REMOTE_BIND` and `BASKET_REMOTE_PORT` instead of `--bind` / `--port`. Alternative: use Termux on Android and SSH to the computer's ZeroTier IP, then run `basket --tui` in the SSH session.
+You can use `BASKET_REMOTE_BIND` and `BASKET_REMOTE_PORT` instead of `--bind` / `--port`. Alternative: use Termux on Android and SSH to the computer's ZeroTier IP, then run `basket tui` in the SSH session.
 
 ## Tools
 

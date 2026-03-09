@@ -7,11 +7,11 @@ from pathlib import Path
 import tempfile
 import json
 
-from basket_assistant.core.settings import (
+from basket_assistant.core import (
+    AgentSettings,
+    ModelSettings,
     Settings,
     SettingsManager,
-    ModelSettings,
-    AgentSettings,
     SubAgentConfig,
 )
 
@@ -191,6 +191,7 @@ def test_model_settings_defaults():
     assert model.model_id == "gpt-4o-mini"
     assert model.temperature == 0.7
     assert model.max_tokens == 4096
+    assert model.context_window == 128000
 
 
 def test_agent_settings_defaults():

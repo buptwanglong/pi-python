@@ -25,9 +25,9 @@ async def run_relay_client(relay_url: str) -> None:
 
     from basket_gateway.gateway import AgentGateway
 
-    from ..agent import CodingAgent
+    from ..agent import AssistantAgent
 
-    agent = CodingAgent()
+    agent = AssistantAgent()
     gateway = AgentGateway(agent_factory=lambda: agent)
     session_id = "default"
 
@@ -57,7 +57,7 @@ async def run_relay_client(relay_url: str) -> None:
         print("Relay connected. Session ID:", sid, flush=True)
         print("Connect from phone/browser (attach) with:", flush=True)
         print("  ", client_url, flush=True)
-        print("Or: basket serve attach --url", client_url, flush=True)
+        print("Or: basket tui  (to use local gateway)", flush=True)
         print("-" * 50, flush=True)
 
         async def sink(payload: dict):

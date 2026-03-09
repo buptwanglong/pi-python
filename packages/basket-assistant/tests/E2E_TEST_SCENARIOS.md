@@ -34,7 +34,7 @@
 async def test_e2e_simple_conversation():
     """用户发送简单消息，agent 用文本回复（不调用工具）"""
     # Given: 一个新的 agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 发送不需要工具的消息
     response = await agent.run_once("Say hello in one word")
@@ -59,7 +59,7 @@ async def test_e2e_read_file_workflow(temp_project_dir):
     test_file = temp_project_dir / "test.txt"
     test_file.write_text("Hello World\nThis is a test file")
 
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 要求读取文件
     response = await agent.run_once(f"Read the file {test_file}")
@@ -84,7 +84,7 @@ async def test_e2e_write_file_workflow(tmp_path):
     """完整的创建文件流程"""
     # Given: 临时目录
     os.chdir(tmp_path)
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 要求创建文件
     response = await agent.run_once(
@@ -116,7 +116,7 @@ async def test_e2e_edit_file_workflow(temp_project_dir):
     test_file = temp_project_dir / "code.py"
     test_file.write_text("def hello():\n    print('Hi')\n")
 
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 要求修改文件
     response = await agent.run_once(
@@ -143,7 +143,7 @@ async def test_e2e_edit_file_workflow(temp_project_dir):
 async def test_e2e_bash_command_workflow():
     """完整的命令执行流程"""
     # Given: 新的 agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 要求执行命令
     response = await agent.run_once("Run the command 'echo Hello World'")
@@ -170,7 +170,7 @@ async def test_e2e_grep_search_workflow(temp_project_dir):
     (temp_project_dir / "file2.py").write_text("def world():\n    pass")
     (temp_project_dir / "file3.txt").write_text("hello world")
 
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 要求搜索
     response = await agent.run_once(
@@ -198,7 +198,7 @@ async def test_e2e_grep_search_workflow(temp_project_dir):
 async def test_e2e_multi_turn_context(temp_project_dir):
     """测试多轮对话的上下文保持"""
     # Given: 新的 agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
     test_file = temp_project_dir / "data.txt"
     test_file.write_text("42")
 
@@ -227,7 +227,7 @@ async def test_e2e_multi_turn_context(temp_project_dir):
 async def test_e2e_multi_tool_workflow(temp_project_dir):
     """测试需要多个工具的任务"""
     # Given: 目录和 agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 复杂任务：创建、修改、验证
     response = await agent.run_once(
@@ -260,7 +260,7 @@ async def test_e2e_multi_tool_workflow(temp_project_dir):
 async def test_e2e_file_not_found_error():
     """测试文件不存在的错误处理"""
     # Given: agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 尝试读取不存在的文件
     response = await agent.run_once("Read /nonexistent/file.txt")
@@ -284,7 +284,7 @@ async def test_e2e_file_not_found_error():
 async def test_e2e_command_timeout():
     """测试命令超时处理"""
     # Given: agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 执行会超时的命令
     response = await agent.run_once("Run the command 'sleep 300'")
@@ -310,7 +310,7 @@ async def test_e2e_edit_pattern_not_found(temp_project_dir):
     test_file = temp_project_dir / "test.py"
     test_file.write_text("def hello():\n    pass")
 
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 尝试替换不存在的内容
     response = await agent.run_once(
@@ -335,7 +335,7 @@ async def test_e2e_edit_pattern_not_found(temp_project_dir):
 async def test_e2e_api_error_recovery():
     """测试 API 错误恢复"""
     # Given: agent with error recovery
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # Simulate first call fails, second succeeds
     # (This needs special setup or real intermittent API)
@@ -364,7 +364,7 @@ async def test_e2e_api_error_recovery():
 async def test_e2e_api_supports_tools():
     """测试 API 是否支持工具调用"""
     # Given: agent with tools
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 发送需要工具的消息
     response = await agent.run_once("What files are in current directory?")
@@ -388,7 +388,7 @@ async def test_e2e_api_supports_tools():
 async def test_e2e_api_response_format():
     """测试 API 响应格式是否正确"""
     # Given: agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 发送消息
     response = await agent.run_once("Say hi")
@@ -414,7 +414,7 @@ async def test_e2e_api_response_format():
 async def test_e2e_api_streaming():
     """测试 API 流式响应"""
     # Given: agent with streaming enabled
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # Capture streamed text
     streamed_chunks = []
@@ -450,7 +450,7 @@ async def test_e2e_api_streaming():
 async def test_e2e_response_time():
     """测试响应时间"""
     # Given: agent
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 发送简单消息
     import time
@@ -480,7 +480,7 @@ async def test_e2e_large_file_handling(temp_project_dir):
     large_file = temp_project_dir / "large.txt"
     large_file.write_text("line\n" * 1000)
 
-    agent = CodingAgent(load_extensions=False)
+    agent = AssistantAgent(load_extensions=False)
 
     # When: 读取大文件
     response = await agent.run_once(f"How many lines in {large_file}?")
@@ -511,7 +511,7 @@ async def test_e2e_custom_settings(tmp_path):
     settings.agent.max_turns = 3
     settings_manager.save(settings)
 
-    agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
 
     # When: 运行 agent
     # Then: 应该使用自定义配置
@@ -545,7 +545,7 @@ async def test_e2e_different_providers(provider, model_id):
     settings.model.provider = provider
     settings.model.model_id = model_id
 
-    agent = CodingAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
 
     # When: 发送消息
     response = await agent.run_once("Say hi")

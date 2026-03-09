@@ -14,7 +14,7 @@ def test_render_user_message():
     result = renderer.render_user_message("Hello, world!")
 
     assert isinstance(result, Text)
-    assert "You: Hello, world!" in str(result)
+    assert "Hello, world!" in str(result)
     assert result.style == "bold"
 
 
@@ -75,7 +75,7 @@ def test_format_tool_block_with_args():
 
     result = renderer.format_tool_block(tool_name, args, result_text)
 
-    assert "Read_file:" in result
+    assert "read_file" in result
     assert "path" in result or "encoding" in result or "/test/file.py" in result
     assert "执行中..." in result
 
@@ -89,7 +89,7 @@ def test_format_tool_block_no_args():
 
     result = renderer.format_tool_block(tool_name, args, result_text)
 
-    assert "List_files:" in result
+    assert "list_files" in result
     assert "完成" in result
 
 

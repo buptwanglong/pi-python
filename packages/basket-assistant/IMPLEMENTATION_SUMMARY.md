@@ -10,7 +10,7 @@ This document summarizes the fixes and improvements made to the basket-assistant
 1. **Timestamp bug**: All messages used `timestamp=0` instead of real timestamps
 2. **Tool results hidden**: TUI mode showed "Tool executed successfully" instead of actual output
 3. **No error recovery**: Agent state corruption after exceptions with no rollback
-4. **Missing integration tests**: No tests for CodingAgent class or end-to-end flows
+4. **Missing integration tests**: No tests for AssistantAgent class or end-to-end flows
 5. **CLI untested**: main.py (~349 lines) had zero test coverage
 
 ### High Priority UX Issues
@@ -126,7 +126,7 @@ print()  # Newline after agent output
 
 **Status:** Framework in place, some tests need fixture adjustments
 
-**Impact:** Provides test coverage for CodingAgent integration with basket-agent and basket-ai
+**Impact:** Provides test coverage for AssistantAgent integration with basket-agent and basket-ai
 
 ---
 
@@ -217,7 +217,7 @@ poetry run python -m basket_assistant
 > exit
 
 # Test TUI mode (verify tool results shown)
-poetry run python -m basket_assistant --tui
+poetry run python -m basket_assistant tui
 ```
 
 ### Automated Testing Commands

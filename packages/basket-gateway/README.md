@@ -19,7 +19,7 @@ pip install basket-gateway[feishu]
 
 ## Usage
 
-Typically used by `basket serve start` from basket-assistant. Standalone:
+Typically used by `basket gateway start` from basket-assistant. Standalone:
 
 ```python
 from basket_gateway import run_gateway

@@ -4,7 +4,7 @@ Tests for AppState class
 
 import pytest
 import asyncio
-from basket_tui.state import AppState
+from basket_tui.state import AppState, OutputCell
 from textual.widgets import Static
 
 
@@ -16,6 +16,7 @@ def test_app_state_initialization():
     assert state.current_tool_widget is None
     assert state.current_thinking_widget is None
     assert state.agent_task is None
+    assert state.phase == "idle"
 
 
 def test_app_state_reset_streaming():
@@ -39,6 +40,7 @@ def test_app_state_reset_all():
     state = AppState()
     state.current_assistant_widget = Static("test")
     state.streaming_buffer = "test buffer"
+    state.phase = "streaming"
     # Just set a placeholder task without actually creating an async task
     state.agent_task = None  # In real usage, this would be an asyncio.Task
 
@@ -47,6 +49,7 @@ def test_app_state_reset_all():
     assert state.current_assistant_widget is None
     assert state.streaming_buffer == ""
     assert state.agent_task is None
+    assert state.phase == "idle"
 
 
 def test_has_active_assistant_widget():
@@ -110,3 +113,68 @@ async def test_cancel_agent_task():
     # Verify task was cancelled
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_get_transcript_text():
+    """Test get_transcript_text returns output_blocks + streaming tail."""
+    state = AppState()
+    state.output_blocks = ["hello", "world"]
+    assert state.get_transcript_text() == "hello\n\nworld"
+
+    state.streaming_assistant = True
+    state.streaming_buffer = " x"
+    assert state.get_transcript_text() == "hello\n\nworld\n\n x"
+
+
+def test_get_transcript_blocks():
+    """Test get_transcript_blocks returns (role, content) list and streaming tail."""
+    state = AppState()
+    state.output_blocks_with_role = [("user", "hi"), ("assistant", "ok")]
+    assert state.get_transcript_blocks() == [("user", "hi"), ("assistant", "ok")]
+
+    state.streaming_assistant = True
+    state.streaming_buffer = " typing..."
+    assert state.get_transcript_blocks() == [
+        ("user", "hi"),
+        ("assistant", "ok"),
+        ("assistant", " typing..."),
+    ]
+
+
+def test_get_last_complete_message():
+    """Test get_last_complete_message returns last non-empty block."""
+    state = AppState()
+    state.output_blocks = ["a", "", "c"]
+    assert state.get_last_complete_message() == "c"
+
+    state.output_blocks = ["only"]
+    assert state.get_last_complete_message() == "only"
+
+    state.output_blocks = ["", ""]
+    assert state.get_last_complete_message() == ""
+
+
+def test_get_last_code_block():
+    """Test get_last_code_block extracts last fenced code block."""
+    state = AppState()
+    state.output_blocks = ["text", "```py\nx=1\n```", "after"]
+    out = state.get_last_code_block()
+    assert out is not None
+    assert out[0] == "x=1"
+    assert out[1] == "py"
+
+    state.output_blocks = ["no code here"]
+    assert state.get_last_code_block() is None
+
+    state.output_blocks = ["```\nplain\n```"]
+    out = state.get_last_code_block()
+    assert out is not None
+    assert out[0] == "plain"
+    assert out[1] == "text"
+
+
+def test_output_cell():
+    """Test OutputCell dataclass."""
+    c = OutputCell(role="user", content="hi", tool_name=None, tool_args=None)
+    assert c.role == "user"
+    assert c.content == "hi"

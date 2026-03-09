@@ -9,6 +9,15 @@ A TextArea-based input widget that supports:
 
 from textual.widgets import TextArea
 from textual.binding import Binding
+from textual.message import Message
+
+
+class InputWantsSlashPopup(Message):
+    """Sent when user presses Tab and input starts with /; app may show slash command list."""
+
+    def __init__(self, prefix: str, sender=None) -> None:
+        super().__init__(sender)
+        self.prefix = prefix
 
 
 class MultiLineInput(TextArea):
@@ -26,6 +35,7 @@ class MultiLineInput(TextArea):
         Binding("enter", "submit", "Send", priority=True),
         Binding("shift+enter", "insert_newline", "New line", show=False),
         Binding("escape", "clear", "Clear"),
+        Binding("tab", "request_slash_popup", "Slash list", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -82,6 +92,12 @@ class MultiLineInput(TextArea):
     def action_clear(self) -> None:
         """Clear the input."""
         self.clear()
+
+    def action_request_slash_popup(self) -> None:
+        """If input starts with /, post message so app can show slash command list."""
+        prefix = (self.text or "").strip()
+        if prefix.startswith("/"):
+            self.post_message(InputWantsSlashPopup(prefix))
 
     class Submitted(TextArea.Changed):
         """Message sent when text is submitted."""

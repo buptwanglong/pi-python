@@ -2,10 +2,40 @@
 
 #output-container {
     height: 1fr;
+    min-height: 0;
     margin: 0 1;
 }
 
-/* Output: read-only TextArea for selectable text (click, drag, double-click) */
+#output-container:focus-within {
+    border: solid $primary;
+}
+
+#input:focus {
+    border: thick $primary;
+}
+
+/* Message list: height follows content so Q and A are not separated by empty space.
+   Override Vertical's default height: 1fr so the list does not fill the scroll viewport. */
+#message-list,
+Vertical#message-list {
+    height: auto;
+}
+
+.message-row {
+    width: 100%;
+    height: auto;
+}
+
+.message-row--user {
+    align: right middle;
+}
+
+.message-spacer {
+    width: 1fr;
+    min-width: 1;
+}
+
+/* Output: read-only TextArea for committed history (selectable) */
 #output {
     height: 1fr;
     min-height: 0;
@@ -14,13 +44,24 @@
     border: none;
 }
 
+/* Live streaming area: last N lines of current reply only */
+#live-output {
+    height: 5;
+    min-height: 1;
+    padding: 0 2;
+    border: none;
+    color: $text-muted;
+}
+
 .message-block {
     width: 100%;
+    height: auto;
     padding: 1 2;
     margin: 0 0 1 0;
 }
 
 .message-user {
+    height: auto;
     background: $surface-darken-1;
 }
 
@@ -33,6 +74,13 @@
     color: $text-muted;
     padding: 0 2;
     background: transparent;
+}
+
+.message-error {
+    color: $error;
+    padding: 0 2;
+    border: solid $error;
+    background: $surface-darken-2;
 }
 
 .message-tool {
@@ -68,6 +116,49 @@
     color: $text-muted;
 }
 
+/* Header context line: connection | model | session */
+#header-context {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    text-style: italic;
+}
+
+/* Shortcut hint below input */
+#input-hint {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    dock: bottom;
+}
+
+#status-bar {
+    height: 1;
+    padding: 0 1;
+    dock: bottom;
+    color: $text-muted;
+}
+
+#status-phase {
+    width: 14;
+    min-width: 14;
+}
+
+#status-model {
+    width: 20;
+    min-width: 10;
+}
+
+#status-session {
+    width: 12;
+    min-width: 8;
+}
+
+#status-queue {
+    width: 12;
+    min-width: 6;
+}
+
 #input {
     dock: bottom;
     height: auto;
@@ -75,6 +166,14 @@
     max-height: 10;
     border: solid $surface-darken-2;
     margin: 0 1;
+}
+
+#input-error {
+    height: auto;
+    min-height: 0;
+    padding: 0 1;
+    color: $error;
+    dock: bottom;
 }
 
 .thinking {

@@ -66,7 +66,10 @@ async def run_subagent(agent: Any, subagent_name: str, user_prompt: str) -> str:
         return f'SubAgent "{subagent_name}" not found. Available: {available}'
 
     if cfg.model and isinstance(cfg.model, dict):
-        model_kwargs: dict = {}
+        model_kwargs: dict = {
+            "context_window": cfg.model.get("context_window", agent.settings.model.context_window),
+            "max_tokens": cfg.model.get("max_tokens", agent.settings.model.max_tokens),
+        }
         if agent.settings.model.base_url:
             model_kwargs["base_url"] = agent.settings.model.base_url
         model = get_model(

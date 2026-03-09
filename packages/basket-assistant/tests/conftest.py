@@ -12,7 +12,7 @@ import pytest
 from basket_agent import Agent
 from basket_ai.types import AssistantMessage, Context, TextContent, ToolCall
 
-from basket_assistant.agent import CodingAgent
+from basket_assistant.agent import AssistantAgent
 from basket_assistant.core import SettingsManager
 
 
@@ -140,7 +140,7 @@ def mock_agent(mock_model):
 @pytest.fixture
 async def mock_coding_agent(tmp_path, mock_settings_manager, monkeypatch):
     """
-    Create a mock CodingAgent instance for integration testing.
+    Create a mock AssistantAgent instance for integration testing.
 
     This fixture:
     - Uses temporary directories for settings and sessions
@@ -163,7 +163,7 @@ async def mock_coding_agent(tmp_path, mock_settings_manager, monkeypatch):
     settings = mock_settings_manager.load()
     settings.sessions_dir = str(tmp_path / "sessions")
     mock_settings_manager.save(settings)
-    agent = CodingAgent(settings_manager=mock_settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=mock_settings_manager, load_extensions=False)
 
     return agent
 

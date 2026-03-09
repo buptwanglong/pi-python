@@ -28,7 +28,7 @@ Try these commands:
 ### TUI Mode (Better UI)
 
 ```bash
-poetry run python -m basket_assistant --tui
+poetry run python -m basket_assistant tui
 ```
 
 This mode has a nicer interface and you'll see **formatted tool results** like:
@@ -92,7 +92,7 @@ poetry run pytest --cov=basket_assistant --cov-report=term
 Create a test file and watch the tool output:
 
 ```bash
-poetry run python -m basket_assistant --tui
+poetry run python -m basket_assistant tui
 ```
 
 Then try:
@@ -182,7 +182,7 @@ poetry run pytest -v
 ### Tool Results Not Showing
 Make sure you're using **TUI mode**:
 ```bash
-poetry run python -m basket_assistant --tui
+poetry run python -m basket_assistant tui
 ```
 
 The basic CLI mode has less visual feedback than TUI mode.

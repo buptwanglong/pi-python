@@ -84,3 +84,13 @@ def test_load_workspace_sections_utf8(tmp_path):
     (tmp_path / "USER.md").write_text("用户：开发者。", encoding="utf-8")
     result = load_workspace_sections(tmp_path, skip_bootstrap=False)
     assert result.get("user") == "用户：开发者。"
+
+
+def test_load_workspace_sections_loads_tools_and_memory(tmp_path):
+    """load_workspace_sections loads TOOLS.md and MEMORY.md when present."""
+    (tmp_path / "IDENTITY.md").write_text("Me", encoding="utf-8")
+    (tmp_path / "TOOLS.md").write_text("Use /usr/bin for system tools.", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("User prefers Python 3.11.", encoding="utf-8")
+    result = load_workspace_sections(tmp_path, skip_bootstrap=False)
+    assert result.get("tools") == "Use /usr/bin for system tools."
+    assert result.get("memory") == "User prefers Python 3.11."

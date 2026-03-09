@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .settings import SubAgentConfig
+from .settings_full import SubAgentConfig
 
 logger = logging.getLogger(__name__)
 

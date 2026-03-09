@@ -14,7 +14,7 @@ from typing import Optional, Tuple
 from basket_agent import Agent
 from basket_ai.types import Message
 from basket_tui import PiCodingAgentApp
-from basket_tui.app import ProcessPendingInputs
+from basket_tui.messages import ProcessPendingInputs
 
 logger = logging.getLogger(__name__)
 
@@ -180,14 +180,16 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
         delta = event.get("delta", "")
         current_response["text"] += delta
         app.append_text(delta)
+        app.set_phase("streaming")
 
     def on_thinking_delta(event):
         delta = event.get("delta", "")
         current_response["thinking"] += delta
         if not current_response["in_thinking"]:
             current_response["in_thinking"] = True
-            app.append_message("system", "Thinking...")  # No emoji
+            # Do not append_message("system", "Thinking...") — append_thinking creates the single block
         app.append_thinking(delta)
+        app.set_phase("thinking")
 
     def on_tool_call_start(event):
         tool_name = event.get("tool_name", "unknown")
@@ -200,6 +202,7 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
         if tool_name == "todo_write":
             return  # Don't show tool block; todo panel is updated in on_tool_call_end
         app.show_tool_call(tool_name, arguments)
+        app.set_phase("tool_running")
 
     def on_tool_call_end(event):
         error = event.get("error")
@@ -217,6 +220,7 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
             result = event.get("result")
             formatted_result = _format_tool_result(tool_name, result)
             app.show_tool_result(formatted_result, success=True)
+        app.set_phase("streaming")
 
     def on_agent_complete(event):
         # Run finished: finalize current assistant block so the next user message gets a new block
@@ -229,7 +233,9 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
 
     def on_agent_error(event):
         error = event.get("error", "Unknown error")
-        app.append_message("system", f"Error: {error}")
+        app.mark_tool_interrupted_if_any()
+        app.set_phase("error")
+        app.append_message("error", f"Error: {error}")
 
     agent.on("text_delta", on_text_delta)
     agent.on("thinking_delta", on_thinking_delta)
@@ -239,12 +245,18 @@ def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_ag
     agent.on("agent_error", on_agent_error)
 
 
-async def run_tui_mode(coding_agent) -> None:
+async def run_tui_mode(
+    coding_agent,
+    max_cols: Optional[int] = None,
+    live_rows: Optional[int] = None,
+) -> None:
     """
     Run the coding agent in TUI mode.
 
     Args:
-        coding_agent: The CodingAgent instance (provides .agent, .context, _run_with_trajectory_if_enabled)
+        coding_agent: The AssistantAgent instance (provides .agent, .context, _run_with_trajectory_if_enabled)
+        max_cols: Optional max column width for TUI output (e.g. from --max-cols).
+        live_rows: Optional number of rows for live streaming area (e.g. from --live-rows).
 
     This function:
     1. Creates a TUI app instance
@@ -267,7 +279,12 @@ async def run_tui_mode(coding_agent) -> None:
         )
 
     agent = coding_agent.agent
-    app = PiCodingAgentApp(agent=agent, coding_agent=coding_agent)
+    app = PiCodingAgentApp(
+        agent=agent,
+        coding_agent=coding_agent,
+        max_cols=max_cols,
+        live_rows=live_rows,
+    )
     current_response = {"text": "", "thinking": "", "in_thinking": False}
     _connect_agent_handlers(app, agent, current_response, coding_agent=coding_agent)
 
@@ -371,6 +388,30 @@ async def run_tui_mode(coding_agent) -> None:
             app.append_message("system", "Context restored to previous state.")
         finally:
             app.set_agent_task(None)
+
+    # Session switch handler (Ctrl+P, /sessions, /new, /reset)
+    from basket_tui.screens.session_picker import SESSION_NEW_ID
+
+    async def do_switch_session(sid: str) -> None:
+        if sid == SESSION_NEW_ID:
+            session_id = await coding_agent.session_manager.create_session(
+                coding_agent.model.id
+            )
+            await coding_agent.set_session_id(session_id, load_history=False)
+            coding_agent.context.messages = []
+            app.load_messages_into_output([("system", app.WELCOME_LINE)])
+        else:
+            await coding_agent.set_session_id(sid, load_history=True)
+            blocks = []
+            for m in coding_agent.context.messages:
+                role, text = _message_to_display(m)
+                if text:
+                    blocks.append((role, text))
+            app.load_messages_into_output(blocks)
+        app.update_todo_panel(getattr(coding_agent, "_current_todos", []))
+        app._refresh_header_context()
+
+    app.set_session_switch_handler(do_switch_session)
 
     # Set input handler
     app.set_input_handler(handle_user_input)

@@ -83,3 +83,18 @@ def test_coding_agent_with_workspace_uses_composed_prompt(tmp_path, monkeypatch)
     assert "WorkspaceBot" in agent._default_system_prompt
     assert "Follow the rules." in agent._default_system_prompt
     assert "read" in agent._default_system_prompt and "write" in agent._default_system_prompt
+
+
+def test_get_system_prompt_base_includes_tools_and_memory_sections(tmp_path):
+    """When TOOLS.md and MEMORY.md exist, prompt includes Tools & environment notes and Memory."""
+    from basket_assistant.core import Settings as FullSettings
+
+    (tmp_path / "IDENTITY.md").write_text("Agent", encoding="utf-8")
+    (tmp_path / "TOOLS.md").write_text("Prefer make over npm where possible.", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("Last project used React 18.", encoding="utf-8")
+    settings = FullSettings(workspace_dir=str(tmp_path), skip_bootstrap=False)
+    prompt = prompts.get_system_prompt_base(settings)
+    assert "Tools & environment notes" in prompt
+    assert "Prefer make over npm" in prompt
+    assert "Memory" in prompt
+    assert "Last project used React" in prompt
