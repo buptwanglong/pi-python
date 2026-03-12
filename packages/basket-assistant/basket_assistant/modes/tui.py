@@ -1,429 +1,103 @@
 """
-TUI Mode for Pi Coding Agent
+TUI Mode Integration (New Architecture)
 
-Runs the coding agent with an interactive TUI interface.
+Integrates basket-tui v2 with basket-assistant.
 """
 
 import asyncio
-import copy
 import logging
-import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
-from basket_agent import Agent
-from basket_ai.types import Message
-from basket_tui import PiCodingAgentApp
-from basket_tui.messages import ProcessPendingInputs
+from basket_tui.app import PiCodingAgentApp
+from basket_tui.core.events import UserInputEvent
+from basket_tui.core.state_machine import Phase
+from basket_ai.types import UserMessage
 
 logger = logging.getLogger(__name__)
-
-
-def _message_to_display(msg: Message) -> Tuple[str, str]:
-    """
-    Convert a Message to (role, display_text) for TUI output.
-    user: content as string; assistant: text blocks joined; toolResult: "[tool: name] result".
-    """
-    role = getattr(msg, "role", "user")
-    if role == "user":
-        content = getattr(msg, "content", "")
-        if isinstance(content, str):
-            return "user", content
-        if isinstance(content, list):
-            parts = []
-            for block in content:
-                if hasattr(block, "text"):
-                    parts.append(block.text)
-            return "user", "\n".join(parts) if parts else ""
-        return "user", str(content)
-    if role == "assistant":
-        content = getattr(msg, "content", []) or []
-        texts = []
-        for block in content:
-            if hasattr(block, "text"):
-                texts.append(block.text)
-            elif hasattr(block, "thinking"):
-                t = getattr(block, "thinking", "") or ""
-                texts.append(f"[thinking] {t[:200]}..." if len(t) > 200 else f"[thinking] {t}")
-        return "assistant", "\n".join(texts) if texts else ""
-    if role == "toolResult":
-        name = getattr(msg, "tool_name", "tool")
-        content_list = getattr(msg, "content", []) or []
-        first_text = ""
-        for block in content_list:
-            if hasattr(block, "text"):
-                first_text = block.text[:500] + "..." if len(block.text) > 500 else block.text
-                break
-        return "system", f"[tool: {name}] {first_text or 'ok'}"
-    return "system", str(msg)
-
-
-def _format_tool_result(tool_name: str, result: any) -> str:
-    """
-    Format tool result for display in TUI (Claude Code minimal style).
-
-    Args:
-        tool_name: Name of the tool that was executed
-        result: Result object from the tool
-
-    Returns:
-        Formatted string representation of the result
-    """
-    if result is None:
-        return "Tool executed successfully (no output)"
-
-    # Handle dict results (Pydantic models are converted to dicts)
-    if isinstance(result, dict):
-        if tool_name == "bash":
-            stdout = result.get("stdout", "").strip()
-            stderr = result.get("stderr", "").strip()
-            exit_code = result.get("exit_code", 0)
-            timeout = result.get("timeout", False)
-
-            parts = []
-            if timeout:
-                parts.append("Command timed out")
-
-            # Simple status line
-            if exit_code == 0:
-                parts.append(f"exit {exit_code}")
-            else:
-                parts.append(f"exit {exit_code} (error)")
-
-            # Output with reasonable truncation
-            if stdout:
-                if len(stdout) > 1000:
-                    parts.append(f"\n{stdout[:1000]}\n... ({len(stdout)} chars total, truncated)")
-                else:
-                    parts.append(f"\n{stdout}")
-
-            if stderr:
-                parts.append(f"\nErrors:\n{stderr[:500]}")
-
-            return "\n".join(parts)
-
-        elif tool_name == "read":
-            lines = result.get("lines", 0)
-            file_path = result.get("file_path", "")
-            content = result.get("content", "")
-
-            # Show first few lines as preview
-            content_lines = content.split("\n")
-            preview_lines = content_lines[:5]
-            preview = "\n".join(preview_lines)
-
-            parts = [f"Read {lines} lines from {file_path}"]
-            if len(content_lines) > 5:
-                parts.append(f"\nFirst 5 lines:\n{preview}\n... ({lines} total lines)")
-            else:
-                parts.append(f"\n{preview}")
-
-            return "\n".join(parts)
-
-        elif tool_name == "write":
-            file_path = result.get("file_path", "")
-            success = result.get("success", False)
-
-            if success:
-                return f"Wrote file: {file_path}"
-            else:
-                error = result.get("error", "Unknown error")
-                return f"Write failed: {error}"
-
-        elif tool_name == "edit":
-            success = result.get("success", False)
-            replacements = result.get("replacements_made", 0)
-            file_path = result.get("file_path", "")
-
-            if success:
-                return f"Made {replacements} replacement(s) in {file_path}"
-            else:
-                error = result.get("error", "Unknown error")
-                return f"Edit failed: {error}"
-
-        elif tool_name == "grep":
-            total_matches = result.get("total_matches", 0)
-            truncated = result.get("truncated", False)
-            matches = result.get("matches", [])
-
-            parts = [f"Found {total_matches} match(es)"]
-
-            if matches:
-                sample_count = min(5, len(matches))
-                parts.append(f"\nShowing {sample_count} of {total_matches}:")
-                for match in matches[:sample_count]:
-                    file_path = match.get("file_path", "")
-                    line_number = match.get("line_number", 0)
-                    parts.append(f"  {file_path}:{line_number}")
-
-                if total_matches > sample_count:
-                    parts.append(f"... and {total_matches - sample_count} more")
-
-            return "\n".join(parts)
-
-    # Fallback for other result types
-    result_str = str(result)
-    if len(result_str) > 500:
-        return result_str[:500] + f"\n... ({len(result_str)} chars total, truncated)"
-    return result_str
-
-
-def _connect_agent_handlers(app, agent: Agent, current_response: dict, coding_agent=None) -> None:
-    """
-    Connect agent event handlers to app display methods (same-thread direct calls).
-
-    Used by run_tui_mode. Event handlers call app methods directly because
-    agent runs in the same asyncio loop as the TUI; call_from_thread must not
-    be used from the app thread. coding_agent is used to refresh the todo panel on todo_write.
-    """
-    def on_text_delta(event):
-        delta = event.get("delta", "")
-        current_response["text"] += delta
-        app.append_text(delta)
-        app.set_phase("streaming")
-
-    def on_thinking_delta(event):
-        delta = event.get("delta", "")
-        current_response["thinking"] += delta
-        if not current_response["in_thinking"]:
-            current_response["in_thinking"] = True
-            # Do not append_message("system", "Thinking...") — append_thinking creates the single block
-        app.append_thinking(delta)
-        app.set_phase("thinking")
-
-    def on_tool_call_start(event):
-        tool_name = event.get("tool_name", "unknown")
-        arguments = event.get("arguments", {}) or {}
-        if tool_name == "ask_user_question":
-            question = arguments.get("question", "")
-            options = arguments.get("options") if isinstance(arguments.get("options"), list) else []
-            app.show_ask_question(question, options or [])
-            return
-        if tool_name == "todo_write":
-            return  # Don't show tool block; todo panel is updated in on_tool_call_end
-        app.show_tool_call(tool_name, arguments)
-        app.set_phase("tool_running")
-
-    def on_tool_call_end(event):
-        error = event.get("error")
-        tool_name = event.get("tool_name", "unknown")
-        if tool_name == "ask_user_question":
-            return
-        if tool_name == "todo_write":
-            if coding_agent is not None:
-                todos = getattr(coding_agent, "_current_todos", [])
-                app.update_todo_panel(todos)
-            return  # Don't show tool block or result in conversation
-        if error:
-            app.show_tool_result(str(error), success=False)
-        else:
-            result = event.get("result")
-            formatted_result = _format_tool_result(tool_name, result)
-            app.show_tool_result(formatted_result, success=True)
-        app.set_phase("streaming")
-
-    def on_agent_complete(event):
-        # Run finished: finalize current assistant block so the next user message gets a new block
-        app.finalize_assistant_block()
-        current_response["text"] = ""
-        current_response["thinking"] = ""
-        current_response["in_thinking"] = False
-        # Process any user inputs queued while agent was streaming (correct display order)
-        app.post_message(ProcessPendingInputs())
-
-    def on_agent_error(event):
-        error = event.get("error", "Unknown error")
-        app.mark_tool_interrupted_if_any()
-        app.set_phase("error")
-        app.append_message("error", f"Error: {error}")
-
-    agent.on("text_delta", on_text_delta)
-    agent.on("thinking_delta", on_thinking_delta)
-    agent.on("agent_tool_call_start", on_tool_call_start)
-    agent.on("agent_tool_call_end", on_tool_call_end)
-    agent.on("agent_complete", on_agent_complete)
-    agent.on("agent_error", on_agent_error)
 
 
 async def run_tui_mode(
     coding_agent,
     max_cols: Optional[int] = None,
-    live_rows: Optional[int] = None,
 ) -> None:
     """
-    Run the coding agent in TUI mode.
+    Run TUI mode with new architecture
 
     Args:
-        coding_agent: The AssistantAgent instance (provides .agent, .context, _run_with_trajectory_if_enabled)
-        max_cols: Optional max column width for TUI output (e.g. from --max-cols).
-        live_rows: Optional number of rows for live streaming area (e.g. from --live-rows).
-
-    This function:
-    1. Creates a TUI app instance
-    2. Connects agent events to TUI display methods
-    3. Sets up input handling to forward messages to the agent
-    4. Runs the TUI application
+        coding_agent: AssistantAgent instance
+        max_cols: Maximum column width
     """
-    # Create session if none (same as run_interactive) so messages are persisted
-    if getattr(coding_agent, "_session_id", None) is None:
+    # Create or restore session
+    if not getattr(coding_agent, "_session_id", None):
         session_id = await coding_agent.session_manager.create_session(
             coding_agent.model.id
         )
         await coding_agent.set_session_id(session_id)
-        logger.info("TUI: created new session session_id=%s", session_id)
+        logger.info(f"Created new session: {session_id}")
     else:
-        logger.info(
-            "TUI: using existing session session_id=%s, context.messages=%d",
-            getattr(coding_agent, "_session_id", None),
-            len(coding_agent.context.messages),
-        )
+        logger.info(f"Using existing session: {coding_agent._session_id}")
 
-    agent = coding_agent.agent
+    # Create TUI app
     app = PiCodingAgentApp(
-        agent=agent,
+        agent=coding_agent.agent,
         coding_agent=coding_agent,
         max_cols=max_cols,
-        live_rows=live_rows,
     )
-    current_response = {"text": "", "thinking": "", "in_thinking": False}
-    _connect_agent_handlers(app, agent, current_response, coding_agent=coding_agent)
 
-    async def handle_user_input(user_input: str):
-        """
-        Handle user input by forwarding to the agent.
-        If there are pending ask_user_question(s), treat input as answer (FIFO) and resume.
-
-        Args:
-            user_input: The user's message
-        """
-        from basket_ai.types import UserMessage
-
-        # Pending ask_user_question: treat this input as the answer (FIFO)
-        pending = getattr(coding_agent, "_pending_asks", None) or []
-        if len(pending) > 0:
-            await app.ensure_assistant_block()
-            task = asyncio.create_task(
-                coding_agent.try_resume_pending_ask(user_input, stream_llm_events=True)
-            )
-            app.set_agent_task(task)
-            try:
-                resumed = await task
-                if resumed:
-                    return
-            except asyncio.CancelledError:
-                logger.debug("Resume task cancelled")
-                app.append_message("system", "Stopped by user.")
-                return
-            except Exception as e:
-                logger.exception("Resume pending ask failed")
-                coding_agent.context.messages = coding_agent.context.messages  # no-op, keep context
-                app.append_message("system", f"Error: {e}")
-                return
-            finally:
-                app.set_agent_task(None)
-            # If not resumed, fall through to normal append + run
-
-        n_before = len(coding_agent.context.messages)
+    # Handle user input
+    async def handle_user_input(text: str) -> None:
+        """Handle user input and run agent"""
         # Add user message to context
         coding_agent.context.messages.append(
-            UserMessage(
-                role="user",
-                content=user_input,
-                timestamp=int(time.time() * 1000),
-            )
+            UserMessage(role="user", content=text)
         )
 
-        # Snapshot context for error recovery (restore on exception)
-        messages_snapshot = copy.deepcopy(coding_agent.context.messages)
+        # Transition to waiting phase
+        app.transition_phase(Phase.WAITING_MODEL)
 
-        # Create assistant block so streaming updates go to one block (must be before run)
-        await app.ensure_assistant_block()
-
-        logger.debug("Sending user message, starting agent run")
-        # Run agent in a cancellable task (with optional trajectory recording)
-        task = asyncio.create_task(coding_agent._run_with_trajectory_if_enabled(stream_llm_events=True))
-        app.set_agent_task(task)
         try:
-            await task
-            # Persist new messages to session
-            session_id = getattr(coding_agent, "_session_id", None)
-            new_messages = coding_agent.context.messages[n_before:]
-            if not session_id or not hasattr(coding_agent, "session_manager"):
-                logger.info(
-                    "memory: TUI turn_done skip session_id=%s has_session_manager=%s",
-                    session_id,
-                    hasattr(coding_agent, "session_manager"),
-                )
-            elif not new_messages:
-                logger.info("memory: TUI turn_done skip new_messages empty")
-            else:
-                await coding_agent.session_manager.append_messages(
-                    session_id, new_messages
-                )
-                await coding_agent.emit_assistant_event(
-                    "turn_done",
-                    {"session_id": session_id, "new_messages": new_messages},
-                )
-                hook_runner = getattr(
-                    getattr(coding_agent, "extension_loader", None),
-                    "hook_runner",
-                    None,
-                )
-                if hook_runner is not None:
-                    await hook_runner.run(
-                        "message.turn_done",
-                        {
-                            "session_id": session_id,
-                            "new_messages": coding_agent._messages_for_hook_payload(new_messages),
-                        },
-                        cwd=Path.cwd(),
-                    )
-        except asyncio.CancelledError:
-            logger.debug("Agent task cancelled by user")
-            app.append_message("system", "Stopped by user.")
-        except Exception as e:
-            logger.exception("Agent run failed in TUI")
-            coding_agent.context.messages = messages_snapshot
-            app.append_message("system", f"Error: {e}")
-            app.append_message("system", "Context restored to previous state.")
-        finally:
-            app.set_agent_task(None)
-
-    # Session switch handler (Ctrl+P, /sessions, /new, /reset)
-    from basket_tui.screens.session_picker import SESSION_NEW_ID
-
-    async def do_switch_session(sid: str) -> None:
-        if sid == SESSION_NEW_ID:
-            session_id = await coding_agent.session_manager.create_session(
-                coding_agent.model.id
+            # Run agent
+            await coding_agent._run_with_trajectory_if_enabled(
+                stream_llm_events=True
             )
-            await coding_agent.set_session_id(session_id, load_history=False)
-            coding_agent.context.messages = []
-            app.load_messages_into_output([("system", app.WELCOME_LINE)])
-        else:
-            await coding_agent.set_session_id(sid, load_history=True)
-            blocks = []
-            for m in coding_agent.context.messages:
-                role, text = _message_to_display(m)
-                if text:
-                    blocks.append((role, text))
-            app.load_messages_into_output(blocks)
-        app.update_todo_panel(getattr(coding_agent, "_current_todos", []))
-        app._refresh_header_context()
 
-    app.set_session_switch_handler(do_switch_session)
+            # Persist messages
+            if coding_agent._session_id:
+                await coding_agent.session_manager.append_messages(
+                    coding_agent._session_id, [coding_agent.context.messages[-1]]
+                )
 
-    # Set input handler
-    app.set_input_handler(handle_user_input)
+        except Exception as e:
+            logger.exception("Agent run failed")
+            app.message_renderer.add_system_message(f"Error: {e}")
+        finally:
+            # Transition back to idle
+            app.transition_phase(Phase.IDLE)
 
-    # Render loaded session history into TUI so user sees past messages
+    # Subscribe to user input events
+    app.event_bus.subscribe(
+        UserInputEvent, lambda e: asyncio.create_task(handle_user_input(e.text))
+    )
+
+    # Set input callback
+    app.input_handler.set_callback(handle_user_input)
+
+    # Load history messages
     for msg in coding_agent.context.messages:
-        role, display_text = _message_to_display(msg)
-        if display_text:
-            app.append_message(role, display_text)
+        role = getattr(msg, "role", "assistant")
+        content = getattr(msg, "content", "")
+        if isinstance(content, list):
+            content = "\n".join(
+                getattr(block, "text", "")
+                for block in content
+                if hasattr(block, "text")
+            )
+        if content:
+            if role == "user":
+                app.message_renderer.add_user_message(content)
+            else:
+                app.message_renderer.add_system_message(f"[{role}] {content}")
 
-    # Run the app
+    # Run app
     await app.run_async()
-
-
-__all__ = ["run_tui_mode"]
