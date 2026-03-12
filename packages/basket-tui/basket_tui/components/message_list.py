@@ -1,83 +1,93 @@
 """
-Message list and tool card for chat log (Phase 3).
-Replaces single TextArea with card-based list; ToolCard supports expand/collapse.
+MessageList Widget
+
+Displays conversation messages with reactive updates.
 """
 
-from textual.containers import Vertical, Horizontal
-from textual.widgets import Static
+from typing import List
+from textual.widgets import Widget
+from textual.reactive import reactive
+from rich.text import Text
 
-from ..constants import (
-    MESSAGE_BLOCK_CLASS,
-    MESSAGE_USER_CLASS,
-    MESSAGE_ASSISTANT_CLASS,
-    MESSAGE_SYSTEM_CLASS,
-    MESSAGE_ERROR_CLASS,
-    TOOL_BLOCK_CLASS,
-)
-
-TOOL_CARD_COLLAPSED_LEN = 80
+from ..core.conversation import Message
 
 
-class ToolCard(Static):
-    """Single tool block: collapsed shows summary, expanded shows full content."""
+class MessageList(Widget):
+    """
+    Message list widget with reactive updates
 
-    def __init__(self, content: str, index: int, expanded: bool, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._content = content or ""
-        self._index = index
-        self._expanded = expanded
-        self.update_render()
+    Uses Textual's reactive property system to automatically
+    refresh UI when messages change.
 
-    def update_render(self) -> None:
-        if self._expanded:
-            text = self._content
-        else:
-            first_line = self._content.split("\n")[0] if self._content else ""
-            if len(first_line) > TOOL_CARD_COLLAPSED_LEN:
-                text = first_line[: TOOL_CARD_COLLAPSED_LEN - 3] + "..."
-            else:
-                text = first_line or "(no content)"
-        self.update(text)
+    Attributes:
+        messages: Reactive list of messages
+    """
 
-    def set_expanded(self, expanded: bool) -> None:
-        self._expanded = expanded
-        self.update_render()
+    # Reactive property - auto-triggers watch_messages when changed
+    messages: reactive[List[Message]] = reactive(list, init=False)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.messages = []
 
-class MessageList(Vertical):
-    """Vertical list of message cards (user, assistant, system, tool). Built from state.get_transcript_blocks()."""
+    def watch_messages(
+        self, old_messages: List[Message], new_messages: List[Message]
+    ) -> None:
+        """
+        Called automatically when messages property changes
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.can_focus = True
-        # So list height follows content; prevents large gap between first Q and A (override Vertical's 1fr)
-        self.styles.height = "auto"
+        Args:
+            old_messages: Previous message list
+            new_messages: New message list
+        """
+        self.refresh()
 
-    def update_from_state(self, state) -> None:
-        """Rebuild children from state.output_blocks_with_role + streaming tail and tool_expanded."""
-        blocks = state.get_transcript_blocks()
-        self.remove_children()
-        for i, (role, content) in enumerate(blocks):
-            content = content or ""
-            if role == "user":
-                row = Horizontal(classes="message-row message-row--user")
-                self.mount(row)
-                row.mount(Static("", classes="message-spacer"))
-                row.mount(Static(content, classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_USER_CLASS}"))
-            elif role == "assistant":
-                self.mount(Static(content, classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_ASSISTANT_CLASS}"))
-            elif role == "system":
-                self.mount(Static(content, classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_SYSTEM_CLASS}"))
-            elif role == "error":
-                self.mount(Static(content, classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_ERROR_CLASS}"))
-            elif role == "tool":
-                expanded = state.tool_expanded.get(i, False)
-                card = ToolCard(
-                    content,
-                    index=i,
-                    expanded=expanded,
-                    classes=f"{MESSAGE_BLOCK_CLASS} {TOOL_BLOCK_CLASS}",
-                )
-                self.mount(card)
-            else:
-                self.mount(Static(content, classes=f"{MESSAGE_BLOCK_CLASS} {MESSAGE_SYSTEM_CLASS}"))
+    def render(self) -> Text:
+        """
+        Render message list to Rich Text
+
+        Returns:
+            Rendered text with styled messages
+        """
+        output = Text()
+
+        for msg in self.messages:
+            # Role prefix with color
+            role_style = self._get_role_style(msg.role)
+            output.append(f"[{msg.role}] ", style=role_style)
+
+            # Message content
+            output.append(msg.content)
+            output.append("\n\n")
+
+        return output
+
+    def _get_role_style(self, role: str) -> str:
+        """
+        Get Rich style for message role
+
+        Args:
+            role: Message role
+
+        Returns:
+            Rich style string
+        """
+        styles = {
+            "user": "cyan",
+            "assistant": "green",
+            "system": "yellow",
+            "tool": "magenta",
+        }
+        return styles.get(role, "white")
+
+    def add_message(self, message: Message) -> None:
+        """
+        Add message to list
+
+        Triggers reactive update by creating new list.
+
+        Args:
+            message: Message to add
+        """
+        # Create new list to trigger reactive update
+        self.messages = self.messages + [message]
