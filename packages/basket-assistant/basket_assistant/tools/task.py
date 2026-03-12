@@ -38,7 +38,9 @@ def create_task_tool(agent_ref: Any) -> dict:
             "Available subagents (pass subagent_type when calling this tool):",
         ]
         for name, cfg in sorted(configs.items()):
-            lines.append(f"  - {name}: {cfg.description}")
+            desc = getattr(agent_ref, "get_subagent_display_description", None)
+            label = (desc(name, cfg) if callable(desc) else (getattr(cfg, "description", "") or name)).strip() or name
+            lines.append(f"  - {name}: {label}")
         description = "\n".join(lines)
 
     async def execute_task(description: str, prompt: str, subagent_type: str) -> str:

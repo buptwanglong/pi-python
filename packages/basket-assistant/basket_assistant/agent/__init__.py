@@ -5,7 +5,7 @@ AssistantAgent: main coding agent class composed from prompts, session, tools, e
 import logging
 import os
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from basket_agent import Agent
 from basket_ai.api import get_model
@@ -46,12 +46,17 @@ class AssistantAgent:
             if value:
                 os.environ[key] = str(value)
 
-        sessions_dir = Path(self.settings.sessions_dir).expanduser()
         # Resolve main agent key: agent_name (e.g. from CLI --agent) or default_agent
         main_agent_key = (agent_name or "").strip() or getattr(
             self.settings, "default_agent", None
         )
-        self.session_manager = SessionManager(sessions_dir, agent_name=main_agent_key or None)
+        # Sessions per-agent: agents/<name>/sessions/ when main_agent_key is set; else global sessions_dir
+        if main_agent_key:
+            agent_root = prompts.get_agent_root(self.settings, main_agent_key)
+            sessions_dir = agent_root / "sessions"
+        else:
+            sessions_dir = Path(self.settings.sessions_dir).expanduser()
+        self.session_manager = SessionManager(sessions_dir, agent_name=None)
 
         use_agent_model = (
             main_agent_key
@@ -125,6 +130,10 @@ class AssistantAgent:
 
     def _get_subagent_configs(self):
         return prompts.get_subagent_configs(self)
+
+    def get_subagent_display_description(self, name: str, cfg: Any) -> str:
+        """Display label for a subagent in Task list: cfg.description or first line of workspace AGENTS.md."""
+        return tools.get_subagent_display_description(self, name, cfg)
 
     def _get_skills_dirs(self):
         return prompts.get_skills_dirs(self.settings)

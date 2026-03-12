@@ -87,11 +87,7 @@ class TestAssistantAgentIntegration:
     @pytest.mark.asyncio
     async def test_filter_tools_for_subagent_whitelist(self, mock_coding_agent):
         """SubAgentConfig.tools whitelist: only explicitly enabled tools are returned."""
-        cfg = SubAgentConfig(
-            description="Explore",
-            prompt="You explore.",
-            tools={"read": True, "grep": True},
-        )
+        cfg = SubAgentConfig(tools={"read": True, "grep": True})
         filtered = mock_coding_agent._filter_tools_for_subagent(cfg)
         names = [t["name"] for t in filtered]
         assert set(names) == {"read", "grep"}, "Only whitelisted read and grep should be enabled"
@@ -106,12 +102,7 @@ class TestAssistantAgentIntegration:
         monkeypatch.setattr("basket_ai.api.get_model", lambda *args, **kwargs: mock_model)
         settings = mock_settings_manager.load()
         settings.sessions_dir = str(tmp_path / "sessions")
-        settings.agents = {
-            "general": SubAgentConfig(
-                description="General research",
-                prompt="You are a research assistant.",
-            ),
-        }
+        settings.agents = {"general": SubAgentConfig()}
         mock_settings_manager.save(settings)
         agent = AssistantAgent(settings_manager=mock_settings_manager, load_extensions=False)
         tool_names = {t.name for t in agent.agent.tools}

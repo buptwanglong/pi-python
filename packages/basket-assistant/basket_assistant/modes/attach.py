@@ -3,11 +3,14 @@ TUI attach mode: connect to a resident assistant gateway via WebSocket and run t
 
 Same protocol works for (1) local gateway ws://127.0.0.1:7682/ws and (2) relay client
 URL (e.g. wss://relay-host/relay/client?session_id=xxx from `basket relay <url>`).
+Optional agent_name appends ?agent=<name> to select main agent (basket tui --agent).
 """
 
 import asyncio
 import json
 import logging
+from urllib.parse import urlencode
+
 from typing import Optional
 
 from basket_tui import PiCodingAgentApp
@@ -16,7 +19,16 @@ from basket_tui.messages import ProcessPendingInputs
 logger = logging.getLogger(__name__)
 
 
-async def run_tui_mode_attach(ws_url: str) -> None:
+def _build_attach_url(ws_url: str, agent_name: Optional[str]) -> str:
+    """Append ?agent=<name> or &agent=<name> to ws_url when agent_name is set."""
+    if not agent_name or not agent_name.strip():
+        return ws_url
+    name = agent_name.strip()
+    sep = "&" if "?" in ws_url else "?"
+    return f"{ws_url}{sep}{urlencode({'agent': name})}"
+
+
+async def run_tui_mode_attach(ws_url: str, agent_name: Optional[str] = None) -> None:
     """
     Run the TUI connected to a gateway WebSocket. User input is sent to the gateway;
     events (text_delta, tool_call_*, agent_complete, agent_error) are received and
@@ -25,12 +37,14 @@ async def run_tui_mode_attach(ws_url: str) -> None:
     Args:
         ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws or relay client URL
                 wss://host/relay/client?session_id=xxx)
+        agent_name: Optional main agent name; appends ?agent=<name> to ws_url for gateway.
     """
     try:
         import websockets
     except ImportError:
         raise ImportError("basket_assistant.modes.attach requires 'websockets' package")
 
+    ws_url = _build_attach_url(ws_url, agent_name)
     app = PiCodingAgentApp(agent=None)
     ws_ref: list = []  # single-element list holding the current WebSocket
     connected = asyncio.Event()
@@ -160,10 +174,20 @@ async def run_tui_mode_attach(ws_url: str) -> None:
     app.set_input_handler(handle_user_input)
     reader_task = asyncio.create_task(reader())
     await connected.wait()
+
+    _original_exit = app.exit
+
+    def _exit_with_reader_cancel(*args, **kwargs):
+        reader_task.cancel()
+        _original_exit(*args, **kwargs)
+
+    app.exit = _exit_with_reader_cancel  # type: ignore[method-assign]
+
     try:
         await app.run_async()
     finally:
-        reader_task.cancel()
+        if not reader_task.done():
+            reader_task.cancel()
         try:
             await reader_task
         except asyncio.CancelledError:

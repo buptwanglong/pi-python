@@ -1,10 +1,9 @@
 """Mixin: slash commands, slash popup, plan mode toggle."""
 
 from textual.css.query import NoMatches
-from textual import on
 
 from .constants import INPUT_ID
-from .components.multiline_input import MultiLineInput, InputWantsSlashPopup
+from .components.multiline_input import MultiLineInput
 from .screens.slash_popup import SlashCommandScreen
 from .screens.code_block_overlay import CodeBlockOverlay
 from .screens import HelpScreen
@@ -12,7 +11,7 @@ from .screens.session_picker import SESSION_NEW_ID
 
 
 class AppSlashMixin:
-    """Slash: _handle_slash_command, _run_slash_command, _show_slash_help, _on_input_wants_slash_popup, _on_slash_popup_dismissed, action_toggle_plan_mode."""
+    """Slash: _handle_slash_command, _run_slash_command, _show_slash_help, on_input_wants_slash_popup, _on_slash_popup_dismissed, action_toggle_plan_mode."""
 
     def _run_slash_command(self, cmd: str) -> None:
         """Run a single slash command (used by slash popup)."""
@@ -59,11 +58,12 @@ class AppSlashMixin:
         elif cmd == "/abort":
             self.action_stop_agent()
 
-    @on(InputWantsSlashPopup)
-    def _on_input_wants_slash_popup(self, event: InputWantsSlashPopup) -> None:
+    def on_input_wants_slash_popup(self, event) -> None:
         """User pressed Tab with / in input; show slash command list."""
         try:
             inp = self.query_one(f"#{INPUT_ID}", MultiLineInput)
+            # Update _last_text before clearing to prevent re-triggering the event
+            inp._last_text = ""
             inp.clear()
         except NoMatches:
             pass
@@ -162,8 +162,8 @@ class AppSlashMixin:
         return False
 
     def _show_slash_help(self) -> None:
-        """Show slash commands and shortcuts in a modal."""
-        help_text = """Commands (type in input):
+        """Show slash commands and shortcuts in a modal (improvement 10: input history & line edit)."""
+        help_text = """Commands (type / or /help in input; Tab to open list):
 /clear   Clear output
 /help    This help
 /history Open transcript overlay
@@ -178,16 +178,22 @@ class AppSlashMixin:
 /reset   Reset current session
 /abort   Stop agent
 
+Input (improvement 10):
+Ctrl+↑ / Ctrl+↓  Input history (previous/next)
+Ctrl+A / Ctrl+E  Cursor to line start/end
+Ctrl+K / Ctrl+U  Delete to end/start of line
+Ctrl+W           Delete word left
+
 Shortcuts:
 Ctrl+Shift+T  Transcript overlay
 Ctrl+E        Expand last tool result
-Ctrl+G        Stop agent
-Ctrl+L        Model info
-Ctrl+Shift+L  Clear
-Ctrl+P        Session picker
-Ctrl+Shift+P  Plan mode
-Ctrl+D        Toggle dark
-Ctrl+T        Todo expand/collapse
-Ctrl+End      Scroll to bottom
-Q             Quit"""
+Ctrl+G       Stop agent
+Ctrl+L       Model info
+Ctrl+Shift+L Clear
+Ctrl+P       Session picker
+Ctrl+Shift+P Plan mode
+Ctrl+D       Toggle dark
+Ctrl+T       Todo expand/collapse
+Ctrl+End     Scroll to bottom
+Q            Quit"""
         self.push_screen(HelpScreen(help_text), lambda _: None)

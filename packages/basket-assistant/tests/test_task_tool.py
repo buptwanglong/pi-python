@@ -16,20 +16,17 @@ def agent_ref_no_agents():
 
 @pytest.fixture
 def agent_ref_with_agents():
-    """Agent ref with two subagents."""
+    """Agent ref with two subagents (display label from get_subagent_display_description or name)."""
     from basket_assistant.core import SubAgentConfig
     ref = MagicMock()
     ref._get_subagent_configs.return_value = {
-        "general": SubAgentConfig(
-            description="General-purpose research",
-            prompt="You are a research assistant.",
-        ),
-        "explore": SubAgentConfig(
-            description="Fast codebase exploration",
-            prompt="You explore codebases. Be concise.",
-            tools={"read": True, "grep": True},
-        ),
+        "general": SubAgentConfig(tools=None),
+        "explore": SubAgentConfig(tools={"read": True, "grep": True}),
     }
+    # Optional: return a label when no workspace (mock has no get_subagent_display_description)
+    ref.get_subagent_display_description = lambda name, cfg: (
+        "General-purpose research" if name == "general" else "Fast codebase exploration"
+    )
     return ref
 
 

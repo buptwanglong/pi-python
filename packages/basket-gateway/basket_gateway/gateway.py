@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Union
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -96,25 +96,33 @@ def _extract_last_assistant_text(agent: Any) -> str:
     return ""
 
 
+def _agent_cache_key(session_id: str, agent_name: Optional[str]) -> tuple[str, str]:
+    """Cache key for (session_id, agent_name); empty agent_name means default."""
+    return (session_id, (agent_name or "").strip() or "")
+
+
 class AgentGateway:
     """
     Gateway that runs agent for a session; supports single default session and
     per-session agents for multi-user channels (e.g. Feishu).
+    agent_factory may accept optional agent_name: Callable[[Optional[str]], Any].
     """
 
-    def __init__(self, agent_factory: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        agent_factory: Union[Callable[[], Any], Callable[[Optional[str]], Any]],
+    ) -> None:
         self._agent_factory = agent_factory
-        self._default_agent: Optional[Any] = None
-        self._sessions: dict[str, Any] = {}
+        self._sessions: dict[tuple[str, str], Any] = {}
 
-    def _get_agent(self, session_id: str) -> Any:
-        if session_id == "default":
-            if self._default_agent is None:
-                self._default_agent = self._agent_factory()
-            return self._default_agent
-        if session_id not in self._sessions:
-            self._sessions[session_id] = self._agent_factory()
-        return self._sessions[session_id]
+    def _get_agent(self, session_id: str, agent_name: Optional[str] = None) -> Any:
+        key = _agent_cache_key(session_id, agent_name)
+        if key not in self._sessions:
+            try:
+                self._sessions[key] = self._agent_factory(agent_name or None)
+            except TypeError:
+                self._sessions[key] = self._agent_factory()
+        return self._sessions[key]
 
     def _ensure_event_sink_handlers(self, agent: Any) -> None:
         """Register gateway event handlers once per agent; they send to agent._gateway_event_sink_ref[0]."""
@@ -173,14 +181,16 @@ class AgentGateway:
         user_content: str,
         *,
         event_sink: Optional[Callable[[dict], Awaitable[None]]] = None,
+        agent_name: Optional[str] = None,
     ) -> str:
         """
         Append user message, run agent, optionally stream events to event_sink.
+        agent_name: when set, use/create agent for this name (e.g. from TUI --agent).
         Returns the final assistant reply text.
         """
         from basket_ai.types import UserMessage
 
-        agent = self._get_agent(session_id)
+        agent = self._get_agent(session_id, agent_name)
         if hasattr(agent, "set_session_id") and asyncio.iscoroutinefunction(agent.set_session_id):
             await agent.set_session_id(session_id)
         # Ensure session file exists (e.g. for "default") so append_messages can persist
@@ -288,12 +298,13 @@ async def status_endpoint(request: Request) -> JSONResponse:
 
 def create_app(
     pid: Optional[int] = None,
-    agent_factory: Optional[Callable[[], Any]] = None,
+    agent_factory: Optional[Union[Callable[[], Any], Callable[[Optional[str]], Any]]] = None,
     channel_config: Optional[dict] = None,
 ) -> Starlette:
     """
     Create Starlette app with gateway and mounted channels.
-    agent_factory is required; channel_config defaults to {"websocket": True, "feishu": None}.
+    agent_factory is required; may be () -> Agent or (agent_name: Optional[str]) -> Agent.
+    channel_config defaults to {"websocket": True, "feishu": None}.
     """
     if agent_factory is None:
         raise ValueError("agent_factory is required")
@@ -335,7 +346,7 @@ def create_app(
 async def run_gateway(
     host: str = "127.0.0.1",
     port: int = 7682,
-    agent_factory: Optional[Callable[[], Any]] = None,
+    agent_factory: Optional[Union[Callable[[], Any], Callable[[Optional[str]], Any]]] = None,
     channel_config: Optional[dict] = None,
 ) -> None:
     """Run the gateway. Writes pid/port before starting; clears on exit."""

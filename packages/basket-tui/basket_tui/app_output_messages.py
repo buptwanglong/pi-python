@@ -2,11 +2,15 @@
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from .messages import MountMessageBlock, MountWidget, ProcessPendingInputs
 
 logger = logging.getLogger(__name__)
+
+# Braille spinner for "Thinking..." (improvement 5, OpenClaw-style)
+BRAILLE_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 class AppOutputMessagesMixin:
@@ -73,13 +77,56 @@ class AppOutputMessagesMixin:
         if self._stream_refresh_timer is None:
             self._stream_refresh_timer = self.set_timer(0.08, self._on_streaming_refresh_tick)
 
+    def _start_thinking_spinner(self) -> None:
+        """Start timer to animate Braille spinner and elapsed time (improvement 5)."""
+        if getattr(self, "_thinking_spinner_timer", None) is not None:
+            return
+        self._thinking_spinner_timer = self.set_timer(0.08, self._on_thinking_spinner_tick)
+
+    def _on_thinking_spinner_tick(self) -> None:
+        """Update thinking block with next Braille frame and elapsed time; keep accumulated content."""
+        self._thinking_spinner_timer = None
+        idx = self.state.thinking_block_index
+        if idx is None or idx >= len(self.state.output_blocks):
+            return
+        start = self.state.thinking_start_time
+        if start is None:
+            start = time.time()
+            self.state.thinking_start_time = start
+        elapsed = time.time() - start
+        frame_idx = getattr(self, "_thinking_spinner_frame_index", 0) % len(BRAILLE_SPINNER_FRAMES)
+        frame = BRAILLE_SPINNER_FRAMES[frame_idx]
+        content = getattr(self.state, "thinking_content", "") or ""
+        text = f"{frame} Thinking... ({elapsed:.1f}s)" + (f" {content}" if content else "")
+        self.state.output_blocks[idx] = text
+        self.state.output_blocks_with_role[idx] = ("assistant", text)
+        self._thinking_spinner_frame_index = (frame_idx + 1) % len(BRAILLE_SPINNER_FRAMES)
+        self._refresh_output()
+        if self.state.thinking_block_index is not None:
+            self._thinking_spinner_timer = self.set_timer(0.08, self._on_thinking_spinner_tick)
+
+    def _stop_thinking_spinner(self) -> None:
+        """Stop Braille spinner timer (e.g. on finalize)."""
+        t = getattr(self, "_thinking_spinner_timer", None)
+        if t is not None:
+            t.stop()
+            self._thinking_spinner_timer = None
+
     def append_thinking(self, thinking: str) -> None:
-        """Append thinking as a block in output (TextArea mode)."""
-        if self.state.thinking_block_index is None:
+        """Append thinking as a block in output (TextArea mode). Braille spinner + elapsed time (improvement 5)."""
+        just_created = self.state.thinking_block_index is None
+        if just_created:
+            self.state.thinking_start_time = time.time()
+            self.state.thinking_content = ""
             self.state.output_blocks.append("Thinking... ")
             self.state.output_blocks_with_role.append(("assistant", "Thinking... "))
             self.state.thinking_block_index = len(self.state.output_blocks) - 1
-        text = "Thinking... " + thinking
+            self._start_thinking_spinner()
+        self.state.thinking_content = (getattr(self.state, "thinking_content", "") or "") + thinking
+        elapsed = time.time() - (self.state.thinking_start_time or time.time())
+        frame_idx = getattr(self, "_thinking_spinner_frame_index", 0) % len(BRAILLE_SPINNER_FRAMES)
+        frame = BRAILLE_SPINNER_FRAMES[frame_idx]
+        text = f"{frame} Thinking... ({elapsed:.1f}s)" + (f" {self.state.thinking_content}" if self.state.thinking_content else "")
         self.state.output_blocks[self.state.thinking_block_index] = text
         self.state.output_blocks_with_role[self.state.thinking_block_index] = ("assistant", text)
         self._refresh_output()
@@ -151,6 +198,9 @@ class AppOutputMessagesMixin:
         self.state.streaming_assistant = False
         self.state.streaming_buffer = ""
         self.state.thinking_block_index = None
+        self.state.thinking_start_time = None
+        self.state.thinking_content = ""
+        self._stop_thinking_spinner()
         if self._stream_refresh_timer is not None:
             self._stream_refresh_timer.stop()
             self._stream_refresh_timer = None

@@ -53,6 +53,10 @@ class AppState:
     current_tool_name: Optional[str] = None
     current_tool_args: Optional[dict] = None
     thinking_block_index: Optional[int] = None
+    """When thinking block is active, time when it started (for Braille spinner elapsed time)."""
+    thinking_start_time: Optional[float] = None
+    """Accumulated thinking text for current block (so spinner doesn't overwrite it)."""
+    thinking_content: str = ""
     agent_task: Optional[asyncio.Task] = None
     tool_block_full_results: List[str] = field(default_factory=list)
     """Conversation phase for status bar: idle, waiting_model, thinking, streaming, tool_running, error."""
@@ -74,6 +78,8 @@ class AppState:
         self.current_tool_name = None
         self.current_tool_args = None
         self.thinking_block_index = None
+        self.thinking_start_time = None
+        self.thinking_content = ""
         # tool_block_full_results is not cleared on reset_streaming; cleared on reset_all / clear
 
     def reset_all(self) -> None:

@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..core import SubAgentConfig, get_skill_full_content, load_agents_from_dirs
-from ..core.workspace_bootstrap import load_workspace_sections, resolve_workspace_dir
+from ..core.workspace_bootstrap import (
+    load_daily_memory,
+    load_workspace_sections,
+    resolve_workspace_dir,
+)
 
 
 def get_agents_dirs(settings: Any) -> List[Path]:
@@ -15,6 +19,14 @@ def get_agents_dirs(settings: Any) -> List[Path]:
         Path.home() / ".basket" / "agents",
         Path.cwd() / ".basket" / "agents",
     ]
+
+
+def get_agent_root(settings: Any, agent_name: str) -> Path:
+    """Root directory for an agent: agents_base / agent_name (sessions/, workspace/ live under this)."""
+    dirs = get_agents_dirs(settings)
+    base = dirs[0] if dirs else Path.home() / ".basket" / "agents"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / agent_name
 
 
 def get_subagent_configs(agent: Any) -> Dict[str, SubAgentConfig]:
@@ -68,39 +80,87 @@ Always explain what you're doing before using tools.
 """
 
 
+SECTION_ORDER = [
+    ("identity", "Identity"),
+    ("soul", "Soul (persona & boundaries)"),
+    ("agents", "Operating instructions"),
+    ("user", "User context"),
+    ("tools", "Tools & environment notes"),
+    ("memory", "Memory"),
+    ("bootstrap", "Bootstrap"),
+    ("boot", "Boot"),
+    ("heartbeat", "Heartbeat"),
+]
+
+
+def compose_system_prompt_from_workspace(
+    workspace_dir: Path,
+    skip_bootstrap: bool = False,
+    include_daily_memory: bool = True,
+) -> str:
+    """
+    Compose system prompt from workspace md files and optional daily memory.
+    Returns assembled sections plus _TOOLS_SYSTEM_BLOCK. Used by main agent and run_subagent.
+    """
+    sections = load_workspace_sections(workspace_dir, skip_bootstrap=skip_bootstrap)
+    if include_daily_memory:
+        daily = load_daily_memory(workspace_dir)
+        if daily:
+            existing = sections.get("memory", "")
+            sections["memory"] = (existing + "\n\n" + daily).strip() if existing else daily
+    parts = []
+    for key, title in SECTION_ORDER:
+        if key in sections and sections[key]:
+            parts.append(f"## {title}\n\n{sections[key]}")
+    if not parts:
+        return _builtin_base_prompt()
+    composed = "\n\n".join(parts)
+    return composed + "\n\n---\n\n" + _TOOLS_SYSTEM_BLOCK
+
+
+def _resolve_main_agent_workspace_dir(settings: Any) -> Optional[Path]:
+    """
+    Resolve workspace path for main agent: agents[default_agent].workspace_dir if set and valid,
+    else global settings.workspace_dir (or default ~/.basket/workspace via resolve_workspace_dir).
+    """
+    default_agent = getattr(settings, "default_agent", None)
+    agents = getattr(settings, "agents", None) or {}
+    if default_agent and default_agent in agents:
+        cfg = agents[default_agent]
+        raw = getattr(cfg, "workspace_dir", None)
+        if raw and str(raw).strip():
+            path = Path(str(raw).strip()).expanduser().resolve()
+            if path.exists() and path.is_dir():
+                return path
+            path.mkdir(parents=True, exist_ok=True)
+            from ..core.workspace_bootstrap import ensure_workspace_default_fill
+            ensure_workspace_default_fill(path)
+            return path
+    return resolve_workspace_dir(settings)
+
+
 def get_system_prompt_base(settings: Optional[Any] = None) -> str:
     """
     Get the base system prompt for the agent.
 
     When settings is None, loads via default SettingsManager (backward compatibility).
-    When workspace_dir is set and skip_bootstrap is False, composes from AGENTS.md,
-    IDENTITY.md, SOUL.md, USER.md plus the tools block; otherwise returns the
-    built-in coding assistant prompt plus the tools block.
+    Workspace is always used: agents[default_agent].workspace_dir overrides global workspace_dir;
+    when unset, default ~/.basket/workspace is used and default-filled. When skip_bootstrap is True,
+    returns built-in prompt without loading workspace content.
     """
     if settings is None:
         from ..core import SettingsManager
         settings = SettingsManager().load()
     if getattr(settings, "skip_bootstrap", False):
         return _builtin_base_prompt()
-    workspace_dir = resolve_workspace_dir(settings)
+    workspace_dir = _resolve_main_agent_workspace_dir(settings)
     if workspace_dir is None:
         return _builtin_base_prompt()
-    sections = load_workspace_sections(workspace_dir, skip_bootstrap=False)
-    if not sections:
-        return _builtin_base_prompt()
-    parts = []
-    for key, title in [
-        ("identity", "Identity"),
-        ("soul", "Soul (persona & boundaries)"),
-        ("agents", "Operating instructions"),
-        ("user", "User context"),
-        ("tools", "Tools & environment notes"),
-        ("memory", "Memory"),
-    ]:
-        if key in sections and sections[key]:
-            parts.append(f"## {title}\n\n{sections[key]}")
-    composed = "\n\n".join(parts)
-    return composed + "\n\n---\n\n" + _TOOLS_SYSTEM_BLOCK
+    return compose_system_prompt_from_workspace(
+        workspace_dir,
+        skip_bootstrap=False,
+        include_daily_memory=True,
+    )
 
 
 def _builtin_base_prompt() -> str:

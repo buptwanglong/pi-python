@@ -1,15 +1,13 @@
 """Mixin: input handler, input changed, multi-line input submitted."""
 
 import asyncio
-from textual.widgets import TextArea
-from textual import on
 
 from .constants import INPUT_ID
 from .components.multiline_input import MultiLineInput
 
 
 class AppInputMixin:
-    """Input: set_input_handler, _on_input_changed, on_multi_line_input_submitted."""
+    """Input: set_input_handler, _handle_input_changed, on_multi_line_input_submitted."""
 
     def set_input_handler(self, handler) -> None:
         """
@@ -20,9 +18,8 @@ class AppInputMixin:
         """
         self._input_handler = handler
 
-    @on(TextArea.Changed)
-    def _on_input_changed(self, event: TextArea.Changed) -> None:
-        """Clear input error when user types."""
+    def _handle_input_changed(self, event) -> None:
+        """Clear input error when user types (called from _on_text_area_changed on App)."""
         if getattr(event.control, "id", None) == INPUT_ID:
             self._clear_input_error()
 

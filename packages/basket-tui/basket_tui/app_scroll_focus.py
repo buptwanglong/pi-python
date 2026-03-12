@@ -5,12 +5,10 @@ import logging
 from textual.containers import ScrollableContainer
 from textual.widgets import Static
 from textual.css.query import NoMatches
-from textual.events import Click
-from textual import on
 
 from .constants import OUTPUT_CONTAINER_ID, MESSAGE_LIST_ID, INPUT_ID
 from .components.message_list import MessageList
-from .components.multiline_input import MultiLineInput
+from .components.multiline_input import MultiLineInput, InputWantsSlashPopup
 from .screens import CopyPasteMenuScreen
 
 logger = logging.getLogger(__name__)
@@ -78,12 +76,17 @@ class AppScrollFocusMixin:
             logger.error(f"Unexpected error while scrolling down: {e}")
 
     def action_focus_next_region(self) -> None:
-        """Cycle focus to next region: message area -> input -> message area."""
+        """Cycle focus to next region: message area -> input -> message area.
+        When focus is on input and content starts with /, Tab opens slash command list instead."""
         try:
             inp = self.query_one(f"#{INPUT_ID}", MultiLineInput)
             msg_list = self.query_one(f"#{MESSAGE_LIST_ID}", MessageList)
             focused = self.focused
             if focused is not None and focused == inp:
+                prefix = (inp.text or "").strip()
+                if prefix.startswith("/"):
+                    inp.post_message(InputWantsSlashPopup(prefix))
+                    return
                 msg_list.focus()
             else:
                 inp.focus()
@@ -140,8 +143,7 @@ class AppScrollFocusMixin:
         self.state.tool_expanded[idx] = not self.state.tool_expanded.get(idx, False)
         self._refresh_output()
 
-    @on(Click)
-    def _on_click(self, event: Click) -> None:
+    def _handle_click(self, event) -> None:
         """Left-click/tap on message area: focus it for scroll (touch/keyboard). Right-click: 复制/粘贴 menu."""
         w = event.widget
         try:

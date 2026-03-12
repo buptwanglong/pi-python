@@ -9,6 +9,7 @@ from basket_ai.api import get_model
 from basket_ai.types import Context, UserMessage
 
 from ..core import SubAgentConfig
+from ..core.workspace_bootstrap import ensure_workspace_default_fill
 from ..extensions.api import _wrap_tool_execute_with_hooks
 from ..tools import (
     BUILT_IN_TOOLS,
@@ -57,13 +58,67 @@ def filter_tools_for_subagent(agent: Any, cfg: SubAgentConfig) -> List[dict]:
     return [t for t in tools if cfg.tools.get(t["name"], False)]
 
 
+def get_subagent_display_description(agent: Any, name: str, cfg: SubAgentConfig) -> str:
+    """Display label for a subagent: first paragraph of workspace AGENTS.md, else name."""
+    try:
+        workspace_path = _resolve_subagent_workspace_path(agent, name, cfg)
+        agents_md = workspace_path / "AGENTS.md"
+        if agents_md.exists() and agents_md.is_file():
+            text = agents_md.read_text(encoding="utf-8").strip()
+            if text:
+                first = text.split("\n\n")[0].strip()[:200]
+                if first:
+                    return first
+    except Exception:
+        pass
+    return name
+
+
+def _resolve_subagent_workspace_path(agent: Any, subagent_name: str, cfg: SubAgentConfig) -> Path:
+    """Resolve workspace path for subagent: cfg.workspace_dir, else cfg.agent_dir/workspace, else default agents_dir/<name>/workspace."""
+    raw = getattr(cfg, "workspace_dir", None)
+    if raw and str(raw).strip():
+        path = Path(str(raw).strip()).expanduser().resolve()
+        if path.exists() and path.is_dir():
+            return path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    agent_dir_raw = getattr(cfg, "agent_dir", None)
+    if agent_dir_raw and str(agent_dir_raw).strip():
+        path = Path(str(agent_dir_raw).strip()).expanduser().resolve() / "workspace"
+        path.mkdir(parents=True, exist_ok=True)
+        ensure_workspace_default_fill(path)
+        return path
+    dirs = prompts.get_agents_dirs(agent.settings)
+    if not dirs:
+        default_base = Path.home() / ".basket" / "agents"
+        default_base.mkdir(parents=True, exist_ok=True)
+        path = default_base / subagent_name / "workspace"
+    else:
+        path = dirs[0] / subagent_name / "workspace"
+    path.mkdir(parents=True, exist_ok=True)
+    ensure_workspace_default_fill(path)
+    return path
+
+
 async def run_subagent(agent: Any, subagent_name: str, user_prompt: str) -> str:
-    """Run a subagent with the given prompt; returns last assistant text."""
+    """Run a subagent with the given prompt; returns last assistant text.
+    Subagent system prompt is built from workspace (OpenClaw-style md files); when workspace_dir
+    is unset, default ~/.basket/agents/<name>/ is used and default-filled.
+    """
     configs = prompts.get_subagent_configs(agent)
     cfg = configs.get(subagent_name)
     if not cfg:
         available = ", ".join(configs) if configs else "none"
         return f'SubAgent "{subagent_name}" not found. Available: {available}'
+
+    workspace_path = _resolve_subagent_workspace_path(agent, subagent_name, cfg)
+    ensure_workspace_default_fill(workspace_path)
+    system_prompt = prompts.compose_system_prompt_from_workspace(
+        workspace_path,
+        skip_bootstrap=False,
+        include_daily_memory=True,
+    )
 
     if cfg.model and isinstance(cfg.model, dict):
         model_kwargs: dict = {
@@ -81,7 +136,7 @@ async def run_subagent(agent: Any, subagent_name: str, user_prompt: str) -> str:
         model = agent.model
 
     context = Context(
-        systemPrompt=cfg.prompt,
+        systemPrompt=system_prompt,
         messages=[
             UserMessage(
                 role="user",

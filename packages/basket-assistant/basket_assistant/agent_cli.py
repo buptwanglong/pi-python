@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .core.workspace_bootstrap import ensure_workspace_default_fill
+
 
 def _default_settings_path() -> Path:
     env = os.environ.get("BASKET_SETTINGS_PATH")
@@ -49,9 +51,22 @@ def run_list(settings_path: Path | str | None = None) -> int:
     for name, cfg in sorted(agents.items()):
         if not isinstance(cfg, dict):
             continue
-        desc = (cfg.get("description") or "").strip() or "(no description)"
-        print(f"{name}\t{desc}")
+        print(f"{name}\t(workspace)")
     return 0
+
+
+def _default_agent_workspace_dir(agent_name: str, data: dict[str, Any]) -> Path:
+    """Default workspace path for a subagent: first agents_dirs or ~/.basket/agents, then <name>/workspace/."""
+    agents_dirs = data.get("agents_dirs")
+    if agents_dirs and isinstance(agents_dirs, list) and agents_dirs:
+        first = agents_dirs[0]
+        if isinstance(first, str) and first.strip():
+            base = Path(first.strip()).expanduser().resolve()
+            base.mkdir(parents=True, exist_ok=True)
+            return base / agent_name / "workspace"
+    base = Path.home() / ".basket" / "agents"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / agent_name / "workspace"
 
 
 def run_add(
@@ -62,7 +77,7 @@ def run_add(
     force: bool = False,
     settings_path: Path | str | None = None,
 ) -> int:
-    """Add a subagent to settings.agents. Returns 0 on success, 1 on abort/error."""
+    """Add a subagent to settings.agents; creates workspace at ~/.basket/agents/<name>/workspace/ with default fill (IDENTITY.md, AGENTS.md, BOOTSTRAP.md, memory/). Returns 0 on success, 1 on abort/error."""
     path = Path(settings_path) if settings_path else _default_settings_path()
     data = load_settings_raw(settings_path)
     agents = data.setdefault("agents", {})
@@ -77,15 +92,19 @@ def run_add(
         if answer not in ("y", "yes"):
             print("Aborted.")
             return 1
+    workspace_path = _default_agent_workspace_dir(name, data)
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    ensure_workspace_default_fill(workspace_path)
+    agent_dir_path = workspace_path.parent
     entry: dict[str, Any] = {
-        "description": description.strip(),
-        "prompt": prompt.strip(),
+        "agent_dir": str(agent_dir_path.resolve()),
+        "workspace_dir": str(workspace_path.resolve()),
     }
     if tools_dict:
         entry["tools"] = tools_dict
     agents[name] = entry
     save_settings_raw(data, settings_path)
-    print(f"Added subagent {name!r}.")
+    print(f"Added subagent {name!r}. Workspace: {workspace_path}")
     return 0
 
 

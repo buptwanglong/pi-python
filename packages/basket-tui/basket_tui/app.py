@@ -47,7 +47,7 @@ class PiCodingAgentApp(
 
     TITLE = "Pi Coding Agent"
     SUB_TITLE = "Interactive AI Coding Assistant"
-    WELCOME_LINE = "Enter 发送，Shift+Enter 换行。右键 复制/粘贴，Q 退出。Scroll: 滚轮或 Page Up/Down。"
+    WELCOME_LINE = "Enter 发送 Shift+Enter 换行 | Ctrl+↑/↓ 历史 | Ctrl+A/E 行首/尾 Ctrl+K/U 删行尾/首 Ctrl+W 删词 | Q 退出"
 
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
@@ -112,8 +112,23 @@ class PiCodingAgentApp(
         self._streaming_length_rendered = 0
         self._long_running_timer = None
         self._show_still_running = False
+        self._thinking_spinner_timer = None
+        self._thinking_spinner_frame_index = 0
         self.state = AppState()
         self.renderer = MessageRenderer()
+
+    def _stop_all_timers(self) -> None:
+        """Cancel all active timers so widgets can close cleanly."""
+        for attr in ("_stream_refresh_timer", "_long_running_timer", "_thinking_spinner_timer"):
+            t = getattr(self, attr, None)
+            if t is not None:
+                t.stop()
+                setattr(self, attr, None)
+        self.state.thinking_block_index = None
+
+    def exit(self, *args, **kwargs) -> None:
+        self._stop_all_timers()
+        super().exit(*args, **kwargs)
 
 
 if __name__ == "__main__":

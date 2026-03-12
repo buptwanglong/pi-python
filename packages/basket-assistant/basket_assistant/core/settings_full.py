@@ -10,9 +10,11 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TRAJECTORY_DIR = "~/.basket/trajectories"
 
 
 class ModelSettings(BaseModel):
@@ -43,12 +45,22 @@ class PermissionsSettings(BaseModel):
 
 
 class SubAgentConfig(BaseModel):
-    """Configuration for a subagent (used by the Task tool)."""
+    """Configuration for a subagent (used by the Task tool).
+    System prompt comes from workspace (AGENTS.md, IDENTITY.md, etc.); display label from AGENTS.md first line.
+    """
 
-    description: str = Field(..., description="Short description for the Task tool list")
-    prompt: str = Field(..., description="System prompt for this subagent")
+    model_config = {"extra": "ignore"}  # allow old configs with description/prompt to load
+
     model: Optional[Dict[str, Any]] = Field(None, description="Optional model override")
     tools: Optional[Dict[str, bool]] = Field(None, description="Tool name -> enabled")
+    agent_dir: Optional[str] = Field(
+        None,
+        description="Agent root directory (parent of workspace/, sessions/); when set, workspace_dir defaults to agent_dir/workspace if workspace_dir is unset",
+    )
+    workspace_dir: Optional[str] = Field(
+        None,
+        description="Workspace directory for OpenClaw-style md files; when unset, uses agent_dir/workspace or ~/.basket/agents/<name>/workspace",
+    )
 
 
 class Settings(BaseModel):
@@ -59,7 +71,10 @@ class Settings(BaseModel):
     permissions: PermissionsSettings = Field(default_factory=PermissionsSettings)
     api_keys: Dict[str, str] = Field(default_factory=dict)
     sessions_dir: str = "~/.basket/sessions"
-    trajectory_dir: Optional[str] = "~/.basket/trajectories"
+    trajectory_dir: Optional[str] = Field(
+        default=None,
+        description="Directory for trajectory recording; default filled at load time with ~/.basket/trajectories. Set to empty to disable.",
+    )
     skills_dirs: List[str] = Field(default_factory=list)
     skills_include: List[str] = Field(default_factory=list)
     agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)
@@ -75,6 +90,13 @@ class Settings(BaseModel):
     relay_url: Optional[str] = None
     hooks: Optional[Dict[str, List[Dict[str, Any]]]] = None
     custom: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _fill_trajectory_dir_default(self) -> "Settings":
+        """Set trajectory_dir to default at config time when None (not when reading)."""
+        if self.trajectory_dir is None:
+            object.__setattr__(self, "trajectory_dir", DEFAULT_TRAJECTORY_DIR)
+        return self
 
 
 class SettingsManager:

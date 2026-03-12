@@ -1,14 +1,30 @@
 """
 WebSocket channel: single session at /ws, stream agent events to client.
+Optional query param ?agent=<name> selects main agent (e.g. from basket tui --agent).
 """
 
 import json
 import logging
-from typing import Any
+from urllib.parse import parse_qs
+
+from typing import Any, Optional
 
 from starlette.websockets import WebSocket
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_agent_from_scope(scope: dict) -> Optional[str]:
+    """Parse agent name from WebSocket scope query_string; return None if not set."""
+    qs = scope.get("query_string") or b""
+    if isinstance(qs, bytes):
+        qs = qs.decode("latin-1")
+    params = parse_qs(qs)
+    values = params.get("agent") or []
+    if not values:
+        return None
+    name = (values[0] or "").strip()
+    return name if name else None
 
 
 async def _send_json_safe(app: Any, obj: dict) -> None:
@@ -24,7 +40,8 @@ async def _send_json_safe(app: Any, obj: dict) -> None:
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """
-    WebSocket /ws: single session. Get app from scope; run gateway.run("default", content, event_sink).
+    WebSocket /ws: single session. Optional ?agent=<name> in URL.
+    Run gateway.run("default", content, event_sink=..., agent_name=...).
     """
     app = websocket.scope.get("app")
     if app is None:
@@ -34,6 +51,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     if gateway is None:
         await websocket.close(code=1011)
         return
+
+    agent_name = _parse_agent_from_scope(websocket.scope)
 
     await websocket.accept()
 
@@ -59,7 +78,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if not content:
                 continue
             try:
-                await gateway.run("default", content, event_sink=event_sink)
+                await gateway.run(
+                    "default",
+                    content,
+                    event_sink=event_sink,
+                    agent_name=agent_name,
+                )
             except Exception as e:
                 logger.exception("Agent run failed in gateway")
                 await event_sink({"type": "agent_error", "error": str(e)})

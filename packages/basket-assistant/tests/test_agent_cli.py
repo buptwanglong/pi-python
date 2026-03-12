@@ -43,25 +43,25 @@ def test_run_list_shows_agents(tmp_path, capsys):
     path = tmp_path / "settings.json"
     save_settings_raw({
         "agents": {
-            "explore": {"description": "Fast exploration", "prompt": "Be concise."},
+            "explore": {"agent_dir": "/x/explore", "workspace_dir": "/x/explore/workspace"},
         },
     }, path)
     exit_code = run_list(path)
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "explore" in out
-    assert "Fast exploration" in out
+    assert "workspace" in out
 
 
 def test_run_add_creates_agent(tmp_path, capsys):
     path = tmp_path / "settings.json"
     save_settings_raw({}, path)
-    exit_code = run_add("explore", "Explore code", "You explore.", None, True, path)
+    exit_code = run_add("explore", "", "", None, True, path)
     assert exit_code == 0
     data = load_settings_raw(path)
     assert "explore" in data["agents"]
-    assert data["agents"]["explore"]["description"] == "Explore code"
-    assert data["agents"]["explore"]["prompt"] == "You explore."
+    assert "agent_dir" in data["agents"]["explore"]
+    assert "workspace_dir" in data["agents"]["explore"]
     out = capsys.readouterr().out
     assert "Added" in out
 
@@ -72,6 +72,25 @@ def test_run_add_with_tools(tmp_path):
     run_add("x", "d", "p", {"read": True, "grep": True}, True, path)
     data = load_settings_raw(path)
     assert data["agents"]["x"]["tools"] == {"read": True, "grep": True}
+
+
+def test_run_add_creates_workspace_with_default_fill(tmp_path):
+    """run_add creates agents_dirs[0]/<name>/workspace/ with md files and memory/."""
+    agents_base = tmp_path / "agents"
+    path = tmp_path / "settings.json"
+    save_settings_raw({"agents": {}, "agents_dirs": [str(agents_base)]}, path)
+    exit_code = run_add("writer", "", "", None, True, path)
+    assert exit_code == 0
+    workspace_dir = agents_base / "writer" / "workspace"
+    assert workspace_dir.is_dir()
+    assert (workspace_dir / "IDENTITY.md").exists()
+    assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / "BOOTSTRAP.md").exists()
+    assert (workspace_dir / "memory").is_dir()
+    data = load_settings_raw(path)
+    assert data["agents"]["writer"]["agent_dir"] == str((agents_base / "writer").resolve())
+    assert data["agents"]["writer"]["workspace_dir"] == str(workspace_dir.resolve())
+    assert "helpful assistant" in (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
 
 
 def test_run_remove_deletes_agent(tmp_path, capsys):

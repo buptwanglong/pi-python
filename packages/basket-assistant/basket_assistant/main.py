@@ -86,7 +86,17 @@ async def main_async(args: Optional[list] = None) -> int:
 
     tui_max_cols: Optional[int] = None
     tui_live_rows: Optional[int] = None
+    tui_agent: Optional[str] = None
     if use_tui:
+        if "--agent" in args:
+            i = args.index("--agent")
+            if i + 1 < len(args):
+                tui_agent = args[i + 1].strip() or None
+            args = args[:i] + args[i + 2:] if i + 1 < len(args) else args[:i] + args[i + 1:]
+        if tui_agent is None:
+            tui_agent = os.environ.get("BASKET_AGENT") or None
+        if tui_agent is not None:
+            tui_agent = tui_agent.strip() or None
         if "--max-cols" in args:
             i = args.index("--max-cols")
             if i + 1 < len(args):
@@ -133,7 +143,7 @@ Basket - AI-powered personal assistant
 
 Usage:
   basket                 - Start interactive mode
-  basket tui             - Start TUI (starts gateway if needed, then connect)
+  basket tui [--agent <name>] - Start TUI (optionally with specified main agent)
   basket --session <id> - Start with session loaded (use with interactive or tui)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
@@ -147,6 +157,8 @@ Usage:
   basket --help          - Show this help
   basket --version       - Show version
   basket --debug         - Enable DEBUG logging (to log file only)
+
+  --agent <name>  - Use with 'basket' or 'basket tui' to select main agent from settings.agents
 
 Interactive mode commands:
   help      - Show help
@@ -182,7 +194,13 @@ Environment variables:
             else:
                 rest = rest[:i] + rest[i + 1:]
         from .init_guided import run_init_guided
-        return run_init_guided(settings_path=path_arg, force=force)
+        # Run in thread so questionary (prompt_toolkit) can use asyncio.run() without
+        # "cannot be called from a running event loop" when main_async is already in one.
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: run_init_guided(settings_path=path_arg, force=force),
+        )
 
     # Agent subcommands: list | add | remove (subagents for Task tool)
     if len(args) >= 1 and args[0] == "agent":
@@ -191,7 +209,7 @@ Environment variables:
         if len(rest) == 0 or rest[0] in ("--help", "-h"):
             print("Usage: basket agent <list|add|remove> [options]")
             print("  list              List subagents in settings.json")
-            print("  add               Add a subagent (--name, --description, --prompt; optional --tools, --force)")
+            print("  add               Add a subagent (--name; optional --tools, --force)")
             print("  remove <name>     Remove a subagent")
             print("  --path <file>     Use given settings file (default: BASKET_SETTINGS_PATH or ~/.basket/settings.json)")
             return 0
@@ -246,22 +264,8 @@ Environment variables:
                 if not name:
                     print("Name is required.")
                     return 1
-            if not description:
-                try:
-                    description = input("Description (short): ").strip()
-                except EOFError:
-                    return 1
-                if not description:
-                    print("Description is required.")
-                    return 1
-            if not prompt:
-                try:
-                    prompt = input("Prompt (system prompt for this subagent): ").strip()
-                except EOFError:
-                    return 1
-                if not prompt:
-                    print("Prompt is required.")
-                    return 1
+            description = description or ""
+            prompt = prompt or ""
             tools_dict = agent_cli.parse_tools(tools_s) if tools_s else None
             return agent_cli.run_add(
                 name=name,
@@ -319,7 +323,7 @@ Environment variables:
             await run_gateway(
                 host="127.0.0.1",
                 port=port,
-                agent_factory=AssistantAgent,
+                agent_factory=lambda agent_name=None: AssistantAgent(agent_name=agent_name),
                 channel_config=channel_config,
             )
             return 0
@@ -462,7 +466,7 @@ Environment variables:
         else:
             port = get_serve_port() or port
         attach_url = f"ws://127.0.0.1:{port}/ws"
-        await run_tui_mode_attach(attach_url)
+        await run_tui_mode_attach(attach_url, agent_name=tui_agent)
         return 0
 
     # Create agent (CLI --agent sets BASKET_AGENT for main-agent model selection)

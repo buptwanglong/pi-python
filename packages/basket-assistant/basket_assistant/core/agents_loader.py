@@ -1,5 +1,6 @@
 """
-Load subagent configs from .basket/agents/*.md (YAML frontmatter + body).
+Load subagent configs from .basket/agents/*.md (single file) or .basket/agents/<name>/ (directory with OpenClaw-style md files).
+Directory-type agent takes precedence over same-name .md file.
 """
 
 import logging
@@ -10,6 +11,8 @@ from typing import Any, Dict, List, Optional
 from .settings_full import SubAgentConfig
 
 logger = logging.getLogger(__name__)
+
+WORKSPACE_MARKER_FILES = ("AGENTS.md", "IDENTITY.md")
 
 
 def _parse_frontmatter_and_body(text: str) -> tuple[Dict[str, Any], str]:
@@ -82,37 +85,62 @@ def _parse_frontmatter_and_body(text: str) -> tuple[Dict[str, Any], str]:
 
 def load_agents_from_dirs(dirs: List[Path]) -> Dict[str, SubAgentConfig]:
     """
-    Scan dirs for *.md files; filename stem = agent name.
-    Parse frontmatter (description required, prompt/model/tools optional) + body.
-    Body is used as prompt when frontmatter has no 'prompt'.
-    Later dirs override earlier for same name.
+    Scan dirs for:
+    1) Directory-type agents: subdirs containing AGENTS.md or IDENTITY.md; workspace_dir = subdir, directory wins over same-name .md.
+    2) Single *.md files: stem = agent name, frontmatter + body; prompt from body when no frontmatter prompt.
+    Later dirs override earlier for same name. For same name, directory-type overrides single-file.
     """
     result: Dict[str, SubAgentConfig] = {}
     for d in dirs:
         expanded = d.expanduser().resolve()
         if not expanded.exists() or not expanded.is_dir():
             continue
+        # 1) Directory-type agents (OpenClaw-style workspace per agent) in this dir only
+        # Prefer subdir/workspace/ when present (md files + memory there); else subdir as workspace
+        dir_agent_names: set = set()
+        for subdir in expanded.iterdir():
+            if not subdir.is_dir() or subdir.name.startswith("_"):
+                continue
+            workspace_sub = subdir / "workspace"
+            if workspace_sub.exists() and workspace_sub.is_dir() and any(
+                (workspace_sub / f).exists() and (workspace_sub / f).is_file() for f in WORKSPACE_MARKER_FILES
+            ):
+                ws_dir = workspace_sub
+            elif any((subdir / f).exists() and (subdir / f).is_file() for f in WORKSPACE_MARKER_FILES):
+                ws_dir = subdir
+            else:
+                continue
+            name = subdir.name
+            dir_agent_names.add(name)
+            result[name] = SubAgentConfig(
+                model=None,
+                tools=None,
+                agent_dir=str(subdir.resolve()),
+                workspace_dir=str(ws_dir.resolve()),
+            )
+        # 2) Single-file agents (*.md); skip only if same name from directory in this dir (directory wins)
         for path in expanded.glob("*.md"):
             if path.name.startswith("_"):
                 continue
             name = path.stem
+            if name in dir_agent_names:
+                continue
             try:
                 raw = path.read_text(encoding="utf-8")
             except Exception as e:
                 logger.warning("Failed to read agent file %s: %s", path, e)
                 continue
             fm, body = _parse_frontmatter_and_body(raw)
-            description = fm.get("description") or (body.split("\n\n")[0][:200] if body else "(no description)")
-            prompt = fm.get("prompt") or body.strip() or ""
-            if not prompt:
-                logger.warning("Agent %s: missing prompt and empty body, skipping", path)
-                continue
             model = fm.get("model") if isinstance(fm.get("model"), dict) else None
             tools = fm.get("tools") if isinstance(fm.get("tools"), dict) else None
+            workspace_dir_from_fm = fm.get("workspace_dir")
+            if isinstance(workspace_dir_from_fm, str) and workspace_dir_from_fm.strip():
+                workspace_dir_val: Optional[str] = workspace_dir_from_fm.strip()
+            else:
+                workspace_dir_val = None
             result[name] = SubAgentConfig(
-                description=description,
-                prompt=prompt,
                 model=model,
                 tools=tools,
+                workspace_dir=workspace_dir_val,
             )
     return result

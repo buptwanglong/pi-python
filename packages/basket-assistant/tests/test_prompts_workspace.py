@@ -4,13 +4,17 @@ import pytest
 from pathlib import Path
 
 from basket_assistant.agent import prompts
-from basket_assistant.core.settings import Settings
+from basket_assistant.core import Settings
 
 
-def test_get_system_prompt_base_default_settings_returns_builtin():
-    """get_system_prompt_base(Settings()) with no workspace_dir returns builtin."""
+def test_get_system_prompt_base_default_settings_uses_default_workspace(monkeypatch, tmp_path):
+    """get_system_prompt_base(Settings()) with no workspace_dir uses default path and default fill."""
+    monkeypatch.setattr(
+        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        str(tmp_path / "default_workspace"),
+    )
     prompt = prompts.get_system_prompt_base(Settings())
-    assert "helpful coding assistant" in prompt.lower()
+    assert "helpful assistant" in prompt.lower() or "operating instructions" in prompt.lower()
     assert "read" in prompt and "write" in prompt
     assert "tools" in prompt.lower()
 
@@ -23,19 +27,26 @@ def test_get_system_prompt_base_skip_bootstrap_returns_builtin():
     assert "read" in prompt and "write" in prompt
 
 
-def test_get_system_prompt_base_workspace_dir_none_returns_builtin():
-    """get_system_prompt_base(settings) with workspace_dir=None returns builtin."""
+def test_get_system_prompt_base_workspace_dir_none_uses_default_fill(monkeypatch, tmp_path):
+    """get_system_prompt_base(settings) with workspace_dir=None uses default path and fill."""
+    monkeypatch.setattr(
+        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        str(tmp_path / "default_workspace"),
+    )
     settings = Settings(workspace_dir=None)
     prompt = prompts.get_system_prompt_base(settings)
-    assert "helpful coding assistant" in prompt.lower()
+    assert "helpful assistant" in prompt.lower() or "operating instructions" in prompt.lower()
+    assert "read" in prompt
 
 
-def test_get_system_prompt_base_workspace_dir_not_exists_returns_builtin(tmp_path):
-    """get_system_prompt_base(settings) when workspace_dir path does not exist returns builtin."""
+def test_get_system_prompt_base_workspace_dir_not_exists_creates_and_uses(tmp_path):
+    """get_system_prompt_base(settings) when path does not exist creates dir and default-fills."""
     missing = tmp_path / "missing"
-    settings = Settings(workspace_dir=str(missing))
+    settings = Settings(workspace_dir=str(missing), skip_bootstrap=False)
     prompt = prompts.get_system_prompt_base(settings)
-    assert "helpful coding assistant" in prompt.lower()
+    assert missing.exists()
+    assert "helpful assistant" in prompt.lower() or "operating instructions" in prompt.lower()
+    assert "read" in prompt
 
 
 def test_get_system_prompt_base_from_workspace_includes_sections_and_tools(tmp_path):
@@ -52,11 +63,12 @@ def test_get_system_prompt_base_from_workspace_includes_sections_and_tools(tmp_p
     assert "helpful coding assistant" not in prompt
 
 
-def test_get_system_prompt_base_from_workspace_empty_dir_falls_back_to_builtin(tmp_path):
-    """When workspace_dir exists but has no identity files, returns builtin."""
+def test_get_system_prompt_base_from_workspace_empty_dir_gets_default_fill(tmp_path):
+    """When workspace_dir exists but has no identity files, default fill is applied and used."""
     settings = Settings(workspace_dir=str(tmp_path), skip_bootstrap=False)
     prompt = prompts.get_system_prompt_base(settings)
-    assert "helpful coding assistant" in prompt.lower()
+    assert (tmp_path / "AGENTS.md").exists()
+    assert "helpful assistant" in prompt.lower() or "Operating instructions" in prompt
     assert "read" in prompt
 
 
@@ -83,6 +95,26 @@ def test_coding_agent_with_workspace_uses_composed_prompt(tmp_path, monkeypatch)
     assert "WorkspaceBot" in agent._default_system_prompt
     assert "Follow the rules." in agent._default_system_prompt
     assert "read" in agent._default_system_prompt and "write" in agent._default_system_prompt
+
+
+def test_assistant_agent_sessions_dir_per_agent(tmp_path):
+    """When default_agent is set, session_manager uses agents/<name>/sessions/."""
+    from basket_assistant.agent import AssistantAgent
+    from basket_assistant.core import Settings, SettingsManager, SubAgentConfig
+
+    agents_base = tmp_path / "agents"
+    agents_base.mkdir()
+    settings_manager = SettingsManager(tmp_path)
+    settings = settings_manager.load()
+    settings.agents_dirs = [str(agents_base)]
+    settings.default_agent = "main"
+    settings.agents = dict(settings.agents) if getattr(settings, "agents", None) else {}
+    settings.agents["main"] = SubAgentConfig()
+    settings_manager.save(settings)
+    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+    expected = agents_base / "main" / "sessions"
+    assert agent.session_manager.sessions_dir.resolve() == expected.resolve()
+    assert expected.is_dir()
 
 
 def test_get_system_prompt_base_includes_tools_and_memory_sections(tmp_path):
