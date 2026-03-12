@@ -1,134 +1,146 @@
 """
-Main TUI Application for Pi Coding Agent
+Pi Coding Agent TUI Application
 
-Composes mixins for layout, scroll/focus, session/model, agent, slash, output/messages, input, actions.
+Component-based architecture with event bus communication.
 """
 
-import logging
-from typing import Awaitable, Callable, Optional
-
-from textual.app import App
+import asyncio
+from typing import Optional
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 
-from .core.message_renderer import MessageRenderer
-from .state import AppState
-from .app_layout import AppLayoutMixin
-from .app_scroll_focus import AppScrollFocusMixin
-from .app_session_model import AppSessionModelMixin
-from .app_agent import AppAgentMixin
-from .app_slash import AppSlashMixin
-from .app_output_messages import AppOutputMessagesMixin
-from .app_input import AppInputMixin
-from .app_actions import AppActionsMixin
+from .core.state_machine import AppStateMachine, Phase
+from .core.event_bus import EventBus
+from .core.events import PhaseChangedEvent
+from .managers import (
+    LayoutManager,
+    MessageRenderer,
+    StreamingController,
+    InputHandler,
+    SessionController,
+    AgentEventBridge,
+)
 
-logger = logging.getLogger(__name__)
 
-
-class PiCodingAgentApp(
-    AppLayoutMixin,
-    App,
-    AppScrollFocusMixin,
-    AppSessionModelMixin,
-    AppAgentMixin,
-    AppSlashMixin,
-    AppOutputMessagesMixin,
-    AppInputMixin,
-    AppActionsMixin,
-):
+class PiCodingAgentApp(App):
     """
-    Interactive TUI for Pi Coding Agent.
+    Pi Coding Agent TUI Application
 
-    Features:
-    - Real-time streaming of LLM responses
-    - Markdown rendering with syntax highlighting
-    - Tool execution display
-    - Multi-line input support
+    Uses composition pattern with managers instead of Mixin inheritance.
+    Communication via EventBus for decoupled components.
     """
 
     TITLE = "Pi Coding Agent"
-    SUB_TITLE = "Interactive AI Coding Assistant"
-    WELCOME_LINE = "Enter 发送 Shift+Enter 换行 | Ctrl+↑/↓ 历史 | Ctrl+A/E 行首/尾 Ctrl+K/U 删行尾/首 Ctrl+W 删词 | Q 退出"
+    CSS_PATH = "styles/app.tcss"
 
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
-        Binding("escape", "escape", "Esc", priority=True),
-        Binding("tab", "focus_next_region", "Next region", show=False),
-        Binding("shift+tab", "focus_prev_region", "Prev region", show=False),
-        Binding("ctrl+pageup", "focus_message_region", "Focus messages", show=False),
-        Binding("ctrl+pagedown", "focus_input_region", "Focus input", show=False),
-        Binding("ctrl+o", "toggle_last_tool_card", "Toggle tool card", show=False),
-        Binding("meta+c", "copy_output", "Copy (Cmd+C)", priority=True),
-        Binding("ctrl+shift+c", "copy_output", "Copy", show=False),
-        Binding("meta+v", "paste", "Paste (Cmd+V)", priority=True),
-        Binding("ctrl+v", "paste", "Paste", show=False),
-        Binding("ctrl+g", "stop_agent", "Stop", priority=True),
-        Binding("ctrl+l", "show_model_info", "Model info"),
-        Binding("ctrl+shift+l", "clear", "Clear"),
-        Binding("ctrl+p", "session_picker", "Sessions"),
-        Binding("ctrl+shift+p", "toggle_plan_mode", "Plan mode", show=False),
-        Binding("ctrl+d", "toggle_dark", "Toggle Dark Mode"),
-        Binding("ctrl+t", "toggle_todo_full", "Todo expand/collapse"),
-        Binding("ctrl+shift+t", "transcript_overlay", "Transcript"),
-        Binding("ctrl+e", "expand_last_tool", "Expand last tool"),
-        Binding("ctrl+end", "scroll_to_bottom", "To bottom"),
-        Binding("pageup", "scroll_output_up", "Scroll up", show=False),
-        Binding("pagedown", "scroll_output_down", "Scroll down", show=False),
+        Binding("ctrl+l", "clear", "Clear"),
+        Binding("ctrl+p", "sessions", "Sessions"),
+        Binding("ctrl+d", "toggle_dark", "Dark Mode"),
+        Binding("ctrl+g", "stop_agent", "Stop"),
     ]
-
-    CSS_PATH = "styles/app.tcss"
 
     def __init__(
         self,
         agent=None,
         coding_agent=None,
         max_cols: Optional[int] = None,
-        live_rows: Optional[int] = None,
         **kwargs,
     ):
         """
-        Initialize the TUI app.
+        Initialize TUI app
 
         Args:
-            agent: Optional Pi Agent instance to connect to
-            coding_agent: Optional CodingAgent (has _current_todos); when None (e.g. attach), todos come via update_todo_panel only
-            max_cols: Optional max column width for output (e.g. from --max-cols).
-            live_rows: Optional number of rows for live streaming area (e.g. from --live-rows).
-            **kwargs: Additional arguments for Textual App
+            agent: basket_agent.Agent instance
+            coding_agent: basket_assistant.AssistantAgent instance
+            max_cols: Maximum column width
         """
         super().__init__(**kwargs)
-        self.agent = agent
-        self.coding_agent = coding_agent
+
+        # Core components
+        self.event_bus = EventBus()
+        self.state_machine = AppStateMachine()
+
+        # Managers (composition, not inheritance)
+        self.layout_manager = LayoutManager(self)
+        self.message_renderer = MessageRenderer(self)
+        self.streaming_controller = StreamingController(self)
+        self.input_handler = InputHandler(self)
+        self.session_controller = SessionController(self, coding_agent)
+        self.agent_bridge = AgentEventBridge(self)
+
+        # Connect Agent
+        if agent:
+            self.agent_bridge.connect_agent(agent)
+
+        # Configuration
         self._max_cols = max_cols
-        self._live_rows = live_rows
-        self._todo_show_full = False
-        self._last_todos: list = []
-        self._plan_mode = False
-        self._input_handler = None
-        self._menu_source = None
-        self._menu_from_output = False
-        self._pending_user_inputs: list[str] = []
-        self._session_switch_handler: Optional[Callable[[str], Awaitable[None]]] = None
-        self._stream_refresh_timer = None
-        self._streaming_length_rendered = 0
-        self._long_running_timer = None
-        self._show_still_running = False
-        self._thinking_spinner_timer = None
-        self._thinking_spinner_frame_index = 0
-        self.state = AppState()
-        self.renderer = MessageRenderer()
+        self._agent = agent
+        self._coding_agent = coding_agent
 
-    def _stop_all_timers(self) -> None:
-        """Cancel all active timers so widgets can close cleanly."""
-        for attr in ("_stream_refresh_timer", "_long_running_timer", "_thinking_spinner_timer"):
-            t = getattr(self, attr, None)
-            if t is not None:
-                t.stop()
-                setattr(self, attr, None)
-        self.state.thinking_block_index = None
+        # Subscribe to state changes
+        self.event_bus.subscribe(PhaseChangedEvent, self._on_phase_changed)
 
-    def exit(self, *args, **kwargs) -> None:
-        self._stop_all_timers()
-        super().exit(*args, **kwargs)
+    def compose(self) -> ComposeResult:
+        """Compose UI components"""
+        yield from self.layout_manager.compose()
+
+    def on_mount(self) -> None:
+        """Initialize app on mount"""
+        # Show welcome message
+        self.message_renderer.add_system_message(
+            "Welcome to Pi Coding Agent! Type /help for commands."
+        )
+
+        # Initialize status bar
+        model_name = (
+            getattr(self._agent, "model", {}).get("model_id", "Unknown")
+            if self._agent
+            else "Unknown"
+        )
+        self.layout_manager.update_status_bar(
+            phase=self.state_machine.current_phase.value, model=model_name
+        )
+
+    async def action_clear(self) -> None:
+        """Clear conversation"""
+        self.message_renderer.clear_conversation()
+
+    async def action_sessions(self) -> None:
+        """Show session picker"""
+        await self.session_controller.show_session_picker()
+
+    async def action_stop_agent(self) -> None:
+        """Stop agent execution"""
+        if self._agent and hasattr(self._agent, "cancel"):
+            self._agent.cancel()
+        self.message_renderer.add_system_message("Agent stopped")
+
+    def transition_phase(self, new_phase: Phase) -> None:
+        """
+        Transition to new phase
+
+        Args:
+            new_phase: Target phase
+        """
+        old_phase = self.state_machine.current_phase
+
+        try:
+            self.state_machine.transition_to(new_phase)
+
+            # Publish phase change event
+            self.event_bus.publish(
+                PhaseChangedEvent(old_phase=old_phase, new_phase=new_phase)
+            )
+        except Exception as e:
+            self.message_renderer.add_system_message(
+                f"Phase transition error: {e}"
+            )
+
+    def _on_phase_changed(self, event: PhaseChangedEvent) -> None:
+        """Update UI on phase change"""
+        self.layout_manager.update_status_bar(phase=event.new_phase.value)
 
 
 if __name__ == "__main__":
