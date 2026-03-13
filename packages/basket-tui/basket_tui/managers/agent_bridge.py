@@ -4,8 +4,7 @@ AgentEventBridge
 Bridges Agent events to TUI event bus.
 """
 
-from typing import TYPE_CHECKING, Optional
-from basket_agent import Agent
+from typing import TYPE_CHECKING, Optional, Any
 
 from ..core.events import (
     TextDeltaEvent,
@@ -18,6 +17,7 @@ from ..core.events import (
 from ..core.event_bus import EventBus
 
 if TYPE_CHECKING:
+    from basket_agent import Agent
     from ..app import PiCodingAgentApp
 
 
@@ -33,7 +33,7 @@ class AgentEventBridge:
         self._event_bus: EventBus = app.event_bus
         self._agent: Optional[Agent] = None
 
-    def connect_agent(self, agent: Agent) -> None:
+    def connect_agent(self, agent: Any) -> None:
         """Connect agent and register handlers"""
         self._agent = agent
 

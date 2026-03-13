@@ -7,6 +7,8 @@ from basket_tui import PiCodingAgentApp
 from basket_tui.constants import STATUS_BAR_ID, MESSAGE_LIST_ID
 from basket_tui.components.message_list import MessageList
 from basket_tui.screens import TranscriptOverlay, CodeBlockOverlay
+from basket_tui.core.state_machine import Phase
+from basket_tui.core.events import PhaseChangedEvent
 
 
 def test_app_import():
@@ -23,13 +25,14 @@ def test_app_instantiation():
 
 def test_app_with_agent():
     """Test that the app can be instantiated with an agent."""
-    # Mock agent
+    # Mock agent with required .on() method
     class MockAgent:
-        pass
+        def on(self, event_name, handler):
+            pass
 
     agent = MockAgent()
     app = PiCodingAgentApp(agent=agent)
-    assert app.agent is agent
+    assert app._agent is agent
 
 
 @pytest.mark.asyncio
@@ -43,51 +46,62 @@ async def test_app_compose():
     assert callable(app.compose)
 
 
-def test_app_message_methods():
-    """Test message append methods and block lifecycle."""
+def test_app_manager_composition():
+    """Test that managers are properly composed into the app."""
     app = PiCodingAgentApp()
 
-    # These methods should exist
-    assert hasattr(app, "append_message")
-    assert hasattr(app, "append_text")
-    assert hasattr(app, "append_thinking")
-    assert hasattr(app, "show_tool_call")
-    assert hasattr(app, "show_tool_result")
-    assert hasattr(app, "append_markdown")
-    assert hasattr(app, "show_code_block")
-    assert hasattr(app, "ensure_assistant_block")
-    assert hasattr(app, "finalize_assistant_block")
-    assert hasattr(app, "append_user_message_async")
+    # Verify all managers exist
+    assert hasattr(app, "layout_manager")
+    assert hasattr(app, "message_renderer")
+    assert hasattr(app, "streaming_controller")
+    assert hasattr(app, "input_handler")
+    assert hasattr(app, "session_controller")
+    assert hasattr(app, "agent_bridge")
+
+    # Verify core components
+    assert hasattr(app, "event_bus")
+    assert hasattr(app, "state_machine")
 
 
-def test_handle_slash_command_handled():
-    """Test _handle_slash_command returns True for TUI slash commands."""
+def test_message_renderer_methods():
+    """Test message renderer methods through manager."""
     app = PiCodingAgentApp()
-    assert app._handle_slash_command("/clear") is True
-    assert app._handle_slash_command("/help") is True
-    assert app._handle_slash_command("/history") is True
-    assert app._handle_slash_command("/copy") is True
-    assert app._handle_slash_command("/theme") is True
-    assert app._handle_slash_command("/syntax") is True
+
+    # Methods should be accessible via message_renderer
+    assert hasattr(app.message_renderer, "add_user_message")
+    assert hasattr(app.message_renderer, "add_system_message")
 
 
-def test_handle_slash_command_passthrough():
-    """Test _handle_slash_command returns False for non-commands and agent commands."""
+def test_phase_transition():
+    """Test state machine phase transitions."""
     app = PiCodingAgentApp()
-    assert app._handle_slash_command("hello") is False
-    assert app._handle_slash_command("") is False
-    assert app._handle_slash_command("  /plan") is False  # /plan goes to agent
-    assert app._handle_slash_command("/plan") is False
-    assert app._handle_slash_command("/unknown") is False
+
+    # Initial phase should be IDLE
+    assert app.state_machine.current_phase == Phase.IDLE
+
+    # Verify transition method exists
+    assert hasattr(app, "transition_phase")
+    assert callable(app.transition_phase)
 
 
-def test_status_bar_and_transcript_actions():
-    """Test status bar refresh and transcript overlay actions exist."""
+def test_event_bus_integration():
+    """Test event bus is properly integrated."""
     app = PiCodingAgentApp()
-    assert hasattr(app, "_refresh_status_bar")
-    assert hasattr(app, "action_transcript_overlay")
-    assert hasattr(app, "action_copy_last")
-    assert hasattr(app, "action_clear")
+
+    # Event bus should exist
+    assert app.event_bus is not None
+
+    # Should be able to subscribe and publish
+    called = []
+
+    def handler(event):
+        called.append(event)
+
+    app.event_bus.subscribe(PhaseChangedEvent, handler)
+    app.event_bus.publish(PhaseChangedEvent(old_phase=Phase.IDLE, new_phase=Phase.WAITING_MODEL))
+
+    assert len(called) == 1
+    assert called[0].new_phase == Phase.WAITING_MODEL
 
 
 def test_status_bar_constant():

@@ -5,14 +5,14 @@ Displays conversation messages with reactive updates.
 """
 
 from typing import List
-from textual.widgets import Widget
+from textual.widgets import Static
 from textual.reactive import reactive
 from rich.text import Text
 
 from ..core.conversation import Message
 
 
-class MessageList(Widget):
+class MessageList(Static):
     """
     Message list widget with reactive updates
 

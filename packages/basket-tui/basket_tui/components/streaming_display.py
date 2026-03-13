@@ -4,13 +4,13 @@ StreamingDisplay Widget
 Shows real-time streaming content with automatic updates.
 """
 
-from textual.widgets import Widget
+from textual.widgets import Static
 from textual.reactive import reactive
 from rich.text import Text
 from rich.markdown import Markdown
 
 
-class StreamingDisplay(Widget):
+class StreamingDisplay(Static):
     """
     Streaming display widget with reactive updates
 
