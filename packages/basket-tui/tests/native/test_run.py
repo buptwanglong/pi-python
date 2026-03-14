@@ -187,3 +187,72 @@ def test_dispatch_agent_switched_updates_header_state():
     assert header_state["agent"] == "my_agent"
     assert len(out) == 1
     assert "my_agent" in out[0]
+
+
+def test_dispatch_ui_state_phase_streaming():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "x"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert ui_state["phase"] == "streaming"
+
+
+def test_dispatch_ui_state_phase_tool_running():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "bash", "arguments": {}},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert ui_state["phase"] == "tool_running"
+
+
+def test_dispatch_ui_state_phase_idle():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "hi"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    _dispatch_ws_message(
+        {"type": "agent_complete"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert ui_state["phase"] == "idle"
+
+
+def test_dispatch_ui_state_phase_error():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "agent_error", "error": "Something failed"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert ui_state["phase"] == "error"
