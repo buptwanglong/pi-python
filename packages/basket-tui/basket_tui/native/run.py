@@ -9,8 +9,7 @@ import shutil
 import threading
 from typing import Any, Optional
 
-from .commands import HELP_LINES, handle_slash_command
-from .pickers import run_agent_picker, run_session_picker
+from .input_handler import handle_input, open_picker
 from .ws_loop import run_ws_loop
 
 logger = logging.getLogger(__name__)
@@ -111,12 +110,6 @@ async def run_tui_native_attach(
         "[system] Connected (native). Type /help for commands.",
     ]
 
-    def _http_base_url(u: str) -> str:
-        base = u.replace("ws://", "http://").replace("wss://", "https://").rstrip("/")
-        if base.endswith("/ws"):
-            base = base[:-3]
-        return base
-
     input_buffer = Buffer(name="input", multiline=False)
 
     kb = KeyBindings()
@@ -145,62 +138,7 @@ async def run_tui_native_attach(
         from prompt_toolkit.application import get_app
         text = (input_buffer.text or "").strip()
         input_buffer.reset()
-        if not text:
-            return
-        low = text.strip().lower()
-        if low in ("/session", "/sessions"):
-            session_id = run_session_picker(_http_base_url(ws_url))
-            if session_id:
-                try:
-                    thread_queue.put(("switch_session", session_id))
-                except Exception as e:
-                    body_lines.append(f"[system] Failed to switch: {e}")
-            get_app().invalidate()
-            return
-        if low in ("/agent", "/agents"):
-            agent_name = run_agent_picker(_http_base_url(ws_url))
-            if agent_name:
-                try:
-                    thread_queue.put(("switch_agent", agent_name))
-                except Exception as e:
-                    body_lines.append(f"[system] Failed to switch: {e}")
-            get_app().invalidate()
-            return
-        if low in ("/model", "/models"):
-            # Model is per-agent; use agent picker (same as /agent).
-            agent_name = run_agent_picker(_http_base_url(ws_url))
-            if agent_name:
-                try:
-                    thread_queue.put(("switch_agent", agent_name))
-                except Exception as e:
-                    body_lines.append(f"[system] Failed to switch: {e}")
-            get_app().invalidate()
-            return
-        if low == "/new":
-            try:
-                thread_queue.put(("new_session",))
-            except Exception as e:
-                body_lines.append(f"[system] Failed: {e}")
-            get_app().invalidate()
-            return
-        if low == "/abort":
-            try:
-                thread_queue.put(("abort",))
-            except Exception as e:
-                body_lines.append(f"[system] Failed: {e}")
-            get_app().invalidate()
-            return
-        if low == "/settings":
-            body_lines.append("[system] Settings:")
-            body_lines.append("  Toggle thinking (Ctrl+T): not implemented yet.")
-            body_lines.append("  Toggle tool expand (Ctrl+O): not implemented yet.")
-            get_app().invalidate()
-            return
-        if low == "/help":
-            body_lines.extend(HELP_LINES)
-            get_app().invalidate()
-            return
-        result = handle_slash_command(text)
+        result = handle_input(text, base_url, thread_queue, body_lines)
         if result == "exit":
             try:
                 thread_queue.put(None)
@@ -209,16 +147,13 @@ async def run_tui_native_attach(
             get_app().exit()
             return
         if result == "handled":
-            if text.strip().startswith("/"):
-                body_lines.append(
-                    "[system] Unknown command. Type /help for commands."
-                )
             get_app().invalidate()
             return
-        try:
-            thread_queue.put(text)
-        except Exception as e:
-            body_lines.append(f"[system] Failed to send: {e}")
+        if result == "send":
+            try:
+                thread_queue.put(text)
+            except Exception as e:
+                body_lines.append(f"[system] Failed to send: {e}")
             get_app().invalidate()
 
     @kb.add("enter")
@@ -226,48 +161,23 @@ async def run_tui_native_attach(
         if event.app.layout.current_buffer == input_buffer:
             _accept_input(event)
 
-    def _open_session_picker() -> None:
-        session_id = run_session_picker(_http_base_url(ws_url))
-        if session_id:
-            try:
-                thread_queue.put(("switch_session", session_id))
-            except Exception as e:
-                body_lines.append(f"[system] Failed to switch: {e}")
-        from prompt_toolkit.application import get_app
-        get_app().invalidate()
-
-    def _open_agent_picker() -> None:
-        name = run_agent_picker(_http_base_url(ws_url))
-        if name:
-            try:
-                thread_queue.put(("switch_agent", name))
-            except Exception as e:
-                body_lines.append(f"[system] Failed to switch: {e}")
-        from prompt_toolkit.application import get_app
-        get_app().invalidate()
-
-    def _open_model_picker() -> None:
-        # Model is per-agent; open agent picker (same as Ctrl+G).
-        name = run_agent_picker(_http_base_url(ws_url))
-        if name:
-            try:
-                thread_queue.put(("switch_agent", name))
-            except Exception as e:
-                body_lines.append(f"[system] Failed to switch: {e}")
-        from prompt_toolkit.application import get_app
-        get_app().invalidate()
-
     @kb.add("c-p")
     def _on_ctrl_p(_event: Any) -> None:
-        _open_session_picker()
+        open_picker("session", base_url, thread_queue, body_lines)
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
 
     @kb.add("c-g")
     def _on_ctrl_g(_event: Any) -> None:
-        _open_agent_picker()
+        open_picker("agent", base_url, thread_queue, body_lines)
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
 
     @kb.add("c-l")
     def _on_ctrl_l(_event: Any) -> None:
-        _open_model_picker()
+        open_picker("model", base_url, thread_queue, body_lines)
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
 
     def _do_exit() -> None:
         try:
