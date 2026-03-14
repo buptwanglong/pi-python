@@ -1,6 +1,5 @@
 """Command registry for managing interaction commands."""
 
-import asyncio
 import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
@@ -28,6 +27,37 @@ class CommandRegistry:
         """Initialize the command registry."""
         self._commands: dict[str, Command] = {}
 
+    def _register_command(
+        self,
+        name: str,
+        handler: Callable,
+        description: str,
+        is_async: bool,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Internal method to register a command.
+
+        Args:
+            name: Command name (without leading slash)
+            handler: Function to handle the command
+            description: Human-readable description
+            is_async: Whether the handler is asynchronous
+            aliases: Optional list of alternative names
+        """
+        normalized_name = name.lower()
+        command = Command(
+            name=normalized_name,
+            handler=handler,
+            description=description,
+            is_async=is_async,
+            aliases=[alias.lower() for alias in (aliases or [])],
+        )
+        self._commands[normalized_name] = command
+
+        # Register aliases
+        for alias in command.aliases:
+            self._commands[alias] = command
+
     def register(
         self,
         name: str,
@@ -43,19 +73,7 @@ class CommandRegistry:
             description: Human-readable description
             aliases: Optional list of alternative names
         """
-        normalized_name = name.lower()
-        command = Command(
-            name=normalized_name,
-            handler=handler,
-            description=description,
-            is_async=False,
-            aliases=[alias.lower() for alias in (aliases or [])],
-        )
-        self._commands[normalized_name] = command
-
-        # Register aliases
-        for alias in command.aliases:
-            self._commands[alias] = command
+        self._register_command(name, handler, description, False, aliases)
 
     def register_async(
         self,
@@ -72,19 +90,7 @@ class CommandRegistry:
             description: Human-readable description
             aliases: Optional list of alternative names
         """
-        normalized_name = name.lower()
-        command = Command(
-            name=normalized_name,
-            handler=handler,
-            description=description,
-            is_async=True,
-            aliases=[alias.lower() for alias in (aliases or [])],
-        )
-        self._commands[normalized_name] = command
-
-        # Register aliases
-        for alias in command.aliases:
-            self._commands[alias] = command
+        self._register_command(name, handler, description, True, aliases)
 
     def has_command(self, text: str) -> bool:
         """Check if text starts with a registered command.
