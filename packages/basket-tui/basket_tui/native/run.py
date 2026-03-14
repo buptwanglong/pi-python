@@ -3,7 +3,6 @@ Terminal-native TUI runner: connects to gateway WebSocket and runs line-output +
 """
 
 import asyncio
-import logging
 import queue
 import shutil
 import threading
@@ -11,8 +10,6 @@ from typing import Any, Optional
 
 from .input_handler import handle_input, open_picker
 from .ws_loop import run_ws_loop
-
-logger = logging.getLogger(__name__)
 
 
 def _get_width(max_cols: Optional[int]) -> int:
