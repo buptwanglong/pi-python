@@ -6,7 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from basket_tui.native.commands import HELP_LINES, handle_slash_command
-from basket_tui.native.run import _dispatch_ws_message, _get_width
+from basket_tui.native.dispatch import _dispatch_ws_message
+from basket_tui.native.run import _get_width
 from basket_tui.native.stream import StreamAssembler
 
 
