@@ -256,3 +256,53 @@ def test_dispatch_ui_state_phase_error():
         ui_state=ui_state,
     )
     assert ui_state["phase"] == "error"
+
+
+def test_dispatch_agent_aborted_clears_and_prints():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "x"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message(
+        {"type": "agent_aborted"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert any("Aborted" in line for line in out)
+    assert assembler._buffer == ""
+    assert assembler._current_tool is None
+
+
+def test_dispatch_agent_error_prints_message():
+    assembler, out, output_put, last_output_count, _, _ = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "agent_error", "error": "Something failed"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert len(out) == 1
+    assert "Something failed" in out[0]
+
+
+def test_dispatch_error_type_prints_gateway_error():
+    assembler, out, output_put, last_output_count, _, _ = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "error", "error": "Gateway down"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert len(out) == 1
+    assert "Gateway" in out[0] or "down" in out[0]
