@@ -2,20 +2,35 @@
 
 
 class InteractionError(Exception):
-    """Base exception for interaction layer."""
+    """Base exception for interaction layer.
+
+    All interaction-related exceptions inherit from this class.
+    """
     pass
 
 
 class CommandExecutionError(InteractionError):
-    """Command execution failed."""
+    """Raised when a slash command fails to execute.
+
+    This includes parsing errors, validation failures,
+    and runtime execution errors.
+    """
     pass
 
 
 class InputProcessingError(InteractionError):
-    """Input processing failed."""
+    """Raised when user input cannot be processed.
+
+    This includes malformed input, ambiguous commands,
+    or internal processing failures.
+    """
     pass
 
 
 class ModeInitializationError(InteractionError):
-    """Mode initialization failed."""
+    """Raised when an interaction mode fails to initialize.
+
+    This includes session creation failures, adapter setup errors,
+    or publisher initialization problems.
+    """
     pass
