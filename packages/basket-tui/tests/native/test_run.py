@@ -151,3 +151,39 @@ def test_dispatch_agent_switched_prints_line():
     )
     assert len(out) == 1
     assert "explore" in out[0]
+
+
+def test_dispatch_session_switched_updates_header_state():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    header_state["session"] = "old"
+    width = 80
+    _dispatch_ws_message(
+        {"type": "session_switched", "session_id": "s1"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert header_state["session"] == "s1"
+    assert len(out) == 1
+    assert "s1" in out[0]
+
+
+def test_dispatch_agent_switched_updates_header_state():
+    assembler, out, output_put, last_output_count, header_state, ui_state = _dispatch_setup()
+    header_state["agent"] = "old"
+    width = 80
+    _dispatch_ws_message(
+        {"type": "agent_switched", "agent_name": "my_agent"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state=header_state,
+        ui_state=ui_state,
+    )
+    assert header_state["agent"] == "my_agent"
+    assert len(out) == 1
+    assert "my_agent" in out[0]
