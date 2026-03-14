@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from basket_assistant.core.configuration.loaders import AgentLoader
+from basket_assistant.core.configuration.loaders import AgentLoader, _parse_frontmatter_and_body
 from basket_assistant.core.configuration.models import SubAgentConfig
 
 
@@ -99,3 +99,161 @@ def test_load_agents_prefers_subdir_workspace_when_present(tmp_path):
     result = AgentLoader.load_from_dirs([tmp_path])
     assert "fullstack-engineer" in result
     assert result["fullstack-engineer"].workspace_dir == str(ws)
+
+
+# Tests for _parse_frontmatter_and_body
+
+
+def test_parse_frontmatter_tools_basic():
+    """Test tools field parsing with basic boolean values."""
+    text = """---
+tools: bash: true, edit: false, read: yes
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["tools"] == {"bash": True, "edit": False, "read": True}
+    assert body == "Body"
+
+
+def test_parse_frontmatter_tools_with_spaces():
+    """Test tools field parsing with extra whitespace."""
+    text = """---
+tools:  bash : true ,  edit : false  ,  read:yes
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["tools"] == {"bash": True, "edit": False, "read": True}
+
+
+def test_parse_frontmatter_tools_numeric_values():
+    """Test tools field parsing with numeric boolean values (1/0)."""
+    text = """---
+tools: bash: 1, edit: 0
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["tools"] == {"bash": True, "edit": False}
+
+
+def test_parse_frontmatter_tools_various_false_values():
+    """Test that only true/1/yes are parsed as True, everything else is False."""
+    text = """---
+tools: a: true, b: false, c: no, d: 0, e: foo
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["tools"] == {"a": True, "b": False, "c": False, "d": False, "e": False}
+
+
+def test_parse_frontmatter_tools_empty_string():
+    """Test that empty tools string is deleted from frontmatter."""
+    text = """---
+tools:
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert "tools" not in fm
+
+
+def test_parse_frontmatter_tools_quoted_keys():
+    """Test tools field parsing with quoted keys (quotes stripped)."""
+    text = """---
+tools: 'bash': true, "edit": false
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["tools"] == {"bash": True, "edit": False}
+
+
+def test_parse_frontmatter_model_parsing():
+    """Test model field parsing works correctly (similar to tools)."""
+    text = """---
+model: provider: anthropic, model_id: claude-sonnet-4
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm["model"] == {"provider": "anthropic", "model_id": "claude-sonnet-4"}
+
+
+def test_parse_frontmatter_no_frontmatter():
+    """Test handling text without frontmatter."""
+    text = "Just body text without frontmatter"
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm == {}
+    assert body == text
+
+
+def test_parse_frontmatter_incomplete_frontmatter():
+    """Test handling incomplete frontmatter (only one ---)."""
+    text = """---
+tools: bash: true
+Body without closing delimiter"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert fm == {}
+    assert "---" in body
+
+
+def test_parse_frontmatter_multiline_values():
+    """Test handling multiline field values."""
+    text = """---
+description: This is a
+  multiline description
+  with three lines
+tools: bash: true
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert "multiline description" in fm["description"]
+    assert fm["tools"] == {"bash": True}
+
+
+def test_parse_frontmatter_case_insensitive_keys():
+    """Test that keys are converted to lowercase."""
+    text = """---
+Description: Test
+TOOLS: bash: true
+---
+Body"""
+    fm, body = _parse_frontmatter_and_body(text)
+    assert "description" in fm
+    assert "tools" in fm
+    assert "TOOLS" not in fm
+
+
+def test_load_agents_with_tools_frontmatter(tmp_path):
+    """Integration test: .md file with tools frontmatter."""
+    (tmp_path / "explore.md").write_text(
+        """---
+description: Fast codebase exploration
+tools: bash: true, edit: false, grep: yes
+---
+
+You explore codebases. Be concise.""",
+        encoding="utf-8",
+    )
+    result = AgentLoader.load_from_dirs([tmp_path])
+    assert "explore" in result
+    cfg = result["explore"]
+    assert cfg.tools == {"bash": True, "edit": False, "grep": True}
+
+
+def test_load_agents_with_model_and_tools(tmp_path):
+    """Integration test: .md file with both model and tools."""
+    (tmp_path / "research.md").write_text(
+        """---
+description: Research assistant
+model: provider: anthropic, model_id: claude-sonnet-4
+tools: bash: true, websearch: yes
+workspace_dir: ~/research
+---
+
+Research agent prompt.""",
+        encoding="utf-8",
+    )
+    result = AgentLoader.load_from_dirs([tmp_path])
+    assert "research" in result
+    cfg = result["research"]
+    assert cfg.model == {"provider": "anthropic", "model_id": "claude-sonnet-4"}
+    assert cfg.tools == {"bash": True, "websearch": True}
+    assert cfg.workspace_dir == "~/research"
+

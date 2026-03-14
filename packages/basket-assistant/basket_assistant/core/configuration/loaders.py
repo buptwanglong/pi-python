@@ -68,7 +68,8 @@ def _parse_frontmatter_and_body(text: str) -> tuple[Dict[str, Any], str]:
     if "tools" in fm and isinstance(fm["tools"], str):
         tools_str = fm["tools"]
         tools = {}
-        for part in tools_str.replace(",", "\n").split():
+        for part in tools_str.split(","):
+            part = part.strip()
             if ":" in part:
                 k, v = part.split(":", 1)
                 v_lower = v.strip().lower()
