@@ -8,9 +8,9 @@ import logging
 import queue
 import shutil
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
-from .commands import handle_slash_command
+from .commands import HELP_LINES, handle_slash_command
 from .pickers import run_agent_picker, run_model_picker, run_session_picker
 from .render import render_messages
 from .stream import StreamAssembler
@@ -30,9 +30,10 @@ def _dispatch_ws_message(
     msg: dict[str, Any],
     assembler: StreamAssembler,
     width: int,
-    print_lock: threading.Lock,
+    output_put: Callable[[str], None],
+    last_output_count: list[int],
 ) -> None:
-    """Dispatch one WebSocket message to StreamAssembler and optionally print (on agent_complete)."""
+    """Dispatch one WebSocket message to StreamAssembler and optionally output (on agent_complete)."""
     typ = msg.get("type")
     if typ == "text_delta":
         assembler.text_delta(msg.get("delta", ""))
@@ -52,38 +53,50 @@ def _dispatch_ws_message(
     elif typ == "agent_complete":
         assembler.agent_complete()
         if assembler.messages:
-            last = assembler.messages[-1]
-            lines = render_messages([last], width)
-            with print_lock:
+            start = last_output_count[0]
+            for m in assembler.messages[start:]:
+                lines = render_messages([m], width)
                 for line in lines:
-                    print(line, flush=True)
+                    output_put(line)
+            last_output_count[0] = len(assembler.messages)
     elif typ == "agent_error":
         err = msg.get("error", "Unknown error")
-        with print_lock:
-            print(f"[system] Agent error: {err}", flush=True)
+        output_put(f"[system] Agent error: {err}")
     elif typ == "session_switched":
         sid = msg.get("session_id", "")
         if sid:
-            with print_lock:
-                print(f"[system] Switched to session {sid}", flush=True)
+            output_put(f"[system] Switched to session {sid}")
     elif typ == "agent_switched":
         name = msg.get("agent_name", "")
         if name:
-            with print_lock:
-                print(f"[system] Switched to agent {name}", flush=True)
+            output_put(f"[system] Switched to agent {name}")
     elif typ == "agent_aborted":
         assembler._buffer = ""
         assembler._thinking_buffer = ""
         assembler._current_tool = None
-        with print_lock:
-            print("[system] Aborted.", flush=True)
+        output_put("[system] Aborted.")
     elif typ in ("ready", "agent_disconnected"):
         pass
     elif typ == "error":
-        with print_lock:
-            print(f"[system] Gateway error: {msg.get('error', 'Unknown')}", flush=True)
+        output_put(f"[system] Gateway error: {msg.get('error', 'Unknown')}")
     else:
         logger.debug("Unhandled WebSocket message type: %s", typ)
+
+
+def _make_output_put(
+    output_queue: Optional[queue.Queue],
+    print_lock: Optional[threading.Lock] = None,
+) -> Callable[[str], None]:
+    """Return a callable that outputs one line: to queue or to stdout with lock."""
+    if output_queue is not None:
+        return output_queue.put
+    lock = print_lock or threading.Lock()
+
+    def _print_line(line: str) -> None:
+        with lock:
+            print(line, flush=True)
+
+    return _print_line
 
 
 async def _async_main(
@@ -93,6 +106,7 @@ async def _async_main(
     loop_ref: list,
     ready_event: threading.Event,
     thread_queue: Optional[queue.Queue] = None,
+    output_queue: Optional[queue.Queue] = None,
 ) -> None:
     import websockets
 
@@ -104,7 +118,9 @@ async def _async_main(
     loop_ref.append(loop)
 
     assembler = StreamAssembler()
+    last_output_count: list[int] = [0]
     print_lock = threading.Lock()
+    output_put = _make_output_put(output_queue, print_lock)
     backoff_sec = 1.0
     max_backoff = 30.0
     first_connect = True
@@ -114,8 +130,7 @@ async def _async_main(
             try:
                 async with websockets.connect(ws_url) as ws:
                     if not first_connect:
-                        with print_lock:
-                            print("[system] Connected.", flush=True)
+                        output_put("[system] Connected.")
                     else:
                         first_connect = False
                         ready_event.set()
@@ -128,7 +143,9 @@ async def _async_main(
                             async for raw in ws:
                                 try:
                                     data = json.loads(raw)
-                                    _dispatch_ws_message(data, assembler, width, print_lock)
+                                    _dispatch_ws_message(
+                                        data, assembler, width, output_put, last_output_count
+                                    )
                                 except json.JSONDecodeError:
                                     logger.warning(
                                         "Invalid JSON from gateway: %s", raw[:100]
@@ -165,12 +182,10 @@ async def _async_main(
                                             if closed.is_set():
                                                 return
                                             await ws.send(json.dumps({"type": "new_session"}))
-                                            with print_lock:
-                                                print("[system] Creating new session...", flush=True)
+                                            output_put("[system] Creating new session...")
                                         except Exception as e:
                                             logger.exception("New session failed")
-                                            with print_lock:
-                                                print(f"[system] Error: {e}", flush=True)
+                                            output_put(f"[system] Error: {e}")
                                         continue
                                     if item[0] == "abort":
                                         try:
@@ -180,11 +195,9 @@ async def _async_main(
                                             assembler._buffer = ""
                                             assembler._thinking_buffer = ""
                                             assembler._current_tool = None
-                                            with print_lock:
-                                                print("[system] Aborted.", flush=True)
+                                            output_put("[system] Aborted.")
                                         except Exception as e:
-                                            with print_lock:
-                                                print(f"[system] Error: {e}", flush=True)
+                                            output_put(f"[system] Error: {e}")
                                         continue
                                 if len(item) == 2 and item[0] == "switch_session":
                                     try:
@@ -195,15 +208,12 @@ async def _async_main(
                                                 {"type": "switch_session", "session_id": item[1]}
                                             )
                                         )
-                                        with print_lock:
-                                            print(
-                                                f"[system] Switching to session {item[1][:12]}...",
-                                                flush=True,
-                                            )
+                                        output_put(
+                                            f"[system] Switching to session {item[1][:12]}..."
+                                        )
                                     except Exception as e:
                                         logger.exception("Failed to switch session")
-                                        with print_lock:
-                                            print(f"[system] Switch error: {e}", flush=True)
+                                        output_put(f"[system] Switch error: {e}")
                                     continue
                                 if len(item) == 2 and item[0] == "switch_agent":
                                     try:
@@ -214,15 +224,10 @@ async def _async_main(
                                                 {"type": "switch_agent", "agent_name": item[1]}
                                             )
                                         )
-                                        with print_lock:
-                                            print(
-                                                f"[system] Switching to agent {item[1]}",
-                                                flush=True,
-                                            )
+                                        output_put(f"[system] Switching to agent {item[1]}")
                                     except Exception as e:
                                         logger.exception("Failed to switch agent")
-                                        with print_lock:
-                                            print(f"[system] Switch error: {e}", flush=True)
+                                        output_put(f"[system] Switch error: {e}")
                                     continue
                             text = str(item)
                             try:
@@ -233,19 +238,14 @@ async def _async_main(
                                 )
                             except Exception as e:
                                 logger.exception("Failed to send message to gateway")
-                                with print_lock:
-                                    print(
-                                        f"[system] Send error: {e}",
-                                        flush=True,
-                                )
+                                output_put(f"[system] Send error: {e}")
                                 continue
                             assembler.messages.append({"role": "user", "content": text})
                             lines = render_messages(
                                 [{"role": "user", "content": text}], width
                             )
-                            with print_lock:
-                                for line in lines:
-                                    print(line, flush=True)
+                            for line in lines:
+                                output_put(line)
 
                     reader_task = asyncio.create_task(reader())
                     bridge_task = (
@@ -267,8 +267,7 @@ async def _async_main(
                         break
             except Exception as e:
                 logger.exception("WebSocket connection failed")
-                with print_lock:
-                    print("[system] Disconnected. Reconnecting...", flush=True)
+                output_put("[system] Disconnected. Reconnecting...")
                 await asyncio.sleep(backoff_sec)
                 backoff_sec = min(backoff_sec * 2, max_backoff)
     except Exception as e:
@@ -305,18 +304,24 @@ async def run_tui_native_attach(
         raise ImportError("basket_tui.native.run requires 'websockets' package")
 
     try:
-        from prompt_toolkit import prompt as pt_prompt
-    except ImportError:
+        from prompt_toolkit import Application
+        from prompt_toolkit.buffer import Buffer
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import Layout
+        from prompt_toolkit.layout.containers import HSplit, VSplit, Window
+        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+    except ImportError as e:
         raise ImportError(
             "basket_tui.native.run requires 'prompt_toolkit' package"
-        )
+        ) from e
 
     width = _get_width(max_cols)
     queue_ref: list = []
     loop_ref: list = []
     ready_event = threading.Event()
-
     thread_queue: queue.Queue = queue.Queue()
+    output_queue: queue.Queue = queue.Queue()
 
     def run_async_main() -> None:
         asyncio.run(
@@ -327,19 +332,23 @@ async def run_tui_native_attach(
                 loop_ref,
                 ready_event,
                 thread_queue=thread_queue,
+                output_queue=output_queue,
             )
         )
 
-    thread = threading.Thread(target=run_async_main, daemon=False)
-    thread.start()
+    ws_thread = threading.Thread(target=run_async_main, daemon=False)
+    ws_thread.start()
 
     ready_event.wait(timeout=15.0)
     if not queue_ref or not loop_ref:
         print("[system] Connection timed out.", flush=True)
         return
 
-    print("[system] Connected (native). Type /help for commands.", flush=True)
-    print(f"  URL={ws_url}  agent=default  session=default", flush=True)
+    # Body lines (with ANSI) rendered via FormattedTextControl(ANSI(...)) so colors display.
+    body_lines: list[str] = [
+        "[system] Connected (native). Type /help for commands.",
+        f"  URL={ws_url}  agent=default  session=default",
+    ]
 
     def _http_base_url(u: str) -> str:
         base = u.replace("ws://", "http://").replace("wss://", "https://").rstrip("/")
@@ -347,70 +356,169 @@ async def run_tui_native_attach(
             base = base[:-3]
         return base
 
-    def input_loop() -> None:
-        """Run prompt_toolkit in this thread so it can call asyncio.run() internally."""
-        while True:
-            try:
-                text = pt_prompt("> ").strip()
-            except (EOFError, KeyboardInterrupt):
-                break
-            if not text:
-                continue
-            low = text.strip().lower()
-            if low in ("/session", "/sessions"):
-                session_id = run_session_picker(_http_base_url(ws_url))
-                if session_id:
-                    try:
-                        thread_queue.put(("switch_session", session_id))
-                    except Exception as e:
-                        print(f"[system] Failed to switch: {e}", flush=True)
-                continue
-            if low in ("/agent", "/agents"):
-                agent_name = run_agent_picker(_http_base_url(ws_url))
-                if agent_name:
-                    try:
-                        thread_queue.put(("switch_agent", agent_name))
-                    except Exception as e:
-                        print(f"[system] Failed to switch: {e}", flush=True)
-                continue
-            if low in ("/model", "/models"):
-                agent_name = run_model_picker(_http_base_url(ws_url))
-                if agent_name:
-                    try:
-                        thread_queue.put(("switch_agent", agent_name))
-                    except Exception as e:
-                        print(f"[system] Failed to switch: {e}", flush=True)
-                continue
-            if low == "/new":
-                try:
-                    thread_queue.put(("new_session",))
-                except Exception as e:
-                    print(f"[system] Failed: {e}", flush=True)
-                continue
-            if low == "/abort":
-                try:
-                    thread_queue.put(("abort",))
-                except Exception as e:
-                    print(f"[system] Failed: {e}", flush=True)
-                continue
-            if low == "/settings":
-                print("[system] Settings overlay not implemented yet.", flush=True)
-                continue
-            result = handle_slash_command(text)
-            if result == "exit":
-                try:
-                    thread_queue.put(None)
-                except Exception:
-                    pass
-                break
-            if result == "handled":
-                continue
-            try:
-                thread_queue.put(text)
-            except Exception as e:
-                print(f"[system] Failed to send: {e}", flush=True)
+    input_buffer = Buffer(name="input", multiline=False)
 
-    input_thread = threading.Thread(target=input_loop, daemon=False)
-    input_thread.start()
-    await asyncio.get_running_loop().run_in_executor(None, input_thread.join)
-    thread.join(timeout=5.0)
+    kb = KeyBindings()
+    app_ref: list = []
+
+    def _poll_output() -> None:
+        try:
+            while True:
+                line = output_queue.get_nowait()
+                body_lines.append(line)
+        except queue.Empty:
+            pass
+        app = app_ref[0] if app_ref else None
+        if app is not None:
+            app.invalidate()
+
+    def _schedule_poll() -> None:
+        from prompt_toolkit.application import get_app
+        _poll_output()
+        try:
+            get_app().call_later(0.15, _schedule_poll)
+        except Exception:
+            pass
+
+    def _accept_input(event: Any) -> None:
+        from prompt_toolkit.application import get_app
+        text = (input_buffer.text or "").strip()
+        input_buffer.reset()
+        if not text:
+            return
+        low = text.strip().lower()
+        if low in ("/session", "/sessions"):
+            session_id = run_session_picker(_http_base_url(ws_url))
+            if session_id:
+                try:
+                    thread_queue.put(("switch_session", session_id))
+                except Exception as e:
+                    body_lines.append(f"[system] Failed to switch: {e}")
+            get_app().invalidate()
+            return
+        if low in ("/agent", "/agents"):
+            agent_name = run_agent_picker(_http_base_url(ws_url))
+            if agent_name:
+                try:
+                    thread_queue.put(("switch_agent", agent_name))
+                except Exception as e:
+                    body_lines.append(f"[system] Failed to switch: {e}")
+            get_app().invalidate()
+            return
+        if low in ("/model", "/models"):
+            agent_name = run_model_picker(_http_base_url(ws_url))
+            if agent_name:
+                try:
+                    thread_queue.put(("switch_agent", agent_name))
+                except Exception as e:
+                    body_lines.append(f"[system] Failed to switch: {e}")
+            get_app().invalidate()
+            return
+        if low == "/new":
+            try:
+                thread_queue.put(("new_session",))
+            except Exception as e:
+                body_lines.append(f"[system] Failed: {e}")
+            get_app().invalidate()
+            return
+        if low == "/abort":
+            try:
+                thread_queue.put(("abort",))
+            except Exception as e:
+                body_lines.append(f"[system] Failed: {e}")
+            get_app().invalidate()
+            return
+        if low == "/settings":
+            body_lines.append("[system] Settings overlay not implemented yet.")
+            get_app().invalidate()
+            return
+        if low == "/help":
+            body_lines.extend(HELP_LINES)
+            get_app().invalidate()
+            return
+        result = handle_slash_command(text)
+        if result == "exit":
+            try:
+                thread_queue.put(None)
+            except Exception:
+                pass
+            get_app().exit()
+            return
+        if result == "handled":
+            if text.strip().startswith("/"):
+                body_lines.append(
+                    "[system] Unknown command. Type /help for commands."
+                )
+            get_app().invalidate()
+            return
+        try:
+            thread_queue.put(text)
+        except Exception as e:
+            body_lines.append(f"[system] Failed to send: {e}")
+            get_app().invalidate()
+
+    @kb.add("enter")
+    def _on_enter(event: Any) -> None:
+        if event.app.layout.current_buffer == input_buffer:
+            _accept_input(event)
+
+    def _do_exit() -> None:
+        try:
+            thread_queue.put(None)
+        except Exception:
+            pass
+        from prompt_toolkit.application import get_app
+        get_app().exit()
+
+    @kb.add("c-c")
+    @kb.add("c-d")
+    def _on_exit(_event: Any) -> None:
+        _do_exit()
+
+    sep_char = "─"
+    sep_control = FormattedTextControl(
+        text=lambda: sep_char * (width if width else 80)
+    )
+    body_control = FormattedTextControl(
+        text=lambda: ANSI("\n".join(body_lines)),
+        focusable=False,
+    )
+    input_control = BufferControl(buffer=input_buffer)
+
+    layout = Layout(
+        HSplit(
+            [
+                Window(content=body_control, wrap_lines=True),
+                Window(height=1, content=sep_control),
+                VSplit(
+                    [
+                        Window(
+                            width=3,
+                            content=FormattedTextControl("❯ "),
+                            dont_extend_width=True,
+                        ),
+                        Window(content=input_control),
+                    ]
+                ),
+            ]
+        )
+    )
+
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        full_screen=True,
+        mouse_support=False,
+        after_render=lambda _: _schedule_poll(),
+    )
+    app_ref.append(app)
+
+    try:
+        await app.run_async()
+    finally:
+        app_ref.clear()
+        try:
+            thread_queue.put(None)
+        except Exception:
+            pass
+        ws_thread.join(timeout=5.0)

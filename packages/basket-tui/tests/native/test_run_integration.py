@@ -1,8 +1,6 @@
 """Integration test for native run: dispatch of WebSocket events produces expected output."""
 
 import re
-import threading
-from unittest.mock import patch
 
 import pytest
 
@@ -17,18 +15,54 @@ def _strip_ansi(s: str) -> str:
 
 
 def test_dispatch_text_delta_agent_complete_prints_assistant_line():
-    """Simulate WebSocket stream: text_delta + agent_complete; assert printed line contains assistant text."""
+    """Simulate WebSocket stream: text_delta + agent_complete; assert output contains assistant text."""
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
     printed: list[str] = []
+    output_put = printed.append
+    last_output_count: list[int] = [0]
 
-    with patch("basket_tui.native.run.print", side_effect=lambda *a, **k: printed.append(" ".join(str(x) for x in a))):
-        _dispatch_ws_message({"type": "text_delta", "delta": "Hello "}, assembler, width, print_lock)
-        _dispatch_ws_message({"type": "text_delta", "delta": "world"}, assembler, width, print_lock)
-        _dispatch_ws_message({"type": "agent_complete"}, assembler, width, print_lock)
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "Hello "}, assembler, width, output_put, last_output_count
+    )
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "world"}, assembler, width, output_put, last_output_count
+    )
+    _dispatch_ws_message({"type": "agent_complete"}, assembler, width, output_put, last_output_count)
 
     assert len(assembler.messages) == 1
     assert assembler.messages[0]["content"] == "Hello world"
     combined = _strip_ansi(" ".join(printed))
-    assert "Hello" in combined and "world" in combined, f"Expected 'Hello world' in printed: {combined!r}"
+    assert "Hello" in combined and "world" in combined, f"Expected 'Hello world' in output: {combined!r}"
+
+
+def test_dispatch_tool_call_then_agent_complete_prints_tool_block():
+    """Simulate tool_call_start, tool_call_end, agent_complete; assert output contains tool name or result."""
+    assembler = StreamAssembler()
+    width = 80
+    printed: list[str] = []
+    output_put = printed.append
+    last_output_count: list[int] = [0]
+
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "bash", "arguments": {"cmd": "ls"}},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message(
+        {"type": "tool_call_end", "tool_name": "bash", "result": "file1.txt", "error": None},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message({"type": "agent_complete"}, assembler, width, output_put, last_output_count)
+
+    assert len(assembler.messages) == 1
+    assert assembler.messages[0].get("role") == "tool"
+    combined = _strip_ansi(" ".join(printed))
+    assert "bash" in combined or "file1.txt" in combined, (
+        f"Expected tool name or result in output: {combined!r}"
+    )

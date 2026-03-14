@@ -58,30 +58,39 @@ def test_handle_slash_command_non_slash_returns_none():
 def test_dispatch_text_delta_and_agent_complete_updates_assembler():
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
-    with patch("basket_tui.native.run.print"):
-        _dispatch_ws_message({"type": "text_delta", "delta": "Hi"}, assembler, width, print_lock)
-        _dispatch_ws_message({"type": "agent_complete"}, assembler, width, print_lock)
+    out: list[str] = []
+    output_put = out.append
+    last_output_count: list[int] = [0]
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "Hi"}, assembler, width, output_put, last_output_count
+    )
+    _dispatch_ws_message(
+        {"type": "agent_complete"}, assembler, width, output_put, last_output_count
+    )
     assert len(assembler.messages) == 1
     assert assembler.messages[0]["role"] == "assistant"
     assert assembler.messages[0]["content"] == "Hi"
+    assert len(out) >= 1
 
 
 def test_dispatch_tool_call_start_end_adds_tool_message():
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
+    output_put = lambda _: None
+    last_output_count: list[int] = [0]
     _dispatch_ws_message(
         {"type": "tool_call_start", "tool_name": "bash", "arguments": {"cmd": "ls"}},
         assembler,
         width,
-        print_lock,
+        output_put,
+        last_output_count,
     )
     _dispatch_ws_message(
         {"type": "tool_call_end", "tool_name": "bash", "result": "ok", "error": None},
         assembler,
         width,
-        print_lock,
+        output_put,
+        last_output_count,
     )
     tool_msgs = [m for m in assembler.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 1
@@ -91,38 +100,43 @@ def test_dispatch_tool_call_start_end_adds_tool_message():
 def test_dispatch_unknown_type_no_op():
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
-    _dispatch_ws_message({"type": "unknown_event"}, assembler, width, print_lock)
+    output_put = lambda _: None
+    last_output_count: list[int] = [0]
+    _dispatch_ws_message(
+        {"type": "unknown_event"}, assembler, width, output_put, last_output_count
+    )
     assert len(assembler.messages) == 0
 
 
 def test_dispatch_session_switched_prints_line():
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
-    with patch("basket_tui.native.run.print") as mock_print:
-        _dispatch_ws_message(
-            {"type": "session_switched", "session_id": "abc123"},
-            assembler,
-            width,
-            print_lock,
-        )
-    mock_print.assert_called_once()
-    call_args = mock_print.call_args[0][0]
-    assert "abc123" in call_args
+    out: list[str] = []
+    output_put = out.append
+    last_output_count: list[int] = [0]
+    _dispatch_ws_message(
+        {"type": "session_switched", "session_id": "abc123"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert len(out) == 1
+    assert "abc123" in out[0]
 
 
 def test_dispatch_agent_switched_prints_line():
     assembler = StreamAssembler()
     width = 80
-    print_lock = threading.Lock()
-    with patch("basket_tui.native.run.print") as mock_print:
-        _dispatch_ws_message(
-            {"type": "agent_switched", "agent_name": "explore"},
-            assembler,
-            width,
-            print_lock,
-        )
-    mock_print.assert_called_once()
-    call_args = mock_print.call_args[0][0]
-    assert "explore" in call_args
+    out: list[str] = []
+    output_put = out.append
+    last_output_count: list[int] = [0]
+    _dispatch_ws_message(
+        {"type": "agent_switched", "agent_name": "explore"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert len(out) == 1
+    assert "explore" in out[0]
