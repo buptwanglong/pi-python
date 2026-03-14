@@ -466,7 +466,9 @@ Environment variables:
         else:
             port = get_serve_port() or port
         attach_url = f"ws://127.0.0.1:{port}/ws"
-        await run_tui_mode_attach(attach_url, agent_name=tui_agent)
+        await run_tui_mode_attach(
+            attach_url, agent_name=tui_agent, max_cols=tui_max_cols
+        )
         return 0
 
     # Create agent (CLI --agent sets BASKET_AGENT for main-agent model selection)
@@ -490,7 +492,11 @@ Environment variables:
 
     # Run mode (interactive or one-shot; TUI is handled above via gateway attach)
     if len(args) == 0:
-        await agent.run_interactive()
+        # Use new CLIMode interaction
+        from .interaction.modes import CLIMode
+        mode = CLIMode(agent, verbose=agent.settings.agent.verbose)
+        await mode.initialize()
+        await mode.run()
     else:
         # One-shot mode
         message = " ".join(args)
