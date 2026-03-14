@@ -11,7 +11,7 @@ import threading
 from typing import Any, Callable, Optional, Union
 
 from .commands import HELP_LINES, handle_slash_command
-from .pickers import run_agent_picker, run_model_picker, run_session_picker
+from .pickers import run_agent_picker, run_session_picker
 from .render import render_messages
 from .stream import StreamAssembler
 
@@ -32,9 +32,20 @@ def _dispatch_ws_message(
     width: int,
     output_put: Callable[[str], None],
     last_output_count: list[int],
+    header_state: Optional[dict[str, str]] = None,
+    ui_state: Optional[dict[str, str]] = None,
 ) -> None:
     """Dispatch one WebSocket message to StreamAssembler and optionally output (on agent_complete)."""
     typ = msg.get("type")
+    if ui_state is not None:
+        if typ == "text_delta":
+            ui_state["phase"] = "streaming"
+        elif typ == "tool_call_start":
+            ui_state["phase"] = "tool_running"
+        elif typ == "agent_complete":
+            ui_state["phase"] = "idle"
+        elif typ == "agent_error":
+            ui_state["phase"] = "error"
     if typ == "text_delta":
         assembler.text_delta(msg.get("delta", ""))
     elif typ == "thinking_delta":
@@ -65,10 +76,14 @@ def _dispatch_ws_message(
     elif typ == "session_switched":
         sid = msg.get("session_id", "")
         if sid:
+            if header_state is not None:
+                header_state["session"] = sid
             output_put(f"[system] Switched to session {sid}")
     elif typ == "agent_switched":
         name = msg.get("agent_name", "")
         if name:
+            if header_state is not None:
+                header_state["agent"] = name
             output_put(f"[system] Switched to agent {name}")
     elif typ == "agent_aborted":
         assembler._buffer = ""
@@ -107,6 +122,8 @@ async def _async_main(
     ready_event: threading.Event,
     thread_queue: Optional[queue.Queue] = None,
     output_queue: Optional[queue.Queue] = None,
+    header_state: Optional[dict[str, str]] = None,
+    ui_state: Optional[dict[str, str]] = None,
 ) -> None:
     import websockets
 
@@ -129,6 +146,8 @@ async def _async_main(
         while True:
             try:
                 async with websockets.connect(ws_url) as ws:
+                    if ui_state is not None:
+                        ui_state["connection"] = "connected"
                     if not first_connect:
                         output_put("[system] Connected.")
                     else:
@@ -144,7 +163,13 @@ async def _async_main(
                                 try:
                                     data = json.loads(raw)
                                     _dispatch_ws_message(
-                                        data, assembler, width, output_put, last_output_count
+                                        data,
+                                        assembler,
+                                        width,
+                                        output_put,
+                                        last_output_count,
+                                        header_state,
+                                        ui_state,
                                     )
                                 except json.JSONDecodeError:
                                     logger.warning(
@@ -267,6 +292,8 @@ async def _async_main(
                         break
             except Exception as e:
                 logger.exception("WebSocket connection failed")
+                if ui_state is not None:
+                    ui_state["connection"] = "disconnected"
                 output_put("[system] Disconnected. Reconnecting...")
                 await asyncio.sleep(backoff_sec)
                 backoff_sec = min(backoff_sec * 2, max_backoff)
@@ -333,6 +360,8 @@ async def run_tui_native_attach(
                 ready_event,
                 thread_queue=thread_queue,
                 output_queue=output_queue,
+                header_state=header_state,
+                ui_state=ui_state,
             )
         )
 
@@ -344,10 +373,26 @@ async def run_tui_native_attach(
         print("[system] Connection timed out.", flush=True)
         return
 
+    # Header state: shared with async side; updated on session_switched/agent_switched.
+    base_url = (
+        ws_url.replace("ws://", "http://")
+        .replace("wss://", "https://")
+        .rstrip("/")
+    )
+    if base_url.endswith("/ws"):
+        base_url = base_url[:-3]
+    header_state: dict[str, str] = {
+        "agent": agent_name or "default",
+        "session": "default",
+    }
+    ui_state: dict[str, str] = {
+        "phase": "idle",
+        "connection": "connecting",
+    }
+
     # Body lines (with ANSI) rendered via FormattedTextControl(ANSI(...)) so colors display.
     body_lines: list[str] = [
         "[system] Connected (native). Type /help for commands.",
-        f"  URL={ws_url}  agent=default  session=default",
     ]
 
     def _http_base_url(u: str) -> str:
@@ -406,7 +451,8 @@ async def run_tui_native_attach(
             get_app().invalidate()
             return
         if low in ("/model", "/models"):
-            agent_name = run_model_picker(_http_base_url(ws_url))
+            # Model is per-agent; use agent picker (same as /agent).
+            agent_name = run_agent_picker(_http_base_url(ws_url))
             if agent_name:
                 try:
                     thread_queue.put(("switch_agent", agent_name))
@@ -429,7 +475,9 @@ async def run_tui_native_attach(
             get_app().invalidate()
             return
         if low == "/settings":
-            body_lines.append("[system] Settings overlay not implemented yet.")
+            body_lines.append("[system] Settings:")
+            body_lines.append("  Toggle thinking (Ctrl+T): not implemented yet.")
+            body_lines.append("  Toggle tool expand (Ctrl+O): not implemented yet.")
             get_app().invalidate()
             return
         if low == "/help":
@@ -462,6 +510,49 @@ async def run_tui_native_attach(
         if event.app.layout.current_buffer == input_buffer:
             _accept_input(event)
 
+    def _open_session_picker() -> None:
+        session_id = run_session_picker(_http_base_url(ws_url))
+        if session_id:
+            try:
+                thread_queue.put(("switch_session", session_id))
+            except Exception as e:
+                body_lines.append(f"[system] Failed to switch: {e}")
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
+
+    def _open_agent_picker() -> None:
+        name = run_agent_picker(_http_base_url(ws_url))
+        if name:
+            try:
+                thread_queue.put(("switch_agent", name))
+            except Exception as e:
+                body_lines.append(f"[system] Failed to switch: {e}")
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
+
+    def _open_model_picker() -> None:
+        # Model is per-agent; open agent picker (same as Ctrl+G).
+        name = run_agent_picker(_http_base_url(ws_url))
+        if name:
+            try:
+                thread_queue.put(("switch_agent", name))
+            except Exception as e:
+                body_lines.append(f"[system] Failed to switch: {e}")
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
+
+    @kb.add("c-p")
+    def _on_ctrl_p(_event: Any) -> None:
+        _open_session_picker()
+
+    @kb.add("c-g")
+    def _on_ctrl_g(_event: Any) -> None:
+        _open_agent_picker()
+
+    @kb.add("c-l")
+    def _on_ctrl_l(_event: Any) -> None:
+        _open_model_picker()
+
     def _do_exit() -> None:
         try:
             thread_queue.put(None)
@@ -475,9 +566,27 @@ async def run_tui_native_attach(
     def _on_exit(_event: Any) -> None:
         _do_exit()
 
+    @kb.add("escape")
+    def _on_escape(_event: Any) -> None:
+        """Esc: abort current turn (same as /abort)."""
+        try:
+            thread_queue.put(("abort",))
+        except Exception:
+            pass
+        from prompt_toolkit.application import get_app
+        get_app().invalidate()
+
     sep_char = "─"
     sep_control = FormattedTextControl(
         text=lambda: sep_char * (width if width else 80)
+    )
+    header_control = FormattedTextControl(
+        text=lambda: f"  URL={base_url}  agent={header_state['agent']}  session={header_state['session']}",
+        focusable=False,
+    )
+    footer_control = FormattedTextControl(
+        text=lambda: f"  {ui_state.get('connection', '?')} | {ui_state.get('phase', 'idle')}",
+        focusable=False,
     )
     body_control = FormattedTextControl(
         text=lambda: ANSI("\n".join(body_lines)),
@@ -488,7 +597,9 @@ async def run_tui_native_attach(
     layout = Layout(
         HSplit(
             [
+                Window(height=1, content=header_control),
                 Window(content=body_control, wrap_lines=True),
+                Window(height=1, content=footer_control),
                 Window(height=1, content=sep_control),
                 VSplit(
                     [
