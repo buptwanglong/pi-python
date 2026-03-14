@@ -8,6 +8,43 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Tool name -> list of argument keys to show in INFO log (first key wins for short summary)
+_TOOL_ARG_SUMMARY_KEYS: Dict[str, List[str]] = {
+    "bash": ["command"],
+    "read": ["file_path"],
+    "write": ["file_path"],
+    "edit": ["file_path", "old_string", "new_string"],
+    "grep": ["pattern", "path"],
+    "web_search": ["query"],
+    "web_fetch": ["url"],
+    "todo_write": [],  # summary is "N items"
+    "ask_user_question": ["question"],
+    "task": ["subagent_type", "prompt"],
+    "skill": ["skill_id", "message"],
+}
+
+
+def _tool_call_args_summary(tool_name: str, args: Dict[str, Any], max_len: int = 200) -> str:
+    """Build a short one-line summary of tool arguments for logging."""
+    if not args:
+        return ""
+    keys = _TOOL_ARG_SUMMARY_KEYS.get(tool_name)
+    if keys:
+        parts = []
+        for k in keys:
+            if k in args:
+                v = args[k]
+                if isinstance(v, str) and len(v) > 80:
+                    v = v[:77] + "..."
+                parts.append(f"{k}={v!r}")
+        if parts:
+            s = " ".join(parts)
+            return s[:max_len] + "..." if len(s) > max_len else s
+    # Fallback: first two keys
+    first = list(args.items())[:2]
+    s = " ".join(f"{k}={v!r}" for k, v in first)
+    return (s[:max_len] + "...") if len(s) > max_len else s
+
 
 def setup_event_handlers(agent: Any) -> None:
     """Setup event handlers for agent events."""
@@ -19,8 +56,12 @@ def setup_event_handlers(agent: Any) -> None:
 
     async def on_tool_call_start(event):
         tool_name = event.get("tool_name", "unknown")
-        logger.info("Tool call start: %s", tool_name)
-        args = event.get("arguments", {})
+        args = event.get("arguments", {}) or {}
+        summary = _tool_call_args_summary(tool_name, args)
+        if summary:
+            logger.info("Tool call start: %s %s", tool_name, summary)
+        else:
+            logger.info("Tool call start: %s", tool_name)
         if args:
             args_str = str(args)
             logger.debug(
@@ -104,6 +145,46 @@ def setup_event_handlers(agent: Any) -> None:
     agent.agent.on("text_delta", on_text_delta)
     agent.agent.on("agent_tool_call_start", on_tool_call_start)
     agent.agent.on("agent_tool_call_end", on_tool_call_end)
+
+
+def setup_logging_handlers(agent: Any) -> None:
+    """
+    Register handlers that only write INFO logs for LLM turns and tool calls.
+    Shared by CLI and TUI; same events drive both logging and display responses.
+    """
+    basket_agent = agent.agent if hasattr(agent, "agent") else agent
+
+    def on_turn_start(event: dict) -> None:
+        logger.info(
+            "LLM turn started, turn_number=%s",
+            event.get("turn_number"),
+        )
+
+    def on_turn_end(event: dict) -> None:
+        logger.info(
+            "LLM turn ended, turn_number=%s, has_tool_calls=%s",
+            event.get("turn_number"),
+            event.get("has_tool_calls", False),
+        )
+
+    def on_tool_call_start_log(event: dict) -> None:
+        tool_name = event.get("tool_name", "unknown")
+        args = event.get("arguments", {}) or {}
+        summary = _tool_call_args_summary(tool_name, args)
+        if summary:
+            logger.info("Tool call start: %s %s", tool_name, summary)
+        else:
+            logger.info("Tool call start: %s", tool_name)
+
+    def on_tool_call_end_log(event: dict) -> None:
+        tool_name = event.get("tool_name", "unknown")
+        err = event.get("error")
+        logger.info("Tool call end: %s error=%s", tool_name, bool(err))
+
+    basket_agent.on("agent_turn_start", on_turn_start)
+    basket_agent.on("agent_turn_end", on_turn_end)
+    basket_agent.on("agent_tool_call_start", on_tool_call_start_log)
+    basket_agent.on("agent_tool_call_end", on_tool_call_end_log)
 
 
 async def emit_assistant_event(agent: Any, event_name: str, payload: dict) -> None:
@@ -207,6 +288,8 @@ async def run_with_trajectory_if_enabled(
     agent.context.system_prompt = prompts.get_system_prompt_for_run(
         agent, invoked_skill_id
     )
+    if invoked_skill_id:
+        logger.info("Invoked skill for this turn: skill_id=%s", invoked_skill_id)
     try:
         await emit_assistant_event(
             agent,

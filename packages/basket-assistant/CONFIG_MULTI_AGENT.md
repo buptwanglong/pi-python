@@ -1,6 +1,6 @@
 # Multi-agent configuration
 
-配置源为 **单一** `settings.json`（与 [CONFIG.md](CONFIG.md) 一致）。主 Agent 与子 Agent（Task 工具用）均由此配置解析。
+配置源为 **单一** `settings.json`（与 [CONFIG.md](CONFIG.md) 一致）。主 Agent 与子 Agent（Task 工具用）均由此配置解析。子智能体的增删改可通过 **`basket agent list` / `basket agent add` / `basket agent remove`** 或程序内 **`ConfigurationManager.list_agents()` / `add_agent()` / `remove_agent()` / `update_agent()`** 完成。
 
 - **主 Agent**：
   - **default_agent**（可选）：主 Agent 名称。为 `null` 或未设置时，主 Agent 使用顶层 `model`。

@@ -1,0 +1,297 @@
+"""
+TUI attach mode: connect to a resident assistant gateway via WebSocket and run the TUI.
+
+Same protocol works for (1) local gateway ws://127.0.0.1:7682/ws and (2) relay client
+URL (e.g. wss://relay-host/relay/client?session_id=xxx from `basket relay <url>`).
+Optional agent_name appends ?agent=<name> to select main agent (basket tui --agent).
+"""
+
+import asyncio
+import json
+import logging
+from urllib.parse import urlencode
+
+from typing import Optional
+
+from basket_tui import PiCodingAgentApp
+from basket_tui.components import ToolDisplay
+from basket_tui.core.events import (
+    AgentCompleteEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+)
+from basket_tui.messages import ProcessPendingInputs, StreamingTextDelta, StreamingThinkingDelta
+
+logger = logging.getLogger(__name__)
+
+
+def _append_message(app: PiCodingAgentApp, role: str, content: str) -> None:
+    """Append message using message_renderer (event/component API)."""
+    if role == "user":
+        app.message_renderer.add_user_message(content)
+    else:
+        app.message_renderer.add_system_message(content)
+
+
+def _ensure_assistant_block(app: PiCodingAgentApp) -> None:
+    """Activate streaming so next deltas go to StreamingDisplay."""
+    app.streaming_controller.activate()
+
+
+def _append_text(app: PiCodingAgentApp, delta: str) -> None:
+    """Emit text delta via event bus (same path as run_tui_mode)."""
+    app.event_bus.publish(TextDeltaEvent(delta=delta))
+
+
+def _append_thinking(app: PiCodingAgentApp, delta: str) -> None:
+    """Emit thinking delta via event bus."""
+    app.event_bus.publish(ThinkingDeltaEvent(delta=delta))
+
+
+def _show_tool_call(app: PiCodingAgentApp, tool_name: str, arguments: dict) -> None:
+    """Show tool call on ToolDisplay component."""
+    app.query_one(ToolDisplay).show_tool_call(tool_name, arguments)
+
+
+def _show_tool_result(app: PiCodingAgentApp, result: str, success: bool) -> None:
+    """Show tool result on ToolDisplay (error=not success)."""
+    app.query_one(ToolDisplay).show_result(result, error=not success)
+
+
+def _finalize_assistant_block(app: PiCodingAgentApp) -> None:
+    """Commit streaming buffer to message list and clear (same as AgentComplete)."""
+    app.event_bus.publish(AgentCompleteEvent())
+
+
+def _format_todos(todos: list) -> str:
+    """Format todo list for display (compact one-line summary + first few items)."""
+    if not todos:
+        return "Todo list cleared."
+    total = len(todos)
+    by_status = {}
+    for t in todos:
+        s = (t.get("status") or "pending").lower()
+        by_status[s] = by_status.get(s, 0) + 1
+    parts = [f"Todo ({total} items)"]
+    if by_status:
+        parts.append(
+            " — "
+            + ", ".join(
+                f"{c} {s}" for s, c in sorted(by_status.items())
+            )
+        )
+    lines = [" ".join(parts)]
+    icons = {"pending": "○", "in_progress": "●", "completed": "✓", "cancelled": "✗"}
+    for t in todos[:8]:
+        st = (t.get("status") or "pending").lower()
+        icon = icons.get(st, "○")
+        content = (t.get("content") or "").strip() or "(no content)"
+        if len(content) > 60:
+            content = content[:57] + "..."
+        lines.append(f"  {icon} {content}")
+    if len(todos) > 8:
+        lines.append(f"  ... and {len(todos) - 8} more")
+    return "\n".join(lines)
+
+
+def _show_todos(app: PiCodingAgentApp, todos: list) -> None:
+    """Show todo list update in TUI as a system message."""
+    app.message_renderer.add_system_message(_format_todos(todos))
+
+
+def _show_ask_question(
+    app: PiCodingAgentApp, question: str, options: Optional[list] = None
+) -> None:
+    """Show agent question in TUI; user replies by typing in input and pressing Enter."""
+    q = (question or "").strip() or "(no question text)"
+    msg = f"Agent asks: {q}\n(Reply in the input below and press Enter.)"
+    if options:
+        opts_str = ", ".join(str(o) for o in options[:10])
+        if len(options) > 10:
+            opts_str += f" (+{len(options) - 10} more)"
+        msg += f"\nOptions: {opts_str}"
+    app.message_renderer.add_system_message(msg)
+
+
+def _build_attach_url(ws_url: str, agent_name: Optional[str]) -> str:
+    """Append ?agent=<name> or &agent=<name> to ws_url when agent_name is set."""
+    if not agent_name or not agent_name.strip():
+        return ws_url
+    name = agent_name.strip()
+    sep = "&" if "?" in ws_url else "?"
+    return f"{ws_url}{sep}{urlencode({'agent': name})}"
+
+
+async def run_tui_mode_attach(
+    ws_url: str,
+    agent_name: Optional[str] = None,
+    max_cols: Optional[int] = None,
+) -> None:
+    """
+    Run the TUI connected to a gateway WebSocket. User input is sent to the gateway;
+    events (text_delta, tool_call_*, agent_complete, agent_error) are received and
+    rendered in the TUI. Exiting the TUI closes the connection; the gateway keeps running.
+
+    Args:
+        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws or relay client URL
+                wss://host/relay/client?session_id=xxx)
+        agent_name: Optional main agent name; appends ?agent=<name> to ws_url for gateway.
+        max_cols: Optional maximum column width for TUI display.
+    """
+    try:
+        import websockets
+    except ImportError:
+        raise ImportError("basket_assistant.modes.attach requires 'websockets' package")
+
+    ws_url = _build_attach_url(ws_url, agent_name)
+    app = PiCodingAgentApp(agent=None, max_cols=max_cols)
+    ws_ref: list = []  # single-element list holding the current WebSocket
+    connected = asyncio.Event()
+    agent_done_future: Optional[asyncio.Future] = None
+    agent_placeholder_task: Optional[asyncio.Task] = None
+
+    async def _placeholder_agent_task(fut: asyncio.Future) -> None:
+        await fut
+
+    async def handle_user_input(user_input: str) -> None:
+        nonlocal agent_done_future, agent_placeholder_task
+        user_input = (user_input or "").strip()
+        if not user_input:
+            return
+        # Show user message in TUI immediately
+        _append_message(app, "user", user_input)
+        _ensure_assistant_block(app)
+        if not ws_ref:
+            _append_message(app, "system", "Not connected to assistant.")
+            return
+        ws = ws_ref[0]
+        agent_done_future = asyncio.get_running_loop().create_future()
+        agent_placeholder_task = asyncio.create_task(_placeholder_agent_task(agent_done_future))
+        try:
+            await ws.send(json.dumps({"type": "message", "content": user_input}))
+        except Exception as e:
+            logger.exception("Failed to send message to gateway")
+            _append_message(app, "system", f"Send error: {e}")
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+
+    def dispatch(msg: dict) -> None:
+        nonlocal agent_done_future, agent_placeholder_task
+        typ = msg.get("type")
+        if typ == "text_delta":
+            # Post to app so UI updates in main loop (streaming refresh)
+            app.post_message(StreamingTextDelta(delta=msg.get("delta", "")))
+        elif typ == "thinking_delta":
+            delta = msg.get("delta", "")
+            if not getattr(dispatch, "_in_thinking", False):
+                dispatch._in_thinking = True
+                _append_message(app, "system", "Thinking...")
+            app.post_message(StreamingThinkingDelta(delta=delta))
+        elif typ == "tool_call_start":
+            dispatch._in_thinking = False
+            if msg.get("tool_name") in ("ask_user_question", "todo_write"):
+                pass
+            else:
+                _show_tool_call(
+                    app,
+                    msg.get("tool_name", "unknown"),
+                    msg.get("arguments") or {},
+                )
+        elif typ == "tool_call_end":
+            tool_name = msg.get("tool_name", "unknown")
+            if tool_name in ("ask_user_question", "todo_write"):
+                pass
+            elif "error" in msg:
+                _show_tool_result(app, msg["error"], success=False)
+            else:
+                _show_tool_result(app, msg.get("result", ""), success=True)
+        elif typ == "todos":
+            _show_todos(app, msg.get("todos") or [])
+        elif typ == "ask_user_question":
+            _show_ask_question(
+                app,
+                msg.get("question", ""),
+                msg.get("options"),
+            )
+        elif typ == "plan_mode":
+            dispatch._in_thinking = False
+            _finalize_assistant_block(app)
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+            agent_done_future = None
+            agent_placeholder_task = None
+            app.post_message(ProcessPendingInputs())
+        elif typ == "agent_complete":
+            dispatch._in_thinking = False
+            _finalize_assistant_block(app)
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+            agent_done_future = None
+            agent_placeholder_task = None
+            app.post_message(ProcessPendingInputs())
+        elif typ == "ready":
+            pass
+        elif typ == "agent_disconnected":
+            _append_message(app, "system", "Agent disconnected from relay.")
+        elif typ == "error":
+            _append_message(app, "system", msg.get("error", "Relay error"))
+        elif typ == "agent_error":
+            dispatch._in_thinking = False
+            _append_message(app, "system", f"Error: {msg.get('error', 'Unknown error')}")
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+
+    dispatch._in_thinking = False
+
+    async def reader() -> None:
+        nonlocal agent_done_future
+        try:
+            async with websockets.connect(ws_url) as ws:
+                ws_ref.append(ws)
+                connected.set()
+                try:
+                    async for raw in ws:
+                        try:
+                            data = json.loads(raw)
+                            dispatch(data)
+                            # Yield so TUI can refresh (streaming display updates)
+                            await asyncio.sleep(0)
+                        except json.JSONDecodeError:
+                            pass
+                finally:
+                    ws_ref.clear()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug("WebSocket reader exited: %s", e)
+            if ws_ref:
+                ws_ref.clear()
+            connected.clear()
+            _append_message(app, "system", f"Disconnected: {e}")
+            if agent_done_future and not agent_done_future.done():
+                agent_done_future.set_result(None)
+
+    app.input_handler.set_callback(handle_user_input)
+    reader_task = asyncio.create_task(reader())
+    await connected.wait()
+
+    _original_exit = app.exit
+
+    def _exit_with_reader_cancel(*args, **kwargs):
+        reader_task.cancel()
+        _original_exit(*args, **kwargs)
+
+    app.exit = _exit_with_reader_cancel  # type: ignore[method-assign]
+
+    try:
+        await app.run_async()
+    finally:
+        if not reader_task.done():
+            reader_task.cancel()
+        try:
+            await reader_task
+        except asyncio.CancelledError:
+            pass
+
+
+__all__ = ["run_tui_mode_attach"]

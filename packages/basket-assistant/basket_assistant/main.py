@@ -147,7 +147,7 @@ Basket - AI-powered personal assistant
 Usage:
   basket                 - Start interactive mode
   basket tui [--agent <name>] - Start TUI (optionally with specified main agent)
-  basket tui-native | basket tn - Start terminal-native TUI (selectable/copyable output)
+  basket tui-native | basket tn - Start terminal-native TUI (line output, selectable/copyable; same gateway as 'basket tui')
   basket --session <id> - Start with session loaded (use with interactive or tui)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
@@ -162,7 +162,7 @@ Usage:
   basket --version       - Show version
   basket --debug         - Enable DEBUG logging (to log file only)
 
-  --agent <name>  - Use with 'basket' or 'basket tui' to select main agent from settings.agents
+  --agent <name>  - Use with 'basket', 'basket tui', or 'basket tui-native' to select main agent from settings.agents
 
 Interactive mode commands:
   help      - Show help

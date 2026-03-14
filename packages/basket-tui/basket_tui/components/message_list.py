@@ -2,12 +2,15 @@
 MessageList Widget
 
 Displays conversation messages with reactive updates.
+Assistant messages are rendered as Markdown (bold, code, etc.).
 """
 
-from typing import List
+from typing import List, Union
 from textual.widgets import Static
 from textual.reactive import reactive
+from rich.console import Group
 from rich.text import Text
+from rich.markdown import Markdown
 
 from ..core.conversation import Message
 
@@ -17,7 +20,7 @@ class MessageList(Static):
     Message list widget with reactive updates
 
     Uses Textual's reactive property system to automatically
-    refresh UI when messages change.
+    refresh UI when messages change. Assistant role is rendered as Markdown.
 
     Attributes:
         messages: Reactive list of messages
@@ -42,25 +45,33 @@ class MessageList(Static):
         """
         self.refresh()
 
-    def render(self) -> Text:
+    def render(self) -> Union[Text, Group]:
         """
-        Render message list to Rich Text
-
-        Returns:
-            Rendered text with styled messages
+        Render message list. Assistant messages use Markdown so **bold** etc. render correctly.
         """
-        output = Text()
+        parts: List[Union[Text, Group]] = []
 
         for msg in self.messages:
-            # Role prefix with color
             role_style = self._get_role_style(msg.role)
-            output.append(f"[{msg.role}] ", style=role_style)
+            prefix = Text(f"[{msg.role}] ", style=role_style)
 
-            # Message content
-            output.append(msg.content)
-            output.append("\n\n")
+            content = (msg.content or "").strip()
+            if msg.role == "assistant" and content:
+                try:
+                    content_renderable: Union[Text, Markdown] = Markdown(content)
+                except Exception:
+                    content_renderable = Text(content)
+                parts.append(Group(prefix, content_renderable))
+            else:
+                block = Text()
+                block.append_text(prefix)
+                block.append(content)
+                parts.append(block)
+            parts.append(Text("\n\n"))
 
-        return output
+        if not parts:
+            return Text()
+        return Group(*parts)
 
     def _get_role_style(self, role: str) -> str:
         """

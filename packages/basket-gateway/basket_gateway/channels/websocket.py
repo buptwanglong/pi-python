@@ -3,6 +3,7 @@ WebSocket channel: single session at /ws, stream agent events to client.
 Optional query param ?agent=<name> selects main agent (e.g. from basket tui --agent).
 """
 
+import asyncio
 import json
 import logging
 from urllib.parse import parse_qs
@@ -61,6 +62,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     app.state.current_ws = websocket
+    current_session_id: str = "default"
+    current_agent_name: Optional[str] = (agent_name or "").strip() or "default"
 
     async def event_sink(payload: dict) -> None:
         await _send_json_safe(app, payload)
@@ -72,17 +75,61 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             except json.JSONDecodeError:
                 await event_sink({"type": "agent_error", "error": "Invalid JSON"})
                 continue
-            if data.get("type") != "message":
+            typ = data.get("type")
+            if typ == "switch_session":
+                sid = (data.get("session_id") or "").strip()
+                if sid:
+                    current_session_id = sid
+                    agent = gateway._get_agent(current_session_id, current_agent_name)
+                    if hasattr(agent, "set_session_id") and asyncio.iscoroutinefunction(
+                        getattr(agent, "set_session_id")
+                    ):
+                        await agent.set_session_id(sid, load_history=True)
+                    await event_sink({"type": "session_switched", "session_id": sid})
+                continue
+            if typ == "switch_agent":
+                name = (data.get("agent_name") or "").strip()
+                if name:
+                    current_agent_name = name
+                    await event_sink({"type": "agent_switched", "agent_name": name})
+                continue
+            if typ == "new_session":
+                try:
+                    agent = gateway._get_agent(current_session_id, current_agent_name)
+                    session_manager = getattr(agent, "session_manager", None)
+                    if session_manager and hasattr(session_manager, "create_session"):
+                        model_id = "default"
+                        if getattr(agent, "model", None) is not None:
+                            model_id = getattr(agent.model, "model_id", None) or getattr(
+                                agent.model, "id", None
+                            ) or "default"
+                        new_sid = await session_manager.create_session(model_id)
+                        current_session_id = new_sid
+                        if hasattr(agent, "set_session_id") and asyncio.iscoroutinefunction(
+                            getattr(agent, "set_session_id")
+                        ):
+                            await agent.set_session_id(new_sid, load_history=True)
+                        await event_sink({"type": "session_switched", "session_id": new_sid})
+                    else:
+                        await event_sink({"type": "agent_error", "error": "Session creation not available"})
+                except Exception as e:
+                    logger.exception("New session failed")
+                    await event_sink({"type": "agent_error", "error": str(e)})
+                continue
+            if typ == "abort":
+                await event_sink({"type": "agent_aborted"})
+                continue
+            if typ != "message":
                 continue
             content = (data.get("content") or "").strip()
             if not content:
                 continue
             try:
                 await gateway.run(
-                    "default",
+                    current_session_id,
                     content,
                     event_sink=event_sink,
-                    agent_name=agent_name,
+                    agent_name=current_agent_name,
                 )
             except Exception as e:
                 logger.exception("Agent run failed in gateway")

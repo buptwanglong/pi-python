@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-from basket_assistant.core.agent_config import AgentConfig
-from basket_assistant.core.settings import load_settings
+from basket_assistant.core import AgentConfigResolver, SettingsManager
 
 
-def get_agent_config(agent_name: str | None = None) -> AgentConfig:
-    """Load settings and return config for the given agent (None = main/default agent).
-    If agent_name is None, uses env BASKET_AGENT (set by CLI --agent) when present.
+def get_agent_config(agent_name: str | None = None) -> dict[str, str | int | None]:
     """
-    import os
+    Load settings and return model config for the given agent.
 
-    if agent_name is None:
-        agent_name = os.environ.get("BASKET_AGENT") or None
-    settings = load_settings()
-    return settings.resolve_agent(agent_name)
+    Args:
+        agent_name: Agent name (None = main/default agent, reads BASKET_AGENT env if None)
+
+    Returns:
+        Dict with provider, model_id, base_url, context_window, max_tokens
+    """
+    settings_manager = SettingsManager()
+    settings = settings_manager.load()
+
+    resolver = AgentConfigResolver(settings)
+    agent_key = resolver.resolve_agent_key(agent_name)
+
+    return resolver.get_model_config(agent_key)
+

@@ -109,7 +109,7 @@ def test_detect_anthropic_from_env(mock_isatty, tmp_path):
 
     assert settings.model.provider == "anthropic"
     assert settings.model.model_id == "claude-3-5-sonnet-20241022"
-    assert "anthropic_api_key" in settings.api_keys
+    assert "anthropic" in settings.api_keys
 
 
 @patch('sys.stdin.isatty', return_value=False)
@@ -126,7 +126,7 @@ def test_detect_google_from_env(mock_isatty, tmp_path):
 
     assert settings.model.provider == "google"
     assert settings.model.model_id == "gemini-1.5-pro"
-    assert "google_api_key" in settings.api_keys
+    assert "google" in settings.api_keys
 
 
 @patch('sys.stdin.isatty', return_value=False)

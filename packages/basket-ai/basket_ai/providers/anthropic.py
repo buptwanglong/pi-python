@@ -436,13 +436,13 @@ class AnthropicProvider(BaseProvider):
     ) -> None:
         """Handle message_start event."""
         usage = event.message.usage
-        output.usage.input = getattr(usage, "input_tokens", 0)
-        output.usage.output = getattr(usage, "output_tokens", 0)
-        output.usage.cache_read = getattr(usage, "cache_read_input_tokens", 0)
-        output.usage.cache_write = getattr(usage, "cache_creation_input_tokens", 0)
+        output.usage.input = getattr(usage, "input_tokens", 0) or 0
+        output.usage.output = getattr(usage, "output_tokens", 0) or 0
+        output.usage.cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        output.usage.cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
         output.usage.total_tokens = (
-            output.usage.input + output.usage.output +
-            output.usage.cache_read + output.usage.cache_write
+            output.usage.input + output.usage.output
+            + output.usage.cache_read + output.usage.cache_write
         )
         self._calculate_cost(output, model)
 
@@ -623,13 +623,13 @@ class AnthropicProvider(BaseProvider):
             output.stop_reason = self._map_stop_reason(event.delta.stop_reason)
 
         usage = event.usage
-        output.usage.input = getattr(usage, "input_tokens", 0)
-        output.usage.output = getattr(usage, "output_tokens", 0)
-        output.usage.cache_read = getattr(usage, "cache_read_input_tokens", 0)
-        output.usage.cache_write = getattr(usage, "cache_creation_input_tokens", 0)
+        output.usage.input = getattr(usage, "input_tokens", 0) or 0
+        output.usage.output = getattr(usage, "output_tokens", 0) or 0
+        output.usage.cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        output.usage.cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
         output.usage.total_tokens = (
-            output.usage.input + output.usage.output +
-            output.usage.cache_read + output.usage.cache_write
+            output.usage.input + output.usage.output
+            + output.usage.cache_read + output.usage.cache_write
         )
         self._calculate_cost(output, model)
 

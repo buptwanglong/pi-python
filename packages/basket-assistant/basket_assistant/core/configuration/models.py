@@ -85,6 +85,14 @@ class Settings(BaseModel):
         default=None,
         description="Default agent name (must exist in agents)"
     )
+    workspace_dir: Optional[str] = Field(
+        default=None,
+        description="Workspace directory for OpenClaw-style identity files",
+    )
+    web_search_provider: Optional[str] = Field(
+        default=None,
+        description="Web search provider: None/duckduckgo or 'serper'",
+    )
 
     @model_validator(mode="after")
     def _validate_agents(self) -> "Settings":

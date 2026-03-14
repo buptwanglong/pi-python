@@ -1,197 +1,150 @@
 """
-TUI attach mode: connect to a resident assistant gateway via WebSocket and run the TUI.
+Backward compatibility shim for modes.attach module.
 
-Same protocol works for (1) local gateway ws://127.0.0.1:7682/ws and (2) relay client
-URL (e.g. wss://relay-host/relay/client?session_id=xxx from `basket relay <url>`).
-Optional agent_name appends ?agent=<name> to select main agent (basket tui --agent).
+This module provides the old TUI attach client behavior (connects to gateway WebSocket).
+The new AttachMode in interaction.modes.attach is a server, not a client.
 """
 
 import asyncio
 import json
 import logging
-from urllib.parse import urlencode
-
-from typing import Optional
 
 from basket_tui import PiCodingAgentApp
-from basket_tui.messages import ProcessPendingInputs
+from basket_tui.core.events import (
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+    ToolCallStartEvent,
+    ToolCallEndEvent,
+    AgentCompleteEvent,
+    AgentErrorEvent,
+)
+
+# Re-export new AttachMode for code that imports it directly
+from basket_assistant.interaction.modes.attach import AttachMode
 
 logger = logging.getLogger(__name__)
 
 
-def _build_attach_url(ws_url: str, agent_name: Optional[str]) -> str:
-    """Append ?agent=<name> or &agent=<name> to ws_url when agent_name is set."""
-    if not agent_name or not agent_name.strip():
-        return ws_url
-    name = agent_name.strip()
-    sep = "&" if "?" in ws_url else "?"
-    return f"{ws_url}{sep}{urlencode({'agent': name})}"
-
-
-async def run_tui_mode_attach(ws_url: str, agent_name: Optional[str] = None) -> None:
+async def run_tui_mode_attach(ws_url: str, agent_name=None, max_cols=None) -> None:
     """
-    Run the TUI connected to a gateway WebSocket. User input is sent to the gateway;
-    events (text_delta, tool_call_*, agent_complete, agent_error) are received and
-    rendered in the TUI. Exiting the TUI closes the connection; the gateway keeps running.
+    Run the TUI connected to a gateway WebSocket (client mode).
+
+    This is the old attach behavior: connects to an existing gateway server
+    and displays the TUI. The agent_name and max_cols parameters are ignored
+    for backward compatibility but not used.
 
     Args:
-        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws or relay client URL
-                wss://host/relay/client?session_id=xxx)
-        agent_name: Optional main agent name; appends ?agent=<name> to ws_url for gateway.
+        ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws)
+        agent_name: Ignored (kept for backward compatibility)
+        max_cols: Ignored (kept for backward compatibility)
     """
     try:
         import websockets
     except ImportError:
         raise ImportError("basket_assistant.modes.attach requires 'websockets' package")
 
-    ws_url = _build_attach_url(ws_url, agent_name)
-    app = PiCodingAgentApp(agent=None)
+    # Create TUI app without agent (we'll receive events via WebSocket)
+    app = PiCodingAgentApp(agent=None, max_cols=max_cols)
     ws_ref: list = []  # single-element list holding the current WebSocket
     connected = asyncio.Event()
-    agent_done_future: Optional[asyncio.Future] = None
-    agent_placeholder_task: Optional[asyncio.Task] = None
-
-    async def _placeholder_agent_task(fut: asyncio.Future) -> None:
-        await fut
 
     async def handle_user_input(user_input: str) -> None:
-        nonlocal agent_done_future, agent_placeholder_task
-        await app.ensure_assistant_block()
+        """Handle user input from TUI - send to gateway via WebSocket."""
         if not ws_ref:
-            app.append_message("system", "Not connected to assistant.")
+            logger.warning("Cannot send input - not connected to gateway")
             return
         ws = ws_ref[0]
-        agent_done_future = asyncio.get_running_loop().create_future()
-        agent_placeholder_task = asyncio.create_task(_placeholder_agent_task(agent_done_future))
-        app.set_agent_task(agent_placeholder_task)
         try:
             await ws.send(json.dumps({"type": "message", "content": user_input}))
         except Exception as e:
             logger.exception("Failed to send message to gateway")
-            app.append_message("system", f"Send error: {e}")
-            if agent_done_future and not agent_done_future.done():
-                agent_done_future.set_result(None)
-            app.set_agent_task(None)
+            app.event_bus.publish(
+                AgentErrorEvent(error=f"Send error: {e}")
+            )
 
     def dispatch(msg: dict) -> None:
-        nonlocal agent_done_future, agent_placeholder_task
+        """Dispatch WebSocket messages to TUI event bus."""
         typ = msg.get("type")
-        if typ == "text_delta":
-            app.append_text(msg.get("delta", ""))
-        elif typ == "thinking_delta":
-            delta = msg.get("delta", "")
-            if not getattr(dispatch, "_in_thinking", False):
-                dispatch._in_thinking = True
-                app.append_message("system", "Thinking...")
-            app.append_thinking(delta)
-        elif typ == "tool_call_start":
-            dispatch._in_thinking = False
-            if msg.get("tool_name") in ("ask_user_question", "todo_write"):
-                pass
-            else:
-                app.show_tool_call(
-                    msg.get("tool_name", "unknown"),
-                    msg.get("arguments") or {},
-                )
-        elif typ == "tool_call_end":
-            tool_name = msg.get("tool_name", "unknown")
-            if tool_name in ("ask_user_question", "todo_write"):
-                pass
-            elif "error" in msg:
-                app.show_tool_result(msg["error"], success=False)
-            else:
-                app.show_tool_result(msg.get("result", ""), success=True)
-        elif typ == "todos":
-            app.update_todo_panel(msg.get("todos", []))
-        elif typ == "ask_user_question":
-            question = msg.get("question", "")
-            options = msg.get("options") or []
-            app.show_ask_question(question, options)
-        elif typ == "plan_mode":
-            app.update_plan_mode(msg.get("value", False))
-            dispatch._in_thinking = False
-            app.finalize_assistant_block()
-            if agent_done_future and not agent_done_future.done():
-                agent_done_future.set_result(None)
-            app.set_agent_task(None)
-            agent_done_future = None
-            agent_placeholder_task = None
-            app.post_message(ProcessPendingInputs())
-        elif typ == "agent_complete":
-            dispatch._in_thinking = False
-            app.finalize_assistant_block()
-            if agent_done_future and not agent_done_future.done():
-                agent_done_future.set_result(None)
-            app.set_agent_task(None)
-            agent_done_future = None
-            agent_placeholder_task = None
-            app.post_message(ProcessPendingInputs())
-        elif typ == "ready":
-            pass
-        elif typ == "agent_disconnected":
-            app.append_message("system", "Agent disconnected from relay.")
-        elif typ == "error":
-            app.append_message("system", msg.get("error", "Relay error"))
-        elif typ == "agent_error":
-            dispatch._in_thinking = False
-            app.append_message("system", f"Error: {msg.get('error', 'Unknown error')}")
-            if agent_done_future and not agent_done_future.done():
-                agent_done_future.set_result(None)
-            app.set_agent_task(None)
 
-    dispatch._in_thinking = False
+        # Map WebSocket events to TUI events
+        if typ == "text_delta":
+            app.event_bus.publish(TextDeltaEvent(delta=msg.get("delta", "")))
+        elif typ == "thinking_delta":
+            app.event_bus.publish(ThinkingDeltaEvent(delta=msg.get("delta", "")))
+        elif typ == "tool_call_start":
+            app.event_bus.publish(
+                ToolCallStartEvent(
+                    tool_name=msg.get("tool_name", "unknown"),
+                    arguments=msg.get("arguments", {}),
+                )
+            )
+        elif typ == "tool_call_end":
+            app.event_bus.publish(
+                ToolCallEndEvent(
+                    tool_name=msg.get("tool_name", "unknown"),
+                    result=msg.get("result"),
+                    error=msg.get("error"),
+                )
+            )
+        elif typ == "agent_complete":
+            app.event_bus.publish(AgentCompleteEvent())
+        elif typ == "agent_error":
+            app.event_bus.publish(
+                AgentErrorEvent(error=msg.get("error", "Unknown error"))
+            )
+        elif typ == "ready":
+            pass  # Gateway ready signal, no action needed
+        elif typ == "agent_disconnected":
+            app.event_bus.publish(
+                AgentErrorEvent(error="Agent disconnected from relay")
+            )
+        elif typ == "error":
+            app.event_bus.publish(
+                AgentErrorEvent(error=msg.get("error", "Gateway error"))
+            )
+        else:
+            logger.debug("Unhandled WebSocket message type: %s", typ)
 
     async def reader() -> None:
-        nonlocal agent_done_future
+        """WebSocket reader task - receives events from gateway."""
         try:
             async with websockets.connect(ws_url) as ws:
                 ws_ref.append(ws)
                 connected.set()
+                logger.info("Connected to gateway at %s", ws_url)
                 try:
                     async for raw in ws:
                         try:
                             data = json.loads(raw)
                             dispatch(data)
                         except json.JSONDecodeError:
-                            pass
+                            logger.warning("Received invalid JSON from gateway: %s", raw[:100])
                 finally:
                     ws_ref.clear()
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug("WebSocket reader exited: %s", e)
+            logger.error("WebSocket connection failed: %s", e)
             if ws_ref:
                 ws_ref.clear()
             connected.clear()
-            app.append_message("system", f"Disconnected: {e}")
-            if agent_done_future and not agent_done_future.done():
-                agent_done_future.set_result(None)
-            try:
-                app.set_agent_task(None)
-            except Exception:
-                pass
+            app.event_bus.publish(
+                AgentErrorEvent(error=f"Disconnected: {e}")
+            )
 
-    app.set_input_handler(handle_user_input)
+    # Set input callback and start reader
+    app.input_handler.set_callback(handle_user_input)
     reader_task = asyncio.create_task(reader())
     await connected.wait()
-
-    _original_exit = app.exit
-
-    def _exit_with_reader_cancel(*args, **kwargs):
-        reader_task.cancel()
-        _original_exit(*args, **kwargs)
-
-    app.exit = _exit_with_reader_cancel  # type: ignore[method-assign]
 
     try:
         await app.run_async()
     finally:
-        if not reader_task.done():
-            reader_task.cancel()
+        reader_task.cancel()
         try:
             await reader_task
         except asyncio.CancelledError:
             pass
 
 
-__all__ = ["run_tui_mode_attach"]
+__all__ = ["run_tui_mode_attach", "AttachMode"]

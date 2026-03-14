@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from textual.containers import ScrollableContainer, Horizontal
 from textual.widgets import Header, Footer, Static
 
-from ..components import MessageList, StreamingDisplay, ToolDisplay
+from ..components import MessageList, StreamingDisplay, ToolDisplay, MultiLineInput
+from ..constants import INPUT_ID
 
 if TYPE_CHECKING:
     from ..app import PiCodingAgentApp
@@ -46,6 +47,9 @@ class LayoutManager:
             yield Static("", id="status-phase")
             yield Static("", id="status-model")
             yield Static("", id="status-session")
+
+        # Input area (docked at bottom by CSS #input)
+        yield MultiLineInput(id=INPUT_ID)
 
         yield Footer()
 

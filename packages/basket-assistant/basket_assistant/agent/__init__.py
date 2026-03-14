@@ -17,7 +17,6 @@ from ..extensions import ExtensionLoader
 
 from . import events
 from . import prompts
-from . import run as run_module
 from . import session
 from . import tools
 
@@ -68,6 +67,9 @@ class AssistantAgent:
             self._load_extensions()
         tools.register_tools(self)
 
+        # Setup event handlers (for ask_user_question, todos, etc.)
+        events.setup_event_handlers(self)
+
     def _setup_environment(self) -> None:
         """Setup environment variables from API keys."""
         for key, value in self.settings.api_keys.items():
@@ -86,6 +88,24 @@ class AssistantAgent:
         """
         self.config_resolver = AgentConfigResolver(self.settings)
         return self.config_resolver.resolve_agent_key(agent_name)
+
+    def list_agent_names(self) -> List[str]:
+        """Return list of configured agent names (for gateway /api/agents and pickers)."""
+        if not self.settings.agents:
+            return ["default"]
+        return list(self.settings.agents.keys())
+
+    def list_models_for_picker(self) -> List[Dict[str, Any]]:
+        """Return list of {agent_name, model_id} for model picker (from config)."""
+        result: List[Dict[str, Any]] = []
+        if not self.settings.agents:
+            return result
+        for name, sub in self.settings.agents.items():
+            model_id = "default"
+            if sub.model and isinstance(sub.model, dict):
+                model_id = sub.model.get("model_id", model_id)
+            result.append({"agent_name": name, "model_id": model_id})
+        return result
 
     def _setup_session_manager(self) -> None:
         """Setup session manager with per-agent or global sessions directory."""
@@ -245,21 +265,31 @@ class AssistantAgent:
             DeprecationWarning,
             stacklevel=2
         )
-        await run_module.run_interactive(self)
+        # Import from new location
+        from ..interaction.modes.cli import run_interactive as cli_run_interactive
+        await cli_run_interactive(self)
 
     async def run_once(
         self, message: str, invoked_skill_id: Optional[str] = None
     ) -> str:
-        return await run_module.run_once(self, message, invoked_skill_id)
+        """Run agent once with a message (for tests/scripts)."""
+        from ..interaction.modes.cli import run_once as cli_run_once
+        return await cli_run_once(self, message, invoked_skill_id)
 
     def _format_todo_block(self) -> str:
-        return run_module.format_todo_block(self)
+        """Format todo block for display."""
+        from ..interaction.modes.cli import format_todo_block
+        return format_todo_block(self)
 
     def _print_help(self) -> None:
-        run_module.print_help(self)
+        """Print help message."""
+        from ..interaction.modes.cli import print_help
+        print_help(self)
 
     def _print_settings(self) -> None:
-        run_module.print_settings(self)
+        """Print settings summary."""
+        from ..interaction.modes.cli import print_settings
+        print_settings(self)
 
 
 __all__ = [

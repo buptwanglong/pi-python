@@ -296,6 +296,51 @@ async def status_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(payload)
 
 
+async def list_sessions_endpoint(request: Request) -> JSONResponse:
+    """GET /api/sessions: list sessions from default agent's session_manager (for tui-native picker)."""
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"error": "gateway not available"}, status_code=503)
+    try:
+        agent = gateway._get_agent("default", None)
+        session_manager = getattr(agent, "session_manager", None)
+        if session_manager is None or not hasattr(session_manager, "list_sessions"):
+            return JSONResponse([])
+        sessions = await session_manager.list_sessions()
+        return JSONResponse([s.model_dump() for s in sessions])
+    except Exception as e:
+        logger.exception("List sessions failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def list_agents_endpoint(request: Request) -> JSONResponse:
+    """GET /api/agents: list agent names from default agent config (for tui-native picker)."""
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"error": "gateway not available"}, status_code=503)
+    try:
+        agent = gateway._get_agent("default", None)
+        names = getattr(agent, "list_agent_names", lambda: ["default"])()
+        return JSONResponse(names if isinstance(names, list) else ["default"])
+    except Exception as e:
+        logger.exception("List agents failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def list_models_endpoint(request: Request) -> JSONResponse:
+    """GET /api/models: list {agent_name, model_id} from config (for tui-native picker)."""
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"error": "gateway not available"}, status_code=503)
+    try:
+        agent = gateway._get_agent("default", None)
+        items = getattr(agent, "list_models_for_picker", lambda: [])()
+        return JSONResponse(items if isinstance(items, list) else [])
+    except Exception as e:
+        logger.exception("List models failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def create_app(
     pid: Optional[int] = None,
     agent_factory: Optional[Union[Callable[[], Any], Callable[[Optional[str]], Any]]] = None,
@@ -317,6 +362,9 @@ def create_app(
     from .channels import get_routes
     routes: list = [
         Route("/status", status_endpoint, methods=["GET"]),
+        Route("/api/sessions", list_sessions_endpoint, methods=["GET"]),
+        Route("/api/agents", list_agents_endpoint, methods=["GET"]),
+        Route("/api/models", list_models_endpoint, methods=["GET"]),
     ]
     routes.extend(get_routes(gateway, config))
 

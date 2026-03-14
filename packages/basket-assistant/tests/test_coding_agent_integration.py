@@ -25,7 +25,7 @@ from basket_assistant.agent import (
     PLAN_MODE_FORBIDDEN_TOOLS,
 )
 from basket_assistant.core import SettingsManager, SubAgentConfig
-from basket_assistant.core.settings import PermissionsSettings
+from basket_assistant.core import PermissionsSettings
 
 
 @pytest.mark.integration
@@ -95,7 +95,7 @@ class TestAssistantAgentIntegration:
     @pytest.mark.asyncio
     async def test_task_tool_registered_when_agents_configured(self, tmp_path, mock_settings_manager, monkeypatch):
         """When settings contain agents, the task tool is registered."""
-        from basket_assistant.core.settings import Settings
+        from basket_assistant.core import Settings
         mock_model = MagicMock()
         mock_model.provider = "mock"
         mock_model.model_id = "mock-model"
@@ -325,9 +325,10 @@ class TestAssistantAgentIntegration:
         assert mock_coding_agent.context.system_prompt is not None
         assert len(mock_coding_agent.context.system_prompt) > 0
 
-        # Verify it contains expected content
-        assert "coding assistant" in mock_coding_agent.context.system_prompt.lower()
-        assert "tools" in mock_coding_agent.context.system_prompt.lower()
+        # Verify it contains expected content (workspace-based prompt)
+        prompt_lower = mock_coding_agent.context.system_prompt.lower()
+        assert "assistant" in prompt_lower  # "coding assistant" is now just "assistant"
+        assert "tools" in prompt_lower
 
     @pytest.mark.asyncio
     async def test_set_session_id_loads_todos_from_file(self, tmp_path, monkeypatch):

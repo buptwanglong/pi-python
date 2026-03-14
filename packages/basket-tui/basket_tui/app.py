@@ -6,12 +6,15 @@ Component-based architecture with event bus communication.
 
 import asyncio
 from typing import Optional
+from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 
 from .core.state_machine import AppStateMachine, Phase
 from .core.event_bus import EventBus
-from .core.events import PhaseChangedEvent
+from .core.events import PhaseChangedEvent, TextDeltaEvent, ThinkingDeltaEvent
+from .components.multiline_input import MultiLineInput
+from .messages import StreamingTextDelta, StreamingThinkingDelta
 from .managers import (
     LayoutManager,
     MessageRenderer,
@@ -141,6 +144,21 @@ class PiCodingAgentApp(App):
     def _on_phase_changed(self, event: PhaseChangedEvent) -> None:
         """Update UI on phase change"""
         self.layout_manager.update_status_bar(phase=event.new_phase.value)
+
+    @on(MultiLineInput.Submitted)
+    async def _on_input_submitted(self, event: MultiLineInput.Submitted) -> None:
+        """When user presses Enter in input, send text to callback (e.g. gateway or local agent)."""
+        await self.input_handler.handle_input(event.text)
+
+    @on(StreamingTextDelta)
+    def _on_streaming_text_delta(self, event: StreamingTextDelta) -> None:
+        """Gateway stream: run in app context so streaming display refreshes."""
+        self.event_bus.publish(TextDeltaEvent(delta=event.delta))
+
+    @on(StreamingThinkingDelta)
+    def _on_streaming_thinking_delta(self, event: StreamingThinkingDelta) -> None:
+        """Gateway stream: run in app context so thinking display refreshes."""
+        self.event_bus.publish(ThinkingDeltaEvent(delta=event.delta))
 
 
 if __name__ == "__main__":
