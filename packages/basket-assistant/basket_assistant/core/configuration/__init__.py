@@ -7,6 +7,7 @@ from .agents import (
     AgentNotFoundError,
     CannotRemoveDefaultAgentError,
 )
+from .initialization import ConfigInitializer, PROVIDER_CHOICES, WEB_SEARCH_CHOICES
 from .loaders import AgentLoader
 from .manager import ConfigurationManager
 from .models import SubAgentConfig
@@ -20,4 +21,7 @@ __all__ = [
     "AgentExistsError",
     "AgentNotFoundError",
     "CannotRemoveDefaultAgentError",
+    "ConfigInitializer",
+    "PROVIDER_CHOICES",
+    "WEB_SEARCH_CHOICES",
 ]
