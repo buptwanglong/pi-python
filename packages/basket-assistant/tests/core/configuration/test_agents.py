@@ -256,3 +256,157 @@ def test_add_agent_workspace_files(tmp_path):
     import shutil
     shutil.rmtree(workspace_path)
 
+
+# === remove_agent() 测试 ===
+
+
+def test_remove_agent_basic(tmp_path):
+    """测试删除智能体 - 基本功能"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 先添加一个智能体
+    agent_manager.add_agent(name="test-agent")
+
+    # 删除智能体
+    new_settings = agent_manager.remove_agent(name="test-agent")
+
+    # 验证已删除
+    assert "test-agent" not in new_settings.agents
+
+    # 验证配置已保存
+    loaded = config_manager.load()
+    assert "test-agent" not in loaded.agents
+
+
+def test_remove_agent_not_found(tmp_path):
+    """测试删除智能体 - 不存在"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 删除不存在的智能体应该抛出异常
+    with pytest.raises(AgentNotFoundError) as exc:
+        agent_manager.remove_agent(name="nonexistent")
+    assert exc.value.name == "nonexistent"
+
+
+def test_remove_agent_is_default(tmp_path):
+    """测试删除智能体 - 不能删除默认智能体"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 添加智能体并设为默认
+    agent_manager.add_agent(name="my-agent")
+    settings = config_manager.load()
+    settings = settings.model_copy(update={"default_agent": "my-agent"})
+    config_manager.save(settings)
+
+    # 尝试删除默认智能体应该抛出异常
+    with pytest.raises(CannotRemoveDefaultAgentError) as exc:
+        agent_manager.remove_agent(name="my-agent")
+    assert exc.value.name == "my-agent"
+
+
+# === update_agent() 测试 ===
+
+
+def test_update_agent_basic(tmp_path):
+    """测试更新智能体 - 基本功能"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 添加智能体
+    agent_manager.add_agent(
+        name="test-agent",
+        model={"provider": "openai"}
+    )
+
+    # 更新模型配置
+    new_settings = agent_manager.update_agent(
+        name="test-agent",
+        model={"provider": "anthropic", "model_id": "claude-sonnet-4"}
+    )
+
+    # 验证更新成功
+    assert new_settings.agents["test-agent"].model["provider"] == "anthropic"
+    assert new_settings.agents["test-agent"].model["model_id"] == "claude-sonnet-4"
+
+
+def test_update_agent_not_found(tmp_path):
+    """测试更新智能体 - 不存在"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 更新不存在的智能体应该抛出异常
+    with pytest.raises(AgentNotFoundError):
+        agent_manager.update_agent(name="nonexistent", model={"provider": "openai"})
+
+
+def test_update_agent_partial(tmp_path):
+    """测试更新智能体 - 部分更新"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 添加智能体（完整配置）
+    agent_manager.add_agent(
+        name="test-agent",
+        workspace_dir=str(tmp_path / "test-workspace"),
+        model={"provider": "openai"},
+        tools={"read": True, "write": False}
+    )
+
+    # 只更新 model（其他字段保持不变）
+    new_settings = agent_manager.update_agent(
+        name="test-agent",
+        model={"provider": "anthropic"}
+    )
+
+    # 验证 model 更新了
+    assert new_settings.agents["test-agent"].model["provider"] == "anthropic"
+
+    # 验证其他字段保持不变
+    assert new_settings.agents["test-agent"].workspace_dir == str(tmp_path / "test-workspace")
+    assert new_settings.agents["test-agent"].tools == {"read": True, "write": False}
+
+
+def test_update_agent_remove_fields(tmp_path):
+    """测试更新智能体 - 移除可选字段"""
+    config_path = tmp_path / "settings.json"
+
+    from basket_assistant.core.configuration.manager import ConfigurationManager
+    config_manager = ConfigurationManager(config_path)
+    agent_manager = AgentManager(config_manager)
+
+    # 添加智能体（带 model 覆盖）
+    agent_manager.add_agent(
+        name="test-agent",
+        model={"provider": "openai"}
+    )
+
+    # 移除 model 覆盖（传入 None）
+    new_settings = agent_manager.update_agent(
+        name="test-agent",
+        model=None
+    )
+
+    # 验证 model 已移除
+    assert new_settings.agents["test-agent"].model is None
+

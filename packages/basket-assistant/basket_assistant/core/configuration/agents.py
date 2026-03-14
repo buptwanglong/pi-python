@@ -117,6 +117,94 @@ class AgentManager:
 
         return new_settings
 
+    def remove_agent(self, name: str) -> Settings:
+        """
+        删除子智能体
+
+        Args:
+            name: 智能体名称
+
+        Returns:
+            更新后的配置
+
+        Raises:
+            AgentNotFoundError: 智能体不存在
+            CannotRemoveDefaultAgentError: 尝试删除默认智能体
+        """
+        # 加载当前配置
+        settings = self.config_manager.load()
+
+        # 检查智能体是否存在
+        if name not in settings.agents:
+            raise AgentNotFoundError(name)
+
+        # 检查是否为默认智能体
+        if settings.default_agent == name:
+            raise CannotRemoveDefaultAgentError(name)
+
+        # 不可变更新：创建新字典（去除指定智能体）
+        new_agents = {k: v for k, v in settings.agents.items() if k != name}
+
+        # 创建新配置
+        new_settings = settings.model_copy(update={"agents": new_agents})
+
+        # 保存并返回
+        self.config_manager.save(new_settings)
+        logger.info(f"删除智能体 '{name}' 成功")
+
+        return new_settings
+
+    def update_agent(self, name: str, **updates: Any) -> Settings:
+        """
+        更新子智能体配置
+
+        仅更新提供的字段，未提供的字段保持不变。
+        传入 None 可以清除可选字段。
+
+        Args:
+            name: 智能体名称
+            **updates: 要更新的字段（workspace_dir, model, tools）
+
+        Returns:
+            更新后的配置
+
+        Raises:
+            AgentNotFoundError: 智能体不存在
+            ValueError: 传入了不支持的字段
+        """
+        # 加载当前配置
+        settings = self.config_manager.load()
+
+        # 检查智能体是否存在
+        if name not in settings.agents:
+            raise AgentNotFoundError(name)
+
+        # 验证更新字段
+        allowed_fields = {"workspace_dir", "model", "tools"}
+        invalid_fields = set(updates.keys()) - allowed_fields
+        if invalid_fields:
+            raise ValueError(f"不支持更新以下字段: {', '.join(invalid_fields)}")
+
+        # 获取当前配置并更新
+        current_config = settings.agents[name]
+        new_config_dict = current_config.model_dump()
+        new_config_dict.update(updates)
+
+        # 创建新的 SubAgentConfig
+        new_agent_config = SubAgentConfig(**new_config_dict)
+
+        # 不可变更新
+        new_agents = dict(settings.agents)
+        new_agents[name] = new_agent_config
+
+        new_settings = settings.model_copy(update={"agents": new_agents})
+
+        # 保存并返回
+        self.config_manager.save(new_settings)
+        logger.info(f"更新智能体 '{name}' 成功")
+
+        return new_settings
+
     def _populate_workspace(self, workspace_path: Path) -> None:
         """
         填充工作区默认文件
