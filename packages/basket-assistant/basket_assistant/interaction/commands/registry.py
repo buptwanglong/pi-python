@@ -1,0 +1,172 @@
+"""Command registry for managing interaction commands."""
+
+import asyncio
+import inspect
+from dataclasses import dataclass, field
+from typing import Any, Callable, Coroutine
+
+
+@dataclass
+class Command:
+    """Represents a registered command."""
+
+    name: str
+    handler: Callable[..., Any] | Callable[..., Coroutine[Any, Any, Any]]
+    description: str
+    is_async: bool
+    aliases: list[str] = field(default_factory=list)
+
+
+class CommandRegistry:
+    """Registry for managing interaction commands.
+
+    Supports both synchronous and asynchronous command handlers.
+    Commands can have aliases and are case-insensitive.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the command registry."""
+        self._commands: dict[str, Command] = {}
+
+    def register(
+        self,
+        name: str,
+        handler: Callable[..., Any],
+        description: str,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Register a synchronous command.
+
+        Args:
+            name: Command name (without leading slash)
+            handler: Synchronous function to handle the command
+            description: Human-readable description
+            aliases: Optional list of alternative names
+        """
+        normalized_name = name.lower()
+        command = Command(
+            name=normalized_name,
+            handler=handler,
+            description=description,
+            is_async=False,
+            aliases=[alias.lower() for alias in (aliases or [])],
+        )
+        self._commands[normalized_name] = command
+
+        # Register aliases
+        for alias in command.aliases:
+            self._commands[alias] = command
+
+    def register_async(
+        self,
+        name: str,
+        handler: Callable[..., Coroutine[Any, Any, Any]],
+        description: str,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Register an asynchronous command.
+
+        Args:
+            name: Command name (without leading slash)
+            handler: Async function to handle the command
+            description: Human-readable description
+            aliases: Optional list of alternative names
+        """
+        normalized_name = name.lower()
+        command = Command(
+            name=normalized_name,
+            handler=handler,
+            description=description,
+            is_async=True,
+            aliases=[alias.lower() for alias in (aliases or [])],
+        )
+        self._commands[normalized_name] = command
+
+        # Register aliases
+        for alias in command.aliases:
+            self._commands[alias] = command
+
+    def has_command(self, text: str) -> bool:
+        """Check if text starts with a registered command.
+
+        Args:
+            text: Input text to check
+
+        Returns:
+            True if text starts with a registered command
+        """
+        if not text or not text.startswith("/"):
+            return False
+
+        # Extract command name (first word after /)
+        parts = text.split(maxsplit=1)
+        if not parts:
+            return False
+
+        command_name = parts[0][1:].lower()  # Remove leading slash and normalize
+        return command_name in self._commands
+
+    async def execute(self, text: str) -> tuple[bool, str]:
+        """Execute a command.
+
+        Args:
+            text: Command text (e.g., "/echo hello")
+
+        Returns:
+            Tuple of (success, result)
+            - success: True if command executed successfully
+            - result: Command output or error message
+        """
+        if not text or not text.startswith("/"):
+            return False, "Not a command"
+
+        # Parse command and arguments
+        parts = text.split(maxsplit=1)
+        command_name = parts[0][1:].lower()  # Remove leading slash and normalize
+        args_text = parts[1] if len(parts) > 1 else ""
+
+        # Get command
+        command = self._commands.get(command_name)
+        if not command:
+            return False, f"Unknown command: /{command_name}"
+
+        # Execute command
+        try:
+            # Get handler signature to determine how to pass arguments
+            sig = inspect.signature(command.handler)
+            params = list(sig.parameters.values())
+
+            # Prepare arguments based on handler signature
+            if not params:
+                # No parameters - call with no args
+                if command.is_async:
+                    result = await command.handler()  # type: ignore
+                else:
+                    result = command.handler()
+            else:
+                # Has parameters - pass args_text
+                if command.is_async:
+                    result = await command.handler(args_text)  # type: ignore
+                else:
+                    result = command.handler(args_text)
+
+            return True, result if result is not None else ""
+
+        except Exception as e:
+            return False, f"Command execution failed: {str(e)}"
+
+    def list_commands(self) -> list[Command]:
+        """List all registered commands.
+
+        Returns:
+            List of Command objects (excluding aliases)
+        """
+        seen_names = set()
+        commands = []
+
+        for command in self._commands.values():
+            if command.name not in seen_names:
+                seen_names.add(command.name)
+                commands.append(command)
+
+        return commands
