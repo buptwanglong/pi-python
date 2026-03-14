@@ -87,7 +87,7 @@ class Settings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_default_agent(self) -> "Settings":
+    def _validate_agents(self) -> "Settings":
         """校验 default_agent 必须存在于 agents 中"""
         if self.default_agent is not None and self.default_agent not in self.agents:
             raise ValueError(
