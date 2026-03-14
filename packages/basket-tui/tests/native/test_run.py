@@ -10,6 +10,17 @@ from basket_tui.native.run import _dispatch_ws_message, _get_width
 from basket_tui.native.stream import StreamAssembler
 
 
+def _dispatch_setup():
+    """Return (assembler, out, output_put, last_output_count, header_state, ui_state) for _dispatch_ws_message tests."""
+    assembler = StreamAssembler()
+    out: list[str] = []
+    output_put = out.append
+    last_output_count: list[int] = [0]
+    header_state: dict[str, str] = {}
+    ui_state: dict[str, str] = {}
+    return assembler, out, output_put, last_output_count, header_state, ui_state
+
+
 def test_get_width_returns_max_cols_when_positive():
     assert _get_width(120) == 120
     assert _get_width(80) == 80
