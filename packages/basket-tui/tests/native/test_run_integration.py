@@ -131,3 +131,39 @@ def test_dispatch_multiple_tools_then_assistant_in_one_turn():
     pos_done = combined.find("Done.")
     assert pos_bash >= 0 and pos_read >= 0 and pos_done >= 0
     assert pos_bash < pos_done and pos_read < pos_done
+
+
+def test_dispatch_two_rounds_agent_complete():
+    """Two rounds: first assistant message, then second; assert both in output in order."""
+    assembler = StreamAssembler()
+    width = 80
+    printed: list[str] = []
+    output_put = printed.append
+    last_output_count: list[int] = [0]
+
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "First"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message({"type": "agent_complete"}, assembler, width, output_put, last_output_count)
+
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "Second"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message({"type": "agent_complete"}, assembler, width, output_put, last_output_count)
+
+    assert len(assembler.messages) == 2
+    assert assembler.messages[0]["content"] == "First"
+    assert assembler.messages[1]["content"] == "Second"
+    assert last_output_count[0] == 2
+
+    combined = _strip_ansi(" ".join(printed))
+    assert "First" in combined and "Second" in combined
+    assert combined.find("First") < combined.find("Second")
