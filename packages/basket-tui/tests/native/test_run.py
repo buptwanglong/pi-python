@@ -306,3 +306,43 @@ def test_dispatch_error_type_prints_gateway_error():
     )
     assert len(out) == 1
     assert "Gateway" in out[0] or "down" in out[0]
+
+
+def test_dispatch_last_output_count_after_tool_and_assistant():
+    assembler, out, output_put, last_output_count, _, _ = _dispatch_setup()
+    width = 80
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "bash", "arguments": {}},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message(
+        {"type": "tool_call_end", "tool_name": "bash", "result": "done", "error": None},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "ok"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    _dispatch_ws_message(
+        {"type": "agent_complete"},
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+    )
+    assert last_output_count[0] == 2
+    combined = " ".join(out).replace("\x1b[0m", "").replace("\x1b[31m", "")
+    # Tool output then assistant output
+    bash_pos = combined.find("bash")
+    ok_pos = combined.find("ok")
+    assert bash_pos >= 0 and ok_pos >= 0
+    assert bash_pos < ok_pos
