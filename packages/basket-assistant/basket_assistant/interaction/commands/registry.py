@@ -23,9 +23,19 @@ class CommandRegistry:
     Commands can have aliases and are case-insensitive.
     """
 
-    def __init__(self) -> None:
-        """Initialize the command registry."""
+    def __init__(self, agent=None) -> None:
+        """Initialize the command registry.
+
+        Args:
+            agent: Optional agent instance for auto-registering builtin commands
+        """
         self._commands: dict[str, Command] = {}
+
+        # Auto-register builtin commands if agent provided
+        if agent is not None:
+            from basket_assistant.interaction.commands.handlers import register_builtin_commands
+
+            register_builtin_commands(self, agent)
 
     def _register_command(
         self,
@@ -63,17 +73,20 @@ class CommandRegistry:
         name: str,
         handler: Callable[..., Any],
         description: str,
+        usage: str = "",
         aliases: list[str] | None = None,
     ) -> None:
-        """Register a synchronous command.
+        """Register a command (auto-detects sync vs async).
 
         Args:
             name: Command name (without leading slash)
-            handler: Synchronous function to handle the command
+            handler: Function to handle the command (sync or async)
             description: Human-readable description
+            usage: Usage example (optional)
             aliases: Optional list of alternative names
         """
-        self._register_command(name, handler, description, False, aliases)
+        is_async = inspect.iscoroutinefunction(handler)
+        self._register_command(name, handler, description, is_async, aliases)
 
     def register_async(
         self,
@@ -158,6 +171,40 @@ class CommandRegistry:
 
             return True, result if result is not None else ""
 
+        except Exception as e:
+            return False, f"Command execution failed: {str(e)}"
+
+    def get_command(self, name: str) -> Command | None:
+        """Get a command by name or alias.
+
+        Args:
+            name: Command name (with or without leading slash)
+
+        Returns:
+            Command object or None if not found
+        """
+        normalized = name.lstrip("/").lower()
+        return self._commands.get(normalized)
+
+    def execute_command(self, name: str, args: str) -> tuple[bool, str]:
+        """Execute a synchronous command by name.
+
+        Args:
+            name: Command name (without leading slash)
+            args: Command arguments
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        command = self.get_command(name)
+        if not command:
+            return False, f"Unknown command: {name}"
+
+        if command.is_async:
+            return False, f"Command '{name}' is async, use await execute()"
+
+        try:
+            return command.handler(args)
         except Exception as e:
             return False, f"Command execution failed: {str(e)}"
 
