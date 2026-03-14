@@ -62,7 +62,10 @@ async def main_async(args: Optional[list] = None) -> int:
 
     # Parse subcommand and simple arguments
     use_tui = len(args) >= 1 and args[0] == "tui"
+    use_tui_native = len(args) >= 1 and args[0] in ("tui-native", "tn")
     if use_tui:
+        args = args[1:]
+    if use_tui_native:
         args = args[1:]
 
     use_plan_mode = "--plan" in args
@@ -87,7 +90,7 @@ async def main_async(args: Optional[list] = None) -> int:
     tui_max_cols: Optional[int] = None
     tui_live_rows: Optional[int] = None
     tui_agent: Optional[str] = None
-    if use_tui:
+    if use_tui or use_tui_native:
         if "--agent" in args:
             i = args.index("--agent")
             if i + 1 < len(args):
@@ -144,6 +147,7 @@ Basket - AI-powered personal assistant
 Usage:
   basket                 - Start interactive mode
   basket tui [--agent <name>] - Start TUI (optionally with specified main agent)
+  basket tui-native | basket tn - Start terminal-native TUI (selectable/copyable output)
   basket --session <id> - Start with session loaded (use with interactive or tui)
   basket --remote        - Start remote web terminal (requires basket-remote, ttyd; use with ZeroTier)
   basket "message"       - Run once with a message
@@ -180,7 +184,7 @@ Environment variables:
         print("Basket v0.1.0")
         return 0
 
-    # Init: guided setup
+    # Init: guided setup (ConfigurationManager + ConfigInitializer)
     if len(args) >= 1 and args[0] == "init":
         rest = args[1:]
         force = "--force" in rest
@@ -193,18 +197,27 @@ Environment variables:
                 rest = rest[:i] + rest[i + 2:]
             else:
                 rest = rest[:i] + rest[i + 1:]
-        from .init_guided import run_init_guided
-        # Run in thread so questionary (prompt_toolkit) can use asyncio.run() without
-        # "cannot be called from a running event loop" when main_async is already in one.
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: run_init_guided(settings_path=path_arg, force=force),
-        )
 
-    # Agent subcommands: list | add | remove (subagents for Task tool)
+        def _do_init() -> int:
+            from .core.configuration import ConfigurationManager
+            manager = ConfigurationManager(path_arg)
+            manager.run_guided_init(force=force)
+            print(f"\nSettings written to {manager.config_path}. You can run 'basket gateway start' to start.")
+            return 0
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _do_init)
+
+    # Agent subcommands: list | add | remove (ConfigurationManager)
     if len(args) >= 1 and args[0] == "agent":
-        from . import agent_cli
+        from .core.configuration import (
+            ConfigurationManager,
+            AgentExistsError,
+            AgentNotFoundError,
+            CannotRemoveDefaultAgentError,
+        )
+        from .core.configuration.validation import ValidationError
+
         rest = args[1:]
         if len(rest) == 0 or rest[0] in ("--help", "-h"):
             print("Usage: basket agent <list|add|remove> [options]")
@@ -223,32 +236,40 @@ Environment variables:
                 rest = rest[:i] + rest[i + 2:]
             else:
                 rest = rest[:i] + rest[i + 1:]
+        manager = ConfigurationManager(path_arg)
+
         if sub == "list":
-            return agent_cli.run_list(settings_path=path_arg)
+            agents = manager.list_agents()
+            if not agents:
+                print("No subagents configured.")
+                return 0
+            for a in agents:
+                ws = a.workspace_dir or "(workspace)"
+                print(f"{a.name}\t{ws}")
+            return 0
         if sub == "remove":
             if not rest:
                 print("Usage: basket agent remove <name>")
                 return 1
-            return agent_cli.run_remove(rest[0], settings_path=path_arg)
+            try:
+                manager.remove_agent(rest[0])
+                print(f"Removed subagent {rest[0]!r}.")
+                return 0
+            except AgentNotFoundError:
+                print(f"Subagent {rest[0]!r} not found.")
+                return 1
+            except CannotRemoveDefaultAgentError:
+                print(f"Cannot remove default agent {rest[0]!r}.")
+                return 1
         if sub == "add":
             force = "--force" in rest
             rest = [a for a in rest if a != "--force"]
             name = None
-            description = None
-            prompt = None
             tools_s = None
             i = 0
             while i < len(rest):
                 if rest[i] == "--name" and i + 1 < len(rest):
                     name = rest[i + 1]
-                    rest = rest[:i] + rest[i + 2:]
-                    continue
-                if rest[i] == "--description" and i + 1 < len(rest):
-                    description = rest[i + 1]
-                    rest = rest[:i] + rest[i + 2:]
-                    continue
-                if rest[i] == "--prompt" and i + 1 < len(rest):
-                    prompt = rest[i + 1]
                     rest = rest[:i] + rest[i + 2:]
                     continue
                 if rest[i] == "--tools" and i + 1 < len(rest):
@@ -264,17 +285,31 @@ Environment variables:
                 if not name:
                     print("Name is required.")
                     return 1
-            description = description or ""
-            prompt = prompt or ""
-            tools_dict = agent_cli.parse_tools(tools_s) if tools_s else None
-            return agent_cli.run_add(
-                name=name,
-                description=description,
-                prompt=prompt,
-                tools_dict=tools_dict,
-                force=force,
-                settings_path=path_arg,
-            )
+            tools_dict = None
+            if tools_s:
+                tools_dict = {t.strip(): True for t in tools_s.split(",") if t.strip()}
+            try:
+                manager.add_agent(name=name, tools=tools_dict, force=force)
+                print(f"Added subagent {name!r}.")
+                return 0
+            except ValidationError as e:
+                print(f"Validation error: {e}")
+                return 1
+            except AgentExistsError:
+                if not force:
+                    try:
+                        answer = input(f"Subagent {name!r} already exists. Overwrite? [y/N]: ").strip().lower()
+                    except EOFError:
+                        return 1
+                    if answer in ("y", "yes"):
+                        manager.add_agent(name=name, tools=tools_dict, force=True)
+                        print(f"Added subagent {name!r}.")
+                        return 0
+                print("Aborted.")
+                return 1
+            except Exception as e:
+                print(f"Error: {e}")
+                return 1
         print("Usage: basket agent <list|add|remove> [options]")
         return 1
 
@@ -467,6 +502,51 @@ Environment variables:
             port = get_serve_port() or port
         attach_url = f"ws://127.0.0.1:{port}/ws"
         await run_tui_mode_attach(
+            attach_url, agent_name=tui_agent, max_cols=tui_max_cols
+        )
+        return 0
+
+    # TUI native mode: same gateway as tui, then run terminal-native TUI (line output + prompt_toolkit)
+    if use_tui_native:
+        try:
+            from .serve import get_serve_port, is_serve_running, read_serve_state
+            from basket_tui.native.run import run_tui_native_attach
+        except ImportError as e:
+            logger.warning("TUI native import failed: %s", e)
+            print(f"Error: tui-native requires 'basket-tui' and gateway support: {e}")
+            return 1
+        port = 7682
+        try:
+            port = int(os.environ.get("BASKET_SERVE_PORT", "7682"))
+        except ValueError:
+            pass
+        running, _ = is_serve_running()
+        if not running:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "basket_assistant.main", "gateway", "start"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            for _ in range(30):
+                await asyncio.sleep(0.5)
+                running, _ = is_serve_running()
+                _, port_from_state = read_serve_state()
+                if running and port_from_state is not None:
+                    port = port_from_state
+                    break
+            if not running:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                print("Error: Failed to start gateway in time.")
+                return 1
+        else:
+            port = get_serve_port() or port
+        attach_url = f"ws://127.0.0.1:{port}/ws"
+        await run_tui_native_attach(
             attach_url, agent_name=tui_agent, max_cols=tui_max_cols
         )
         return 0
