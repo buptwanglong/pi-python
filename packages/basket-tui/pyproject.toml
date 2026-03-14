@@ -19,6 +19,7 @@ textual = "^0.68.0"
 rich = "^13.7.0"
 pygments = "^2.18.0"
 pyperclip = "^1.8.2"
+prompt_toolkit = "^3.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
