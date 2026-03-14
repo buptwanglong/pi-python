@@ -49,11 +49,7 @@ async def run_tui_native_attach(
     try:
         from prompt_toolkit import Application
         from prompt_toolkit.buffer import Buffer
-        from prompt_toolkit.formatted_text import ANSI
         from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.layout import Layout
-        from prompt_toolkit.layout.containers import HSplit, VSplit, Window
-        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
     except ImportError as e:
         raise ImportError(
             "basket_tui.native.run requires 'prompt_toolkit' package"
@@ -202,44 +198,8 @@ async def run_tui_native_attach(
         from prompt_toolkit.application import get_app
         get_app().invalidate()
 
-    sep_char = "─"
-    sep_control = FormattedTextControl(
-        text=lambda: sep_char * (width if width else 80)
-    )
-    header_control = FormattedTextControl(
-        text=lambda: f"  URL={base_url}  agent={header_state['agent']}  session={header_state['session']}",
-        focusable=False,
-    )
-    footer_control = FormattedTextControl(
-        text=lambda: f"  {ui_state.get('connection', '?')} | {ui_state.get('phase', 'idle')}",
-        focusable=False,
-    )
-    body_control = FormattedTextControl(
-        text=lambda: ANSI("\n".join(body_lines)),
-        focusable=False,
-    )
-    input_control = BufferControl(buffer=input_buffer)
-
-    layout = Layout(
-        HSplit(
-            [
-                Window(height=1, content=header_control),
-                Window(content=body_control, wrap_lines=True),
-                Window(height=1, content=footer_control),
-                Window(height=1, content=sep_control),
-                VSplit(
-                    [
-                        Window(
-                            width=3,
-                            content=FormattedTextControl("❯ "),
-                            dont_extend_width=True,
-                        ),
-                        Window(content=input_control),
-                    ]
-                ),
-            ]
-        )
-    )
+    from .layout import build_layout
+    layout = build_layout(width, base_url, header_state, ui_state, body_lines, input_buffer)
 
     app = Application(
         layout=layout,
