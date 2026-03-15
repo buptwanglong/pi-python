@@ -1,10 +1,12 @@
 """Terminal-native TUI: line-by-line stdout + prompt_toolkit input."""
 
-from .connection import GatewayWsConnection
-from .handlers import make_handlers
-from .render import render_messages
-from .stream import StreamAssembler
-from .types import GatewayConnectionProtocol, GatewayHandlers
+from .connection import (
+    GatewayConnectionProtocol,
+    GatewayHandlers,
+    GatewayWsConnection,
+)
+from .handle import make_handlers
+from .pipeline import StreamAssembler, render_messages
 
 __all__ = [
     "GatewayConnectionProtocol",

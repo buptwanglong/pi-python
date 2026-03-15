@@ -28,7 +28,7 @@ HELP_LINES = [
 SlashResult = Optional[Literal["exit", "handled"]]
 
 
-def _handle_slash_command(text: str) -> SlashResult:
+def handle_slash_command(text: str) -> SlashResult:
     """
     If input is a slash command, return status. No side effects (caller adds to body_lines).
     Return "exit" for /exit, "handled" for other slash commands, None if not a slash command.
@@ -115,7 +115,7 @@ def handle_input(
         body_lines.extend(HELP_LINES)
         return "handled"
 
-    result = _handle_slash_command(text)
+    result = handle_slash_command(text)
     if result == "exit":
         return "exit"
     if result == "handled":

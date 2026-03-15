@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from basket_tui.native.dispatch import _dispatch_ws_message
-from basket_tui.native.stream import StreamAssembler
+from basket_tui.native.handle.dispatch import _dispatch_ws_message
+from basket_tui.native.pipeline import StreamAssembler
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m|\x1b\]8;;.*?\x1b\\\\")
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_tui.native.types import GatewayConnectionProtocol, GatewayHandlers
+from basket_tui.native.connection import GatewayConnectionProtocol, GatewayHandlers
 
 
 def test_gateway_handlers_optional_keys() -> None:

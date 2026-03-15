@@ -9,9 +9,9 @@ import shutil
 from typing import Any, Optional
 
 from .connection import GatewayWsConnection
-from .handlers import make_handlers
-from .input_handler import handle_input, open_picker
-from .stream import StreamAssembler
+from .handle import make_handlers
+from .pipeline import StreamAssembler
+from .ui import build_layout, handle_input, open_picker
 
 
 def _get_width(max_cols: Optional[int]) -> int:
@@ -167,8 +167,6 @@ async def run_tui_native_attach(
         from prompt_toolkit.application import get_app
 
         get_app().invalidate()
-
-    from .layout import build_layout
 
     layout = build_layout(
         width, base_url, header_state, ui_state, body_lines, input_buffer
