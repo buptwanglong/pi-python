@@ -10,6 +10,15 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, Optional, Union
 
+from basket_protocol import (
+    AgentComplete,
+    AgentError,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    inbound_to_dict,
+)
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -136,26 +145,42 @@ class AgentGateway:
             if sink is not None:
                 asyncio.create_task(sink(payload))
 
-        agent.agent.on("text_delta", lambda e: make_send({"type": "text_delta", "delta": e.get("delta", "")}))
-        agent.agent.on("thinking_delta", lambda e: make_send({"type": "thinking_delta", "delta": e.get("delta", "")}))
+        agent.agent.on(
+            "text_delta",
+            lambda e: make_send(inbound_to_dict(TextDelta(delta=e.get("delta", "") or ""))),
+        )
+        agent.agent.on(
+            "thinking_delta",
+            lambda e: make_send(inbound_to_dict(ThinkingDelta(delta=e.get("delta", "") or ""))),
+        )
         agent.agent.on(
             "agent_tool_call_start",
-            lambda e: make_send({
-                "type": "tool_call_start",
-                "tool_name": e.get("tool_name", "unknown"),
-                "arguments": e.get("arguments", {}),
-            }),
+            lambda e: make_send(
+                inbound_to_dict(
+                    ToolCallStart(
+                        tool_name=e.get("tool_name", "unknown") or "unknown",
+                        arguments=e.get("arguments"),
+                    )
+                )
+            ),
         )
         def on_tool_call_end(e: dict) -> None:
-            tool_name = e.get("tool_name", "unknown")
+            tool_name = e.get("tool_name", "unknown") or "unknown"
             if e.get("error") is not None:
-                make_send({"type": "tool_call_end", "tool_name": tool_name, "error": str(e["error"])})
+                make_send(
+                    inbound_to_dict(
+                        ToolCallEnd(tool_name=tool_name, error=str(e["error"]))
+                    )
+                )
             else:
-                make_send({
-                    "type": "tool_call_end",
-                    "tool_name": tool_name,
-                    "result": format_tool_result(tool_name, e.get("result")),
-                })
+                make_send(
+                    inbound_to_dict(
+                        ToolCallEnd(
+                            tool_name=tool_name,
+                            result=format_tool_result(tool_name, e.get("result")),
+                        )
+                    )
+                )
             if tool_name == "todo_write" and hasattr(agent, "_current_todos"):
                 make_send({"type": "todos", "todos": list(agent._current_todos)})
             if tool_name == "ask_user_question" and getattr(agent, "_pending_asks", None):
@@ -168,10 +193,17 @@ class AgentGateway:
                 })
 
         agent.agent.on("agent_tool_call_end", on_tool_call_end)
-        agent.agent.on("agent_complete", lambda _: make_send({"type": "agent_complete"}))
+        agent.agent.on(
+            "agent_complete",
+            lambda _: make_send(inbound_to_dict(AgentComplete())),
+        )
         agent.agent.on(
             "agent_error",
-            lambda e: make_send({"type": "agent_error", "error": e.get("error", "Unknown error")}),
+            lambda e: make_send(
+                inbound_to_dict(
+                    AgentError(error=e.get("error", "Unknown error") or "Unknown error")
+                )
+            ),
         )
         agent._gateway_event_sink_handlers = True
 

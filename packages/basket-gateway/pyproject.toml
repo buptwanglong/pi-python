@@ -16,6 +16,7 @@ classifiers = [
 python = "^3.12"
 basket-agent = {path = "../basket-agent", develop = true}
 basket-ai = {path = "../basket-ai", develop = true}
+basket-protocol = {path = "../basket-protocol", develop = true}
 starlette = "^0.37.0"
 uvicorn = {extras = ["standard"], version = "^0.30.0"}
 lark-oapi = {version = "^1.0", optional = true}

@@ -12,6 +12,7 @@ from basket_protocol import (
     ToolCallEnd,
     ToolCallStart,
     Unknown,
+    inbound_to_dict,
     parse_inbound,
 )
 
@@ -114,3 +115,11 @@ def test_parse_inbound_unknown_type() -> None:
     assert isinstance(msg, Unknown)
     assert msg.type == "unknown"
     assert msg.payload == {"type": "unknown"}
+
+
+def test_inbound_to_dict_text_delta_roundtrip() -> None:
+    """inbound_to_dict(TextDelta(delta='hi')) returns wire dict; parse_inbound roundtrips."""
+    msg = TextDelta(delta="hi")
+    d = inbound_to_dict(msg)
+    assert d == {"type": "text_delta", "delta": "hi"}
+    assert parse_inbound(d) == msg

@@ -135,3 +135,38 @@ def parse_inbound(data: dict[str, Any]) -> InboundMessage:
         return System(event=typ, payload=data)
 
     return Unknown(type=typ, payload=data)
+
+
+def inbound_to_dict(msg: InboundMessage) -> dict[str, Any]:
+    """Serialize an inbound (server→client) message to wire-format dict for sending."""
+    if isinstance(msg, TextDelta):
+        return {"type": "text_delta", "delta": msg.delta}
+    if isinstance(msg, ThinkingDelta):
+        return {"type": "thinking_delta", "delta": msg.delta}
+    if isinstance(msg, ToolCallStart):
+        out: dict[str, Any] = {"type": "tool_call_start", "tool_name": msg.tool_name}
+        if msg.arguments is not None:
+            out["arguments"] = msg.arguments
+        return out
+    if isinstance(msg, ToolCallEnd):
+        out = {"type": "tool_call_end", "tool_name": msg.tool_name}
+        if msg.result is not None:
+            out["result"] = msg.result
+        if msg.error is not None:
+            out["error"] = msg.error
+        return out
+    if isinstance(msg, AgentComplete):
+        return {"type": "agent_complete"}
+    if isinstance(msg, AgentError):
+        return {"type": "agent_error", "error": msg.error}
+    if isinstance(msg, SessionSwitched):
+        return {"type": "session_switched", "session_id": msg.session_id}
+    if isinstance(msg, AgentSwitched):
+        return {"type": "agent_switched", "agent_name": msg.agent_name}
+    if isinstance(msg, AgentAborted):
+        return {"type": "agent_aborted"}
+    if isinstance(msg, System):
+        return {"type": msg.event, **(msg.payload or {})}
+    if isinstance(msg, Unknown):
+        return dict(msg.payload) if msg.payload else {"type": msg.type}
+    raise TypeError(f"Unknown inbound message type: {type(msg)}")

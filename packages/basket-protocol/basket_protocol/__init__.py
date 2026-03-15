@@ -13,6 +13,7 @@ from .inbound import (
     ToolCallEnd,
     ToolCallStart,
     Unknown,
+    inbound_to_dict,
     parse_inbound,
 )
 from .outbound import (
@@ -44,6 +45,7 @@ __all__ = [
     "ToolCallEnd",
     "ToolCallStart",
     "Unknown",
+    "inbound_to_dict",
     "parse_inbound",
     "serialize_outbound",
 ]
