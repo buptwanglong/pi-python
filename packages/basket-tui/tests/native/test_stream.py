@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_tui.native.stream import StreamAssembler
+from basket_tui.native.pipeline import StreamAssembler
 
 
 def test_text_delta_and_agent_complete_produce_assistant_message():

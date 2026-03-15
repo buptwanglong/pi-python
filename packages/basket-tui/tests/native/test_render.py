@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from basket_tui.native.render import render_messages
+from basket_tui.native.pipeline import render_messages
 
 
 def _visible_width(line: str) -> int:
