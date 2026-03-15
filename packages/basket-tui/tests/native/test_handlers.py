@@ -2,12 +2,13 @@
 
 import pytest
 
+from basket_protocol import TextDelta
 from basket_tui.native.handle import make_handlers
 from basket_tui.native.pipeline import StreamAssembler
 
 
 def test_make_handlers_returns_dict_like_on_text_delta_appends_to_buffer() -> None:
-    """make_handlers(assembler, width, output_put, last_output_count, header_state, ui_state) returns a dict-like; on_text_delta('x') leaves assembler._buffer == 'x'."""
+    """make_handlers returns dict-like; on_text_delta(TextDelta(delta='x')) leaves assembler._buffer == 'x'."""
     assembler = StreamAssembler()
     width = 80
     lines_out: list[str] = []
@@ -28,7 +29,7 @@ def test_make_handlers_returns_dict_like_on_text_delta_appends_to_buffer() -> No
     on_text_delta = handlers["on_text_delta"]
     assert callable(on_text_delta)
 
-    on_text_delta("x")
+    on_text_delta(TextDelta(delta="x"))
     assert assembler._buffer == "x"
 
 

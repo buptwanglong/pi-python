@@ -31,7 +31,7 @@ async def test_reader_calls_on_text_delta_for_inbound_messages():
             return None
 
     handlers: GatewayHandlers = {
-        "on_text_delta": lambda d: deltas.append(d),
+        "on_text_delta": lambda event: deltas.append(event.delta),
     }
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", handlers, ready_event)

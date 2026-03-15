@@ -5,6 +5,21 @@ Message dispatch for terminal-native TUI: WebSocket message → StreamAssembler 
 import logging
 from typing import Any, Callable, Optional
 
+from basket_protocol import (
+    AgentAborted,
+    AgentComplete,
+    AgentError,
+    AgentSwitched,
+    SessionSwitched,
+    System,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    Unknown,
+    parse_inbound,
+)
+
 from ..pipeline.render import render_messages
 from ..pipeline.stream import StreamAssembler
 
@@ -137,47 +152,46 @@ def _dispatch_ws_message(
     header_state: Optional[dict[str, str]] = None,
     ui_state: Optional[dict[str, str]] = None,
 ) -> None:
-    """Dispatch one WebSocket message to StreamAssembler and optionally output (on agent_complete)."""
-    typ = msg.get("type")
-    if typ == "text_delta":
-        handle_text_delta(assembler, msg.get("delta", ""), ui_state=ui_state)
-    elif typ == "thinking_delta":
-        handle_thinking_delta(assembler, msg.get("delta", ""))
-    elif typ == "tool_call_start":
+    """Dispatch one WebSocket message (dict) to StreamAssembler after parsing to typed message."""
+    parsed = parse_inbound(msg)
+    if isinstance(parsed, Unknown):
+        logger.debug("Unhandled WebSocket message type: %s", parsed.type)
+        return
+    if isinstance(parsed, TextDelta):
+        handle_text_delta(assembler, parsed.delta, ui_state=ui_state)
+    elif isinstance(parsed, ThinkingDelta):
+        handle_thinking_delta(assembler, parsed.delta)
+    elif isinstance(parsed, ToolCallStart):
         handle_tool_call_start(
             assembler,
-            msg.get("tool_name", "unknown"),
-            arguments=msg.get("arguments"),
+            parsed.tool_name,
+            arguments=parsed.arguments,
             ui_state=ui_state,
         )
-    elif typ == "tool_call_end":
+    elif isinstance(parsed, ToolCallEnd):
         handle_tool_call_end(
             assembler,
-            msg.get("tool_name", "unknown"),
-            result=msg.get("result"),
-            error=msg.get("error"),
+            parsed.tool_name,
+            result=parsed.result,
+            error=parsed.error,
         )
-    elif typ == "agent_complete":
+    elif isinstance(parsed, AgentComplete):
         handle_agent_complete(
             assembler, width, output_put, last_output_count, ui_state=ui_state
         )
-    elif typ == "agent_error":
-        handle_agent_error(
-            output_put, msg.get("error", "Unknown error"), ui_state=ui_state
-        )
-    elif typ == "session_switched":
+    elif isinstance(parsed, AgentError):
+        handle_agent_error(output_put, parsed.error, ui_state=ui_state)
+    elif isinstance(parsed, SessionSwitched):
         handle_session_switched(
-            header_state, output_put, msg.get("session_id", "")
+            header_state, output_put, parsed.session_id
         )
-    elif typ == "agent_switched":
+    elif isinstance(parsed, AgentSwitched):
         handle_agent_switched(
-            header_state, output_put, msg.get("agent_name", "")
+            header_state, output_put, parsed.agent_name
         )
-    elif typ == "agent_aborted":
+    elif isinstance(parsed, AgentAborted):
         handle_agent_aborted(assembler, output_put)
-    elif typ in ("ready", "agent_disconnected"):
-        handle_system(typ, msg, output_put)
-    elif typ == "error":
-        handle_system(typ, msg, output_put)
+    elif isinstance(parsed, System):
+        handle_system(parsed.event, parsed.payload or {}, output_put)
     else:
-        logger.debug("Unhandled WebSocket message type: %s", typ)
+        logger.debug("Unhandled WebSocket message type: %s", type(parsed).__name__)

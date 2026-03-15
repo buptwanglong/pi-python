@@ -9,68 +9,24 @@ import logging
 from typing import Any, Optional
 
 import websockets
+from basket_protocol import (
+    AgentAborted,
+    AgentComplete,
+    AgentError,
+    AgentSwitched,
+    SessionSwitched,
+    System,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    Unknown,
+    parse_inbound,
+)
 
 from .types import GatewayHandlers
 
 logger = logging.getLogger(__name__)
-
-
-def _dispatch(msg: dict[str, Any], handlers: GatewayHandlers) -> None:
-    """Call the handler for msg["type"] if present. Swallow handler errors."""
-    typ = msg.get("type")
-    if not typ:
-        return
-    try:
-        if typ == "text_delta":
-            h = handlers.get("on_text_delta")
-            if h:
-                h(msg.get("delta", ""))
-        elif typ == "thinking_delta":
-            h = handlers.get("on_thinking_delta")
-            if h:
-                h(msg.get("delta", ""))
-        elif typ == "tool_call_start":
-            h = handlers.get("on_tool_call_start")
-            if h:
-                h(msg.get("tool_name", "unknown"), msg.get("arguments"))
-        elif typ == "tool_call_end":
-            h = handlers.get("on_tool_call_end")
-            if h:
-                h(
-                    msg.get("tool_name", "unknown"),
-                    msg.get("result"),
-                    msg.get("error"),
-                )
-        elif typ == "agent_complete":
-            h = handlers.get("on_agent_complete")
-            if h:
-                h()
-        elif typ == "agent_error":
-            h = handlers.get("on_agent_error")
-            if h:
-                h(msg.get("error", "Unknown error"))
-        elif typ == "session_switched":
-            h = handlers.get("on_session_switched")
-            if h:
-                h(msg.get("session_id", ""))
-        elif typ == "agent_switched":
-            h = handlers.get("on_agent_switched")
-            if h:
-                h(msg.get("agent_name", ""))
-        elif typ == "agent_aborted":
-            h = handlers.get("on_agent_aborted")
-            if h:
-                h()
-        elif typ in ("ready", "agent_disconnected"):
-            h = handlers.get("on_system")
-            if h:
-                h(typ, msg)
-        elif typ == "error":
-            h = handlers.get("on_system")
-            if h:
-                h("error", msg)
-    except Exception:  # noqa: BLE001
-        logger.exception("Handler error for type %s", typ)
 
 
 class GatewayWsConnection:
@@ -99,6 +55,56 @@ class GatewayWsConnection:
         self._user_closed = False
         self._reader_task: Optional[asyncio.Task[None]] = None
 
+    def _dispatch(self, msg: dict[str, Any]) -> None:
+        """Parse inbound message and call the matching handler. Swallow handler errors."""
+        parsed = parse_inbound(msg)
+        if isinstance(parsed, Unknown):
+            logger.debug("Unknown message type: %s", parsed.type)
+            return
+        try:
+            if isinstance(parsed, TextDelta):
+                h = self._handlers.get("on_text_delta")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, ThinkingDelta):
+                h = self._handlers.get("on_thinking_delta")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, ToolCallStart):
+                h = self._handlers.get("on_tool_call_start")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, ToolCallEnd):
+                h = self._handlers.get("on_tool_call_end")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, AgentComplete):
+                h = self._handlers.get("on_agent_complete")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, AgentError):
+                h = self._handlers.get("on_agent_error")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, SessionSwitched):
+                h = self._handlers.get("on_session_switched")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, AgentSwitched):
+                h = self._handlers.get("on_agent_switched")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, AgentAborted):
+                h = self._handlers.get("on_agent_aborted")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, System):
+                h = self._handlers.get("on_system")
+                if h:
+                    h(parsed)
+        except Exception:  # noqa: BLE001
+            logger.exception("Handler error for %s", type(parsed).__name__)
+
     async def run(self) -> None:
         """Connect, run reader, reconnect on disconnect unless close() was called."""
         backoff_sec = 1.0
@@ -116,7 +122,7 @@ class GatewayWsConnection:
                     else:
                         on_system = self._handlers.get("on_system")
                         if on_system:
-                            on_system("reconnected", {})
+                            on_system(System(event="reconnected", payload={}))
                     if self._ui_state is not None:
                         self._ui_state["connection"] = "connected"
 
@@ -125,7 +131,7 @@ class GatewayWsConnection:
                             async for raw in ws:
                                 try:
                                     data = json.loads(raw)
-                                    _dispatch(data, self._handlers)
+                                    self._dispatch(data)
                                 except json.JSONDecodeError:
                                     logger.warning(
                                         "Invalid JSON from gateway: %s",

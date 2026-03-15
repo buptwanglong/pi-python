@@ -1,21 +1,34 @@
 """Type definitions for the WebSocket–TUI boundary (gateway connection and handlers)."""
 
-from typing import Any, Callable, Protocol, TypedDict
+from typing import Callable, Protocol, TypedDict
+
+from basket_protocol import (
+    AgentAborted,
+    AgentComplete,
+    AgentError,
+    AgentSwitched,
+    SessionSwitched,
+    System,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallEnd,
+    ToolCallStart,
+)
 
 
 class GatewayHandlers(TypedDict, total=False):
     """Optional handlers for gateway message types. TUI implements only the hooks it needs."""
 
-    on_text_delta: Callable[[str], None]
-    on_thinking_delta: Callable[[str], None]
-    on_tool_call_start: Callable[[str, dict[str, Any] | None], None]
-    on_tool_call_end: Callable[[str, str | None, str | None], None]
-    on_agent_complete: Callable[[], None]
-    on_agent_error: Callable[[str], None]
-    on_session_switched: Callable[[str], None]
-    on_agent_switched: Callable[[str], None]
-    on_agent_aborted: Callable[[], None]
-    on_system: Callable[[str, dict[str, Any]], None]
+    on_text_delta: Callable[[TextDelta], None]
+    on_thinking_delta: Callable[[ThinkingDelta], None]
+    on_tool_call_start: Callable[[ToolCallStart], None]
+    on_tool_call_end: Callable[[ToolCallEnd], None]
+    on_agent_complete: Callable[[AgentComplete], None]
+    on_agent_error: Callable[[AgentError], None]
+    on_session_switched: Callable[[SessionSwitched], None]
+    on_agent_switched: Callable[[AgentSwitched], None]
+    on_agent_aborted: Callable[[AgentAborted], None]
+    on_system: Callable[[System], None]
 
 
 class GatewayConnectionProtocol(Protocol):
