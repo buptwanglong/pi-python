@@ -47,8 +47,7 @@ def test_help_lines_non_empty():
 
 
 def test_handle_slash_command_help_returns_handled():
-    with patch("basket_tui.native.commands.print"):
-        assert handle_slash_command("/help") == "handled"
+    assert handle_slash_command("/help") == "handled"
 
 
 def test_handle_slash_command_exit_returns_exit():
@@ -56,10 +55,9 @@ def test_handle_slash_command_exit_returns_exit():
 
 
 def test_handle_slash_command_stub_returns_handled():
-    with patch("basket_tui.native.commands.print"):
-        assert handle_slash_command("/session") == "handled"
-        assert handle_slash_command("/agent") == "handled"
-        assert handle_slash_command("/new") == "handled"
+    assert handle_slash_command("/session") == "handled"
+    assert handle_slash_command("/agent") == "handled"
+    assert handle_slash_command("/new") == "handled"
 
 
 def test_handle_slash_command_non_slash_returns_none():
