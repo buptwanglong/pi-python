@@ -16,6 +16,7 @@ classifiers = [
 python = "^3.12"
 basket-protocol = {path = "../basket-protocol", develop = true}
 prompt_toolkit = "^3.0"
+rich = "^13.0"
 websockets = "^14.0"
 
 [tool.poetry.group.dev.dependencies]

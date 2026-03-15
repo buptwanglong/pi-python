@@ -2,6 +2,7 @@
 Gateway handler factory: build GatewayHandlers that delegate to dispatch handle_*.
 """
 
+import logging
 from typing import Callable, Optional
 
 from ..connection.types import GatewayHandlers
@@ -18,6 +19,8 @@ from .dispatch import (
     handle_tool_call_end,
     handle_tool_call_start,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def make_handlers(
@@ -46,7 +49,7 @@ def make_handlers(
             result=event.result,
             error=event.error,
         ),
-        "on_agent_complete": lambda: handle_agent_complete(
+        "on_agent_complete": lambda event: handle_agent_complete(
             assembler, width, output_put, last_output_count, ui_state=ui_state
         ),
         "on_agent_error": lambda event: handle_agent_error(
@@ -58,9 +61,13 @@ def make_handlers(
         "on_agent_switched": lambda event: handle_agent_switched(
             header_state, output_put, event.agent_name
         ),
-        "on_agent_aborted": lambda: handle_agent_aborted(assembler, output_put),
+        "on_agent_aborted": lambda event: handle_agent_aborted(assembler, output_put),
         "on_system": lambda event: handle_system(
             event.event, event.payload or {}, output_put
         ),
     }
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Handler mapping created", extra={"handler_count": len(handlers)})
+
     return handlers

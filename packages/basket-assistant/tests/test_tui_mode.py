@@ -3,7 +3,7 @@ Test TUI mode integration with Pi Agent
 """
 
 import pytest
-from basket_assistant.modes.tui import run_tui_mode
+from basket_assistant.interaction.modes.tui import run_tui_mode
 
 
 def test_run_tui_mode_import():
@@ -14,7 +14,7 @@ def test_run_tui_mode_import():
 
 def test_tui_mode_module():
     """Test that tui mode module exists."""
-    from basket_assistant.modes import tui
+    from basket_assistant.interaction.modes import tui
 
     assert hasattr(tui, "run_tui_mode")
 

@@ -3,10 +3,8 @@ Relay client: outbound-only connection to a message relay. No local port.
 Receives user messages from relay, runs agent via gateway.run(), sends events back to relay.
 """
 
-import asyncio
 import json
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +18,12 @@ async def run_relay_client(relay_url: str) -> None:
         import websockets
     except ImportError:
         raise ImportError(
-            "basket_assistant.modes.relay_client requires 'websockets' package"
+            "basket_assistant.relay_client requires 'websockets' package"
         )
 
     from basket_gateway.gateway import AgentGateway
 
-    from ..agent import AssistantAgent
+    from .agent import AssistantAgent
 
     agent = AssistantAgent()
     gateway = AgentGateway(agent_factory=lambda: agent)

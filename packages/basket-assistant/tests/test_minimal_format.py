@@ -1,6 +1,6 @@
 """Test minimal formatting style matching Claude Code."""
 import pytest
-from basket_assistant.modes.tui import _format_tool_result
+from basket_assistant.interaction.modes.tui import _format_tool_result
 
 
 def test_bash_minimal_format():

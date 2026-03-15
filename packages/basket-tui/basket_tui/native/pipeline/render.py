@@ -4,12 +4,15 @@ Line renderer for terminal-native TUI.
 Renders a list of messages to ANSI lines, each line not exceeding the given width.
 """
 
+import logging
 from io import StringIO
 from typing import Any
 
 from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.text import Text
+
+logger = logging.getLogger(__name__)
 
 ROLE_STYLES = {
     "user": "cyan",
@@ -29,6 +32,9 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
     if not messages:
         return []
 
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Rendering messages", extra={"message_count": len(messages)})
+
     out = StringIO()
     console = Console(
         file=out, width=width, force_terminal=True, color_system="standard"
@@ -43,7 +49,9 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
         if role == "assistant" and content:
             try:
                 body = Markdown(content)
-            except Exception:
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Markdown rendering failed", extra={"error": str(e)})
                 body = Text(content)
         else:
             body = Text(content)
@@ -54,4 +62,9 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
     result = out.getvalue().rstrip("\n")
     if not result:
         return []
-    return result.split("\n")
+
+    lines = result.split("\n")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Render complete", extra={"total_lines": len(lines)})
+
+    return lines

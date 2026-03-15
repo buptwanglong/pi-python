@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -53,7 +52,7 @@ async def main_async(args: Optional[list] = None) -> int:
         root = logging.getLogger()
         root.setLevel(level)
         root.addHandler(file_handler)
-        for name in ("basket_tui.app", "basket_assistant.modes.tui"):
+        for name in ("basket_tui", "basket_assistant.interaction.modes.tui"):
             logging.getLogger(name).setLevel(level)
         logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
         logger.info("Log file: %s", log_file)
@@ -450,7 +449,7 @@ Environment variables:
             print("Example: basket relay wss://your-vps:7683/relay/agent")
             return 1
         try:
-            from .modes.relay_client import run_relay_client
+            from .relay_client import run_relay_client
         except ImportError as e:
             logger.warning("relay_client import failed: %s", e)
             print("Error: basket relay requires 'websockets' package.")
@@ -459,13 +458,13 @@ Environment variables:
         await run_relay_client(relay_url)
         return 0
 
-    # TUI mode: ensure gateway is running, then connect TUI to it (no local agent)
-    if use_tui:
+    # TUI mode (tui or tui-native): require gateway to be already running
+    if use_tui or use_tui_native:
         try:
-            from .serve import get_serve_port, is_serve_running, read_serve_state
-            from .modes.attach import run_tui_mode_attach
+            from .serve import get_serve_port, is_serve_running
+            from basket_tui.native.run import run_tui_native_attach
         except ImportError as e:
-            logger.warning("TUI/attach import failed: %s", e)
+            logger.warning("TUI native import failed: %s", e)
             print(f"Error: TUI requires 'basket-tui' and gateway support: {e}")
             return 1
         port = 7682
@@ -475,76 +474,9 @@ Environment variables:
             pass
         running, _ = is_serve_running()
         if not running:
-            # Start gateway in background subprocess
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "basket_assistant.main", "gateway", "start"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            # Wait for gateway to write state and be ready (poll up to ~15s)
-            for _ in range(30):
-                await asyncio.sleep(0.5)
-                running, _ = is_serve_running()
-                _, port_from_state = read_serve_state()
-                if running and port_from_state is not None:
-                    port = port_from_state
-                    break
-            if not running:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-                print("Error: Failed to start gateway in time.")
-                return 1
-        else:
-            port = get_serve_port() or port
-        attach_url = f"ws://127.0.0.1:{port}/ws"
-        await run_tui_mode_attach(
-            attach_url, agent_name=tui_agent, max_cols=tui_max_cols
-        )
-        return 0
-
-    # TUI native mode: same gateway as tui, then run terminal-native TUI (line output + prompt_toolkit)
-    if use_tui_native:
-        try:
-            from .serve import get_serve_port, is_serve_running, read_serve_state
-            from basket_tui.native.run import run_tui_native_attach
-        except ImportError as e:
-            logger.warning("TUI native import failed: %s", e)
-            print(f"Error: tui-native requires 'basket-tui' and gateway support: {e}")
+            print("Error: Gateway is not running. Run 'basket gateway start' first.")
             return 1
-        port = 7682
-        try:
-            port = int(os.environ.get("BASKET_SERVE_PORT", "7682"))
-        except ValueError:
-            pass
-        running, _ = is_serve_running()
-        if not running:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "basket_assistant.main", "gateway", "start"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            for _ in range(30):
-                await asyncio.sleep(0.5)
-                running, _ = is_serve_running()
-                _, port_from_state = read_serve_state()
-                if running and port_from_state is not None:
-                    port = port_from_state
-                    break
-            if not running:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-                print("Error: Failed to start gateway in time.")
-                return 1
-        else:
-            port = get_serve_port() or port
+        port = get_serve_port() or port
         attach_url = f"ws://127.0.0.1:{port}/ws"
         await run_tui_native_attach(
             attach_url, agent_name=tui_agent, max_cols=tui_max_cols

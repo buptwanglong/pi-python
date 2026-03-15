@@ -5,13 +5,17 @@ WebSocket runs via GatewayWsConnection; TUI sends via conn.send_* and receives v
 """
 
 import asyncio
+import logging
 import shutil
 from typing import Any, Optional
 
 from .connection import GatewayWsConnection
 from .handle import make_handlers
+from .logging_config import setup_logging
 from .pipeline import StreamAssembler
 from .ui import build_layout, handle_input, open_picker
+
+logger = logging.getLogger(__name__)
 
 
 def _get_width(max_cols: Optional[int]) -> int:
@@ -40,6 +44,18 @@ async def run_tui_native_attach(
         agent_name: Optional agent name (for future use)
         max_cols: Optional terminal width
     """
+    # Initialize logging configuration
+    setup_logging()
+
+    logger.info(
+        "TUI starting",
+        extra={
+            "ws_url": ws_url,
+            "agent_name": agent_name,
+            "width": _get_width(max_cols),
+        },
+    )
+
     try:
         import websockets  # noqa: F401
     except ImportError:
@@ -80,6 +96,11 @@ async def run_tui_native_attach(
 
     def output_put(line: str) -> None:
         body_lines.append(line)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Output appended",
+                extra={"line_len": len(line), "total_lines": len(body_lines)},
+            )
         if app_ref:
             app_ref[0].invalidate()
 
@@ -93,7 +114,9 @@ async def run_tui_native_attach(
 
     try:
         await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+        logger.info("Connection ready", extra={})
     except asyncio.TimeoutError:
+        logger.error("Connection timeout", extra={"timeout_sec": 15.0})
         print("[system] Connection timed out.", flush=True)
         ws_task.cancel()
         try:
@@ -113,6 +136,7 @@ async def run_tui_native_attach(
         text = (input_buffer.text or "").strip()
         input_buffer.reset()
         result = handle_input(text, base_url, conn, body_lines)
+        logger.info("User input received", extra={"text_len": len(text), "result": result})
         if result == "exit":
             asyncio.get_running_loop().create_task(conn.close())
             get_app().exit()
@@ -121,6 +145,8 @@ async def run_tui_native_attach(
             get_app().invalidate()
             return
         if result == "send":
+            # Display user message in the UI
+            body_lines.append(f"[user] {text}")
             get_app().invalidate()
 
     @kb.add("enter")
@@ -150,6 +176,7 @@ async def run_tui_native_attach(
         get_app().invalidate()
 
     def _do_exit() -> None:
+        logger.info("TUI shutting down", extra={})
         asyncio.get_running_loop().create_task(conn.close())
         from prompt_toolkit.application import get_app
 
@@ -182,6 +209,7 @@ async def run_tui_native_attach(
     try:
         await app.run_async()
     finally:
+        logger.info("TUI cleanup complete", extra={})
         app_ref.clear()
         await conn.close()
         ws_task.cancel()

@@ -21,7 +21,15 @@ def _fetch_sessions(http_base_url: str) -> list[dict[str, Any]]:
                 return data
             return []
     except Exception as e:
-        logger.warning("Fetch sessions failed: %s", e)
+        logger.warning(
+            "Fetch sessions failed",
+            extra={
+                "url": url,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
         return []
 
 
@@ -41,8 +49,13 @@ def run_session_picker(http_base_url: str) -> Optional[str]:
 
     sessions = _fetch_sessions(http_base_url)
     if not sessions:
+        logger.debug("Picker opening", extra={"kind": "session", "items_count": 0})
         print("[system] No sessions found.", flush=True)
         return None
+
+    logger.debug(
+        "Picker opening", extra={"kind": "session", "items_count": len(sessions)}
+    )
 
     # Build choices: (session_id, label)
     choices: list[tuple[str, str]] = []
@@ -85,7 +98,15 @@ def run_session_picker(http_base_url: str) -> Optional[str]:
     )
     app = Application(layout=layout, key_bindings=kb, full_screen=True)
     app.run()
-    return selected[0]
+
+    result = selected[0]
+    logger.debug(
+        "Picker closed", extra={"kind": "session", "result": result is not None}
+    )
+    if result:
+        logger.debug("Picker item selected", extra={"kind": "session", "selection": result})
+
+    return result
 
 
 def _fetch_json_list(http_base_url: str, path: str) -> list:
@@ -97,7 +118,16 @@ def _fetch_json_list(http_base_url: str, path: str) -> list:
             data = json.loads(resp.read().decode())
             return data if isinstance(data, list) else []
     except Exception as e:
-        logger.warning("Fetch %s failed: %s", path, e)
+        logger.warning(
+            "Fetch failed",
+            extra={
+                "path": path,
+                "url": url,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
         return []
 
 
@@ -159,10 +189,19 @@ def run_agent_picker(http_base_url: str) -> Optional[str]:
     """Show agent list from GET /api/agents; return selected agent_name or None."""
     names = _fetch_agents(http_base_url)
     if not names:
+        logger.debug("Picker opening", extra={"kind": "agent", "items_count": 0})
         print("[system] No agents found.", flush=True)
         return None
+
+    logger.debug("Picker opening", extra={"kind": "agent", "items_count": len(names)})
     choices = [(n, f"  {n}") for n in names]
-    return _run_picker("Agent (Enter select, Esc cancel)", choices)
+    result = _run_picker("Agent (Enter select, Esc cancel)", choices)
+
+    logger.debug("Picker closed", extra={"kind": "agent", "result": result is not None})
+    if result:
+        logger.debug("Picker item selected", extra={"kind": "agent", "selection": result})
+
+    return result
 
 
 def run_model_picker(http_base_url: str) -> Optional[str]:

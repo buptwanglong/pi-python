@@ -3,7 +3,7 @@ Unit tests for TUI mode _format_tool_result.
 """
 
 import pytest
-from basket_assistant.modes.tui import _format_tool_result
+from basket_assistant.interaction.modes.tui import _format_tool_result
 
 
 def test_format_tool_result_none():

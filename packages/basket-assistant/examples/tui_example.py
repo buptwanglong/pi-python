@@ -29,10 +29,10 @@ async def main():
         agent = AssistantAgent()
 
         # Import TUI mode
-        from basket_assistant.modes.tui import run_tui_mode
+        from basket_assistant.interaction.modes.tui import run_tui_mode
 
-        # Run in TUI mode
-        await run_tui_mode(agent.agent)
+        # Run in TUI mode (deprecated: use `basket tui` or `basket tui-native` instead)
+        await run_tui_mode(agent)
 
     except KeyboardInterrupt:
         print("\n\n👋 Goodbye!")

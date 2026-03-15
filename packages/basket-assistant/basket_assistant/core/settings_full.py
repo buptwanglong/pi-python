@@ -140,6 +140,10 @@ class Settings(BaseModel):
         default=None,
         description="Directory for trajectory recording; default filled at load time with ~/.basket/trajectories. Set to empty to disable.",
     )
+    log_level: Optional[str] = Field(
+        default=None,
+        description="Global log level for all basket modules (DEBUG/INFO/WARNING/ERROR). Overridden by BASKET_LOG_LEVEL env var.",
+    )
     skills_dirs: List[str] = Field(default_factory=list)
     skills_include: List[str] = Field(default_factory=list)
     agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)

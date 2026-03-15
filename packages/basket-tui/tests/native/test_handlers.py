@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_protocol import TextDelta
+from basket_protocol import AgentComplete, TextDelta
 from basket_tui.native.handle import make_handlers
 from basket_tui.native.pipeline import StreamAssembler
 
@@ -55,7 +55,7 @@ def test_make_handlers_on_agent_complete_invokes_output_put_and_updates_last_out
     on_agent_complete = handlers["on_agent_complete"]
     assert callable(on_agent_complete)
 
-    on_agent_complete()
+    on_agent_complete(AgentComplete())
 
     assert len(lines_out) >= 1
     assert any("Hello" in line or "assistant" in line for line in lines_out)

@@ -35,11 +35,28 @@ def handle_text_delta(
     if ui_state is not None:
         ui_state["phase"] = "streaming"
     assembler.text_delta(delta)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Text delta processed",
+            extra={
+                "delta_len": len(delta),
+                "buffer_size": len(assembler._buffer),
+                "phase": ui_state.get("phase") if ui_state else None,
+            },
+        )
 
 
 def handle_thinking_delta(assembler: StreamAssembler, delta: str) -> None:
     """Handle thinking_delta: append to assembler thinking buffer."""
     assembler.thinking_delta(delta)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Thinking delta processed",
+            extra={
+                "delta_len": len(delta),
+                "thinking_size": len(assembler._thinking_buffer),
+            },
+        )
 
 
 def handle_tool_call_start(
@@ -52,6 +69,14 @@ def handle_tool_call_start(
     if ui_state is not None:
         ui_state["phase"] = "tool_running"
     assembler.tool_call_start(tool_name, arguments)
+    logger.info(
+        "Tool call started",
+        extra={
+            "tool_name": tool_name,
+            "args_keys": list(arguments.keys()) if arguments else [],
+            "phase": "tool_running",
+        },
+    )
 
 
 def handle_tool_call_end(
@@ -62,6 +87,14 @@ def handle_tool_call_end(
 ) -> None:
     """Handle tool_call_end: append tool message to assembler."""
     assembler.tool_call_end(tool_name, result=result, error=error)
+    logger.info(
+        "Tool call ended",
+        extra={
+            "tool_name": tool_name,
+            "has_result": result is not None,
+            "has_error": error is not None,
+        },
+    )
 
 
 def handle_agent_complete(
@@ -75,6 +108,17 @@ def handle_agent_complete(
     if ui_state is not None:
         ui_state["phase"] = "idle"
     assembler.agent_complete()
+
+    new_messages = len(assembler.messages) - last_output_count[0]
+    logger.info(
+        "Agent turn complete",
+        extra={
+            "new_messages": new_messages,
+            "total_messages": len(assembler.messages),
+            "phase": "idle",
+        },
+    )
+
     if assembler.messages:
         start = last_output_count[0]
         for m in assembler.messages[start:]:
@@ -92,6 +136,7 @@ def handle_agent_error(
     """Handle agent_error: set phase error, output system message."""
     if ui_state is not None:
         ui_state["phase"] = "error"
+    logger.error("Agent error occurred", extra={"error": error, "phase": "error"})
     output_put(f"[system] Agent error: {error}")
 
 
@@ -105,6 +150,7 @@ def handle_session_switched(
         return
     if header_state is not None:
         header_state["session"] = session_id
+    logger.info("Session switched", extra={"session_id": session_id})
     output_put(f"[system] Switched to session {session_id}")
 
 
@@ -118,6 +164,7 @@ def handle_agent_switched(
         return
     if header_state is not None:
         header_state["agent"] = agent_name
+    logger.info("Agent switched", extra={"agent_name": agent_name})
     output_put(f"[system] Switched to agent {agent_name}")
 
 
@@ -126,9 +173,8 @@ def handle_agent_aborted(
     output_put: Callable[[str], None],
 ) -> None:
     """Handle agent_aborted: clear assembler buffers and current tool, output message."""
-    assembler._buffer = ""
-    assembler._thinking_buffer = ""
-    assembler._current_tool = None
+    logger.info("Agent aborted", extra={})
+    assembler.abort()
     output_put("[system] Aborted.")
 
 
@@ -138,6 +184,10 @@ def handle_system(
     output_put: Callable[[str], None],
 ) -> None:
     """Handle system events: ready, agent_disconnected (no-op), error (output gateway error)."""
+    logger.info(
+        "System event received",
+        extra={"event": event, "payload_keys": list(payload.keys()) if payload else []},
+    )
     if event == "error":
         output_put(f"[system] Gateway error: {payload.get('error', 'Unknown')}")
     # ready, agent_disconnected: no-op

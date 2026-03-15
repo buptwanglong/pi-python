@@ -61,10 +61,22 @@ class GatewayWsConnection:
         if isinstance(parsed, Unknown):
             logger.debug("Unknown message type: %s", parsed.type)
             return
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Dispatching message",
+                extra={"parsed_type": type(parsed).__name__},
+            )
+
         try:
             if isinstance(parsed, TextDelta):
                 h = self._handlers.get("on_text_delta")
                 if h:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Handler invoked",
+                            extra={"event_type": "TextDelta", "handler": "on_text_delta"},
+                        )
                     h(parsed)
             elif isinstance(parsed, ThinkingDelta):
                 h = self._handlers.get("on_thinking_delta")
@@ -117,9 +129,13 @@ class GatewayWsConnection:
                 async with websockets.connect(self._ws_url) as ws:
                     self._ws = ws
                     if first_connect:
+                        logger.info("WebSocket connected", extra={"url": self._ws_url})
                         first_connect = False
                         self._ready_event.set()
                     else:
+                        logger.info(
+                            "WebSocket reconnected", extra={"backoff_sec": backoff_sec}
+                        )
                         on_system = self._handlers.get("on_system")
                         if on_system:
                             on_system(System(event="reconnected", payload={}))
@@ -129,8 +145,21 @@ class GatewayWsConnection:
                     async def reader() -> None:
                         try:
                             async for raw in ws:
+                                if logger.isEnabledFor(logging.DEBUG):
+                                    logger.debug(
+                                        "Raw message received",
+                                        extra={
+                                            "size": len(raw) if isinstance(raw, str) else len(raw) if raw else 0,
+                                            "preview": raw[:100] if isinstance(raw, str) else "<binary>",
+                                        },
+                                    )
                                 try:
                                     data = json.loads(raw)
+                                    if logger.isEnabledFor(logging.DEBUG):
+                                        logger.debug(
+                                            "Message parsed",
+                                            extra={"type": data.get("type")},
+                                        )
                                     self._dispatch(data)
                                 except json.JSONDecodeError:
                                     logger.warning(
@@ -167,29 +196,37 @@ class GatewayWsConnection:
 
     async def send_message(self, text: str) -> None:
         if self._ws:
+            logger.info("Sending message", extra={"text_len": len(text)})
             await self._ws.send(json.dumps({"type": "message", "content": text}))
 
     async def send_abort(self) -> None:
         if self._ws:
+            logger.info("Sending abort signal", extra={})
             await self._ws.send(json.dumps({"type": "abort"}))
 
     async def send_new_session(self) -> None:
         if self._ws:
+            logger.info("Creating new session", extra={})
             await self._ws.send(json.dumps({"type": "new_session"}))
 
     async def send_switch_session(self, session_id: str) -> None:
         if self._ws:
+            logger.info("Switching session", extra={"session_id": session_id})
             await self._ws.send(
                 json.dumps({"type": "switch_session", "session_id": session_id})
             )
 
     async def send_switch_agent(self, agent_name: str) -> None:
         if self._ws:
+            logger.info("Switching agent", extra={"agent_name": agent_name})
             await self._ws.send(
                 json.dumps({"type": "switch_agent", "agent_name": agent_name})
             )
 
     async def close(self) -> None:
+        logger.info(
+            "Connection closing", extra={"user_initiated": self._user_closed}
+        )
         self._user_closed = True
         self._closed.set()
         if self._ws:

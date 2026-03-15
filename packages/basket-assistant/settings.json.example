@@ -9,5 +9,6 @@
       "temperature": null
     }
   },
+  "log_level": "INFO",
   "workspace": null
 }

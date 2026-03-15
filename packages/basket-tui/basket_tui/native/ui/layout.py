@@ -2,12 +2,15 @@
 Layout builder for terminal-native TUI.
 """
 
+import logging
 from typing import Any
 
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+
+logger = logging.getLogger(__name__)
 
 
 def build_layout(
@@ -19,6 +22,12 @@ def build_layout(
     input_buffer: Any,
 ) -> Layout:
     """Build prompt_toolkit Layout: header, body, footer, separator, input row."""
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Building layout",
+            extra={"width": width, "body_lines_count": len(body_lines)},
+        )
+
     sep_char = "─"
     sep_control = FormattedTextControl(
         text=lambda: sep_char * (width if width else 80)

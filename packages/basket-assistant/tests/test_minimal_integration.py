@@ -1,6 +1,6 @@
 """Integration test for minimal style TUI."""
 import pytest
-from basket_assistant.modes.tui import _format_tool_result
+from basket_assistant.interaction.modes.tui import _format_tool_result
 
 
 def test_full_minimal_style_no_decorations():

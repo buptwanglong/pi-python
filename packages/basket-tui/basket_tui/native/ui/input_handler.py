@@ -4,10 +4,13 @@ Merges former commands.py: HELP_LINES and handle_slash_command.
 """
 
 import asyncio
+import logging
 from typing import Literal, Optional
 
 from ..connection.types import GatewayConnectionProtocol
 from .pickers import run_agent_picker, run_session_picker
+
+logger = logging.getLogger(__name__)
 
 InputResult = Literal["send", "exit", "handled"]
 
@@ -53,6 +56,7 @@ def _run_picker(
     body_lines: list[str],
 ) -> None:
     if kind == "session":
+        logger.info("Opening picker", extra={"kind": kind})
         session_id = run_session_picker(base_url)
         if session_id:
             try:
@@ -60,9 +64,14 @@ def _run_picker(
                     connection.send_switch_session(session_id)
                 )
             except Exception as e:
+                logger.error(
+                    "Picker operation failed",
+                    extra={"kind": kind, "error": str(e)},
+                )
                 body_lines.append(f"[system] Failed to switch: {e}")
     else:
         # agent and model both use agent picker (model is per-agent)
+        logger.info("Opening picker", extra={"kind": kind})
         name = run_agent_picker(base_url)
         if name:
             try:
@@ -70,6 +79,10 @@ def _run_picker(
                     connection.send_switch_agent(name)
                 )
             except Exception as e:
+                logger.error(
+                    "Picker operation failed",
+                    extra={"kind": kind, "error": str(e)},
+                )
                 body_lines.append(f"[system] Failed to switch: {e}")
 
 
@@ -84,6 +97,12 @@ def handle_input(
     if not text:
         return "handled"
 
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Processing input",
+            extra={"text_preview": text[:50], "is_slash": text.startswith("/")},
+        )
+
     low = text.strip().lower()
     if low in ("/session", "/sessions"):
         _run_picker("session", base_url, connection, body_lines)
@@ -95,12 +114,14 @@ def handle_input(
         _run_picker("model", base_url, connection, body_lines)
         return "handled"
     if low == "/new":
+        logger.info("New session requested", extra={})
         try:
             asyncio.get_running_loop().create_task(connection.send_new_session())
         except Exception as e:
             body_lines.append(f"[system] Failed: {e}")
         return "handled"
     if low == "/abort":
+        logger.info("Abort requested", extra={})
         try:
             asyncio.get_running_loop().create_task(connection.send_abort())
         except Exception as e:
@@ -123,6 +144,7 @@ def handle_input(
             body_lines.append("[system] Unknown command. Type /help for commands.")
         return "handled"
 
+    logger.info("Message queued", extra={"text_len": len(text)})
     try:
         asyncio.get_running_loop().create_task(connection.send_message(text))
     except Exception as e:
