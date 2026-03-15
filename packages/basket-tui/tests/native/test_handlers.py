@@ -2,8 +2,8 @@
 
 import pytest
 
-from basket_tui.native.handlers import make_handlers
-from basket_tui.native.stream import StreamAssembler
+from basket_tui.native.handle import make_handlers
+from basket_tui.native.pipeline import StreamAssembler
 
 
 def test_make_handlers_returns_dict_like_on_text_delta_appends_to_buffer() -> None:

@@ -1,6 +1,6 @@
 """Tests for native dispatch per-type handlers."""
 
-from basket_tui.native.dispatch import (
+from basket_tui.native.handle.dispatch import (
     handle_agent_aborted,
     handle_agent_complete,
     handle_agent_error,
@@ -11,7 +11,7 @@ from basket_tui.native.dispatch import (
     handle_tool_call_end,
     handle_tool_call_start,
 )
-from basket_tui.native.stream import StreamAssembler
+from basket_tui.native.pipeline import StreamAssembler
 
 
 def _minimal_setup():
