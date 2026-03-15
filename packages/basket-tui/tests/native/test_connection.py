@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from basket_tui.native.connection import GatewayWsConnection
-from basket_tui.native.types import GatewayHandlers
+from basket_tui.native.connection import GatewayHandlers, GatewayWsConnection
 
 
 @pytest.mark.asyncio
@@ -37,7 +36,7 @@ async def test_reader_calls_on_text_delta_for_inbound_messages():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", handlers, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
@@ -73,7 +72,7 @@ async def test_send_message_sends_json_with_type_message():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", handlers, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
@@ -112,7 +111,7 @@ async def test_send_abort_sends_type_abort():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", {}, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
@@ -149,7 +148,7 @@ async def test_send_new_session_sends_type_new_session():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", {}, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
@@ -188,7 +187,7 @@ async def test_send_switch_session_sends_type_switch_session_and_session_id():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", {}, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
@@ -227,7 +226,7 @@ async def test_send_switch_agent_sends_type_switch_agent_and_agent_name():
     ready_event = asyncio.Event()
     conn = GatewayWsConnection("ws://test/ws", {}, ready_event)
 
-    with patch("basket_tui.native.connection.websockets") as mock_websockets:
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
         mock_websockets.connect.return_value = AsyncCtx()
         task = asyncio.create_task(conn.run())
         try:
