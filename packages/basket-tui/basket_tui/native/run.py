@@ -1,15 +1,17 @@
 """
 Terminal-native TUI runner: connects to gateway WebSocket and runs line-output + prompt_toolkit UI.
+Single asyncio loop: no threads, no queue.Queue, no polling.
+WebSocket runs via GatewayWsConnection; TUI sends via conn.send_* and receives via handlers (no queue).
 """
 
 import asyncio
-import queue
 import shutil
-import threading
 from typing import Any, Optional
 
+from .connection import GatewayWsConnection
+from .handlers import make_handlers
 from .input_handler import handle_input, open_picker
-from .ws_loop import run_ws_loop
+from .stream import StreamAssembler
 
 
 def _get_width(max_cols: Optional[int]) -> int:
@@ -28,10 +30,10 @@ async def run_tui_native_attach(
     """
     Run the terminal-native TUI connected to a gateway WebSocket.
 
-    - WebSocket reader task dispatches events to StreamAssembler and prints
-      new assistant/tool output on agent_complete (append only).
-    - prompt_toolkit input loop: on submit send message to gateway and append
-      user message to stdout.
+    WebSocket runs via GatewayWsConnection in the same event loop. The TUI
+    sends outbound via conn.send_* (e.g. send_message, send_abort); inbound
+    messages are dispatched to handlers (from make_handlers) which update
+    StreamAssembler and output_put (body_lines + app invalidate). No queue.
 
     Args:
         ws_url: WebSocket URL (e.g. ws://127.0.0.1:7682/ws)
@@ -53,11 +55,7 @@ async def run_tui_native_attach(
         ) from e
 
     width = _get_width(max_cols)
-    queue_ref: list = []
-    loop_ref: list = []
-    ready_event = threading.Event()
-    thread_queue: queue.Queue = queue.Queue()
-    output_queue: queue.Queue = queue.Queue()
+    ready_event = asyncio.Event()
 
     base_url = (
         ws_url.replace("ws://", "http://")
@@ -75,78 +73,54 @@ async def run_tui_native_attach(
         "connection": "connecting",
     }
 
-    def run_async_main() -> None:
-        asyncio.run(
-            run_ws_loop(
-                ws_url,
-                width,
-                queue_ref,
-                loop_ref,
-                ready_event,
-                thread_queue=thread_queue,
-                output_queue=output_queue,
-                header_state=header_state,
-                ui_state=ui_state,
-            )
-        )
+    body_lines: list[str] = []
+    app_ref: list[Any] = []
+    assembler = StreamAssembler()
+    last_output_count: list[int] = [0]
 
-    ws_thread = threading.Thread(target=run_async_main, daemon=False)
-    ws_thread.start()
+    def output_put(line: str) -> None:
+        body_lines.append(line)
+        if app_ref:
+            app_ref[0].invalidate()
 
-    ready_event.wait(timeout=15.0)
-    if not queue_ref or not loop_ref:
+    handlers = make_handlers(
+        assembler, width, output_put, last_output_count, header_state, ui_state
+    )
+    conn = GatewayWsConnection(
+        ws_url, handlers, ready_event, header_state=header_state, ui_state=ui_state
+    )
+    ws_task = asyncio.create_task(conn.run())
+
+    try:
+        await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+    except asyncio.TimeoutError:
         print("[system] Connection timed out.", flush=True)
+        ws_task.cancel()
+        try:
+            await ws_task
+        except asyncio.CancelledError:
+            pass
         return
 
-    # Body lines (with ANSI) rendered via FormattedTextControl(ANSI(...)) so colors display.
-    body_lines: list[str] = [
-        "[system] Connected (native). Type /help for commands.",
-    ]
+    body_lines.append("[system] Connected (native). Type /help for commands.")
 
     input_buffer = Buffer(name="input", multiline=False)
-
     kb = KeyBindings()
-    app_ref: list = []
-
-    def _poll_output() -> None:
-        try:
-            while True:
-                line = output_queue.get_nowait()
-                body_lines.append(line)
-        except queue.Empty:
-            pass
-        app = app_ref[0] if app_ref else None
-        if app is not None:
-            app.invalidate()
-
-    def _schedule_poll() -> None:
-        from prompt_toolkit.application import get_app
-        _poll_output()
-        try:
-            get_app().call_later(0.15, _schedule_poll)
-        except Exception:
-            pass
 
     def _accept_input(event: Any) -> None:
         from prompt_toolkit.application import get_app
+
         text = (input_buffer.text or "").strip()
         input_buffer.reset()
-        result = handle_input(text, base_url, thread_queue, body_lines)
+        result = handle_input(text, base_url, conn, body_lines)
         if result == "exit":
-            try:
-                thread_queue.put(None)
-            except Exception:
-                pass
+            asyncio.get_running_loop().create_task(conn.close())
             get_app().exit()
             return
         if result == "handled":
             get_app().invalidate()
             return
         if result == "send":
-            try:
-                thread_queue.put(text)
-            except Exception as e:
-                body_lines.append(f"[system] Failed to send: {e}")
             get_app().invalidate()
 
     @kb.add("enter")
@@ -156,28 +130,29 @@ async def run_tui_native_attach(
 
     @kb.add("c-p")
     def _on_ctrl_p(_event: Any) -> None:
-        open_picker("session", base_url, thread_queue, body_lines)
+        open_picker("session", base_url, conn, body_lines)
         from prompt_toolkit.application import get_app
+
         get_app().invalidate()
 
     @kb.add("c-g")
     def _on_ctrl_g(_event: Any) -> None:
-        open_picker("agent", base_url, thread_queue, body_lines)
+        open_picker("agent", base_url, conn, body_lines)
         from prompt_toolkit.application import get_app
+
         get_app().invalidate()
 
     @kb.add("c-l")
     def _on_ctrl_l(_event: Any) -> None:
-        open_picker("model", base_url, thread_queue, body_lines)
+        open_picker("model", base_url, conn, body_lines)
         from prompt_toolkit.application import get_app
+
         get_app().invalidate()
 
     def _do_exit() -> None:
-        try:
-            thread_queue.put(None)
-        except Exception:
-            pass
+        asyncio.get_running_loop().create_task(conn.close())
         from prompt_toolkit.application import get_app
+
         get_app().exit()
 
     @kb.add("c-c")
@@ -188,22 +163,21 @@ async def run_tui_native_attach(
     @kb.add("escape")
     def _on_escape(_event: Any) -> None:
         """Esc: abort current turn (same as /abort)."""
-        try:
-            thread_queue.put(("abort",))
-        except Exception:
-            pass
+        asyncio.get_running_loop().create_task(conn.send_abort())
         from prompt_toolkit.application import get_app
+
         get_app().invalidate()
 
     from .layout import build_layout
-    layout = build_layout(width, base_url, header_state, ui_state, body_lines, input_buffer)
 
+    layout = build_layout(
+        width, base_url, header_state, ui_state, body_lines, input_buffer
+    )
     app = Application(
         layout=layout,
         key_bindings=kb,
         full_screen=True,
         mouse_support=False,
-        after_render=lambda _: _schedule_poll(),
     )
     app_ref.append(app)
 
@@ -211,8 +185,9 @@ async def run_tui_native_attach(
         await app.run_async()
     finally:
         app_ref.clear()
+        await conn.close()
+        ws_task.cancel()
         try:
-            thread_queue.put(None)
-        except Exception:
+            await ws_task
+        except asyncio.CancelledError:
             pass
-        ws_thread.join(timeout=5.0)
