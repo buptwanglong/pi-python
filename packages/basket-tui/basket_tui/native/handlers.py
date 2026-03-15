@@ -1,0 +1,56 @@
+"""
+Gateway handler factory: build GatewayHandlers that delegate to dispatch handle_*.
+"""
+
+from typing import Callable, Optional
+
+from .dispatch import (
+    handle_agent_aborted,
+    handle_agent_complete,
+    handle_agent_error,
+    handle_agent_switched,
+    handle_session_switched,
+    handle_system,
+    handle_text_delta,
+    handle_thinking_delta,
+    handle_tool_call_end,
+    handle_tool_call_start,
+)
+from .stream import StreamAssembler
+from .types import GatewayHandlers
+
+
+def make_handlers(
+    assembler: StreamAssembler,
+    width: int,
+    output_put: Callable[[str], None],
+    last_output_count: list[int],
+    header_state: Optional[dict[str, str]] = None,
+    ui_state: Optional[dict[str, str]] = None,
+) -> GatewayHandlers:
+    """Build GatewayHandlers that delegate to dispatch handle_* with closed-over state."""
+    handlers: GatewayHandlers = {
+        "on_text_delta": lambda delta: handle_text_delta(assembler, delta, ui_state),
+        "on_thinking_delta": lambda delta: handle_thinking_delta(assembler, delta),
+        "on_tool_call_start": lambda tool_name, arguments=None: handle_tool_call_start(
+            assembler, tool_name, arguments=arguments, ui_state=ui_state
+        ),
+        "on_tool_call_end": lambda tool_name, result=None, error=None: handle_tool_call_end(
+            assembler, tool_name, result=result, error=error
+        ),
+        "on_agent_complete": lambda: handle_agent_complete(
+            assembler, width, output_put, last_output_count, ui_state=ui_state
+        ),
+        "on_agent_error": lambda error: handle_agent_error(
+            output_put, error, ui_state=ui_state
+        ),
+        "on_session_switched": lambda session_id: handle_session_switched(
+            header_state, output_put, session_id
+        ),
+        "on_agent_switched": lambda agent_name: handle_agent_switched(
+            header_state, output_put, agent_name
+        ),
+        "on_agent_aborted": lambda: handle_agent_aborted(assembler, output_put),
+        "on_system": lambda event, payload: handle_system(event, payload, output_put),
+    }
+    return handlers
