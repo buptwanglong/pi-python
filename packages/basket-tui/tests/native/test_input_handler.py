@@ -1,7 +1,7 @@
 """Tests for native input_handler."""
 
-import queue
-from unittest.mock import patch
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -9,52 +9,90 @@ from basket_tui.native.commands import HELP_LINES
 from basket_tui.native.input_handler import handle_input, open_picker
 
 
+def _make_mock_connection():
+    conn = AsyncMock()
+    conn.send_message = AsyncMock()
+    conn.send_abort = AsyncMock()
+    conn.send_new_session = AsyncMock()
+    conn.send_switch_session = AsyncMock()
+    conn.send_switch_agent = AsyncMock()
+    return conn
+
+
 def test_handle_input_empty_returns_handled():
-    q = queue.Queue()
+    mock_conn = _make_mock_connection()
     body: list[str] = []
-    assert handle_input("", "http://localhost", q, body) == "handled"
-    assert handle_input("   ", "http://localhost", q, body) == "handled"
+    assert handle_input("", "http://localhost", mock_conn, body) == "handled"
+    assert handle_input("   ", "http://localhost", mock_conn, body) == "handled"
 
 
 def test_handle_input_exit_returns_exit():
-    q = queue.Queue()
+    mock_conn = _make_mock_connection()
     body: list[str] = []
-    assert handle_input("/exit", "http://localhost", q, body) == "exit"
+    assert handle_input("/exit", "http://localhost", mock_conn, body) == "exit"
 
 
-def test_handle_input_plain_text_returns_send():
-    q = queue.Queue()
+@pytest.mark.asyncio
+async def test_handle_input_plain_text_returns_send():
+    mock_conn = _make_mock_connection()
     body: list[str] = []
-    assert handle_input("hello", "http://localhost", q, body) == "send"
+    result = handle_input("hello", "http://localhost", mock_conn, body)
+    assert result == "send"
+    await asyncio.sleep(0.05)
+    mock_conn.send_message.assert_called_once_with("hello")
 
 
 def test_handle_input_help_returns_handled_and_appends_help_lines():
-    q = queue.Queue()
+    mock_conn = _make_mock_connection()
     body: list[str] = []
-    assert handle_input("/help", "http://localhost", q, body) == "handled"
+    assert handle_input("/help", "http://localhost", mock_conn, body) == "handled"
     assert len(body) >= len(HELP_LINES)
     for line in HELP_LINES:
         assert line in body
 
 
 def test_handle_input_unknown_slash_returns_handled_and_appends_message():
-    q = queue.Queue()
+    mock_conn = _make_mock_connection()
     body: list[str] = []
-    assert handle_input("/unknown", "http://localhost", q, body) == "handled"
+    assert handle_input("/unknown", "http://localhost", mock_conn, body) == "handled"
     assert any("Unknown command" in line for line in body)
 
 
-def test_open_picker_session_puts_switch_session_when_picker_returns_id():
-    q = queue.Queue()
+@pytest.mark.asyncio
+async def test_handle_input_abort_calls_send_abort():
+    mock_conn = _make_mock_connection()
+    body: list[str] = []
+    result = handle_input("/abort", "http://localhost", mock_conn, body)
+    assert result == "handled"
+    await asyncio.sleep(0.05)
+    mock_conn.send_abort.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_input_new_calls_send_new_session():
+    mock_conn = _make_mock_connection()
+    body: list[str] = []
+    result = handle_input("/new", "http://localhost", mock_conn, body)
+    assert result == "handled"
+    await asyncio.sleep(0.05)
+    mock_conn.send_new_session.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_open_picker_session_puts_switch_session_when_picker_returns_id():
+    mock_conn = _make_mock_connection()
     body: list[str] = []
     with patch("basket_tui.native.input_handler.run_session_picker", return_value="sid-123"):
-        open_picker("session", "http://localhost", q, body)
-    assert q.get_nowait() == ("switch_session", "sid-123")
+        open_picker("session", "http://localhost", mock_conn, body)
+    await asyncio.sleep(0.05)
+    mock_conn.send_switch_session.assert_called_once_with("sid-123")
 
 
-def test_open_picker_agent_puts_switch_agent_when_picker_returns_name():
-    q = queue.Queue()
+@pytest.mark.asyncio
+async def test_open_picker_agent_puts_switch_agent_when_picker_returns_name():
+    mock_conn = _make_mock_connection()
     body: list[str] = []
     with patch("basket_tui.native.input_handler.run_agent_picker", return_value="explore"):
-        open_picker("agent", "http://localhost", q, body)
-    assert q.get_nowait() == ("switch_agent", "explore")
+        open_picker("agent", "http://localhost", mock_conn, body)
+    await asyncio.sleep(0.05)
+    mock_conn.send_switch_agent.assert_called_once_with("explore")
