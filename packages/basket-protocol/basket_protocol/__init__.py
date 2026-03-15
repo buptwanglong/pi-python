@@ -15,14 +15,29 @@ from .inbound import (
     Unknown,
     parse_inbound,
 )
+from .outbound import (
+    Abort,
+    Message,
+    NewSession,
+    OutboundMessage,
+    SwitchAgent,
+    SwitchSession,
+    serialize_outbound,
+)
 
 __all__ = [
+    "Abort",
     "AgentAborted",
     "AgentComplete",
     "AgentError",
     "AgentSwitched",
     "InboundMessage",
+    "Message",
+    "NewSession",
+    "OutboundMessage",
     "SessionSwitched",
+    "SwitchAgent",
+    "SwitchSession",
     "System",
     "TextDelta",
     "ThinkingDelta",
@@ -30,4 +45,5 @@ __all__ = [
     "ToolCallStart",
     "Unknown",
     "parse_inbound",
+    "serialize_outbound",
 ]
