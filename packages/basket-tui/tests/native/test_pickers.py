@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from basket_tui.native.pickers import (
+from basket_tui.native.ui.pickers import (
     _fetch_agents,
     _fetch_models,
     _fetch_sessions,

@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basket_tui.native.commands import HELP_LINES
-from basket_tui.native.input_handler import handle_input, open_picker
+from basket_tui.native.ui import HELP_LINES, handle_input, open_picker
 
 
 def _make_mock_connection():
@@ -82,7 +81,7 @@ async def test_handle_input_new_calls_send_new_session():
 async def test_open_picker_session_puts_switch_session_when_picker_returns_id():
     mock_conn = _make_mock_connection()
     body: list[str] = []
-    with patch("basket_tui.native.input_handler.run_session_picker", return_value="sid-123"):
+    with patch("basket_tui.native.ui.input_handler.run_session_picker", return_value="sid-123"):
         open_picker("session", "http://localhost", mock_conn, body)
     await asyncio.sleep(0.05)
     mock_conn.send_switch_session.assert_called_once_with("sid-123")
@@ -92,7 +91,7 @@ async def test_open_picker_session_puts_switch_session_when_picker_returns_id():
 async def test_open_picker_agent_puts_switch_agent_when_picker_returns_name():
     mock_conn = _make_mock_connection()
     body: list[str] = []
-    with patch("basket_tui.native.input_handler.run_agent_picker", return_value="explore"):
+    with patch("basket_tui.native.ui.input_handler.run_agent_picker", return_value="explore"):
         open_picker("agent", "http://localhost", mock_conn, body)
     await asyncio.sleep(0.05)
     mock_conn.send_switch_agent.assert_called_once_with("explore")
