@@ -1,17 +1,12 @@
 """
-Pi TUI - Terminal UI Framework for Pi Coding Agent
+Basket TUI - Terminal-native TUI (line output + prompt_toolkit).
 
-A Textual-based TUI framework for building interactive terminal applications
-with support for:
-- Markdown rendering with syntax highlighting
-- Multi-line input with autocomplete
-- Streaming LLM responses in real-time
-- Tool execution display
-- Theming and CSS styling
+Provides run_tui_native_attach to connect to the gateway WebSocket and run
+the terminal-native UI with slash commands and pickers.
 """
 
-from .app import PiCodingAgentApp
+from .native.run import run_tui_native_attach
 
 __version__ = "0.1.0"
 
-__all__ = ["PiCodingAgentApp"]
+__all__ = ["run_tui_native_attach"]

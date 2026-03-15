@@ -1,26 +1,13 @@
-# Pi TUI
+# Basket TUI
 
-Terminal UI framework for Pi Coding Agent, built with [Textual](https://github.com/Textualize/textual).
+Terminal-native TUI for Basket: line-by-line output with [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit) input. Connects to the basket-gateway WebSocket.
 
 ## Features
 
-- 🎨 **Rich Terminal UI** - Beautiful, interactive interface with Markdown rendering
-- 🔄 **Real-time Streaming** - Display LLM responses as they arrive
-- 🛠️ **Tool Visualization** - Show tool calls and results inline
-- 🎭 **Theming** - Light/dark mode with CSS styling
-- ⌨️ **Keyboard Shortcuts** - Efficient navigation and control
-
-## Design Philosophy
-
-Pi TUI follows Claude Code's minimal aesthetic:
-
-- **No decorative elements** - No emojis, complex borders, or visual noise
-- **Information hierarchy through spacing** - Use whitespace and indentation
-- **Subtle color accents** - Left border highlights for role identification
-- **Clean typography** - Let content speak for itself
-- **Progressive disclosure** - Show essential info first, details available
-
-This creates a professional, focused interface that doesn't distract from the content.
+- **Line output** – Assistant and tool output printed as lines (no full-screen Textual UI)
+- **prompt_toolkit input** – Single-line input with history
+- **Slash commands** – `/help`, `/new`, `/abort`, `/session`, `/agent`, `/model`
+- **Pickers** – Ctrl+P (session), Ctrl+G (agent), Ctrl+L (model)
 
 ## Installation
 
@@ -30,57 +17,31 @@ poetry install
 
 ## Usage
 
-### Standalone
+Typically used via the Basket CLI (gateway + native TUI):
 
-Run the TUI app directly:
-
-```python
-from basket_tui import PiCodingAgentApp
-
-app = PiCodingAgentApp()
-app.run()
+```bash
+basket tui          # same as tui-native
+basket tui-native   # or short: basket tn
 ```
 
-### With Agent
-
-Integrate with Pi Agent:
+Programmatic:
 
 ```python
-from basket_tui import PiCodingAgentApp
-from pi_agent import Agent
+from basket_tui import run_tui_native_attach
 
-agent = Agent(...)
-app = PiCodingAgentApp(agent=agent)
-
-# Connect agent events
-agent.on("text_delta", lambda e: app.append_text(e["delta"]))
-agent.on("thinking_delta", lambda e: app.append_thinking(e["delta"]))
-agent.on("agent_tool_call_start", lambda e: app.show_tool_call(e["tool_name"]))
-
-app.run()
+# Connect to gateway WebSocket and run the native TUI
+await run_tui_native_attach("ws://127.0.0.1:7682/ws", agent_name="default", max_cols=120)
 ```
-
-## Keyboard Shortcuts
-
-- `Ctrl+C` - Quit
-- `Ctrl+L` - Clear output
-- `Ctrl+D` - Toggle dark/light mode
 
 ## Development
+
+The TUI runs in a single asyncio event loop: WebSocket and prompt_toolkit share the same loop; no threads or `queue.Queue`. Output is pushed via an `output_put` callback (append to body + invalidate).
 
 Run tests:
 
 ```bash
-poetry run pytest tests/ -v
+poetry run pytest tests/native/ -v
 ```
-
-## Architecture
-
-The TUI is built with Textual, a modern Python TUI framework:
-
-- `app.py` - Main application class
-- `components/streaming_log.py` - Custom log widget for streaming content
-- Future components: Markdown viewer, code blocks, autocomplete input
 
 ## License
 
