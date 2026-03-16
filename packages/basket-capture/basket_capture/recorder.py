@@ -5,6 +5,7 @@ import os
 import select
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Union
@@ -34,13 +35,19 @@ def record(
         height: Terminal height for cast header (default 24).
 
     Raises:
-        OSError: If PTY cannot be allocated (e.g. not available on this platform).
+        OSError: If PTY cannot be allocated, executable not found, or spawn fails.
+        RuntimeError: If not running in a TTY (e.g. pipeline or non-interactive).
     """
     if pty is None:
         raise OSError("pty not available on this platform")
+    if not sys.stdin.isatty():
+        raise RuntimeError("请在终端中运行 (run in a terminal)")
 
     output_path = Path(output_path)
-    master_fd, slave_fd = pty.openpty()
+    try:
+        master_fd, slave_fd = pty.openpty()
+    except OSError as e:
+        raise OSError(f"Failed to allocate PTY: {e}") from e
 
     # Set slave window size so child sees correct dimensions
     try:
@@ -53,24 +60,33 @@ def record(
     except (ImportError, OSError):
         pass
 
-    if isinstance(command, str):
-        proc = subprocess.Popen(
-            command,
-            shell=True,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-    else:
-        proc = subprocess.Popen(
-            command,
-            shell=False,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
+    try:
+        if isinstance(command, str):
+            proc = subprocess.Popen(
+                command,
+                shell=True,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                command,
+                shell=False,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+    except FileNotFoundError as e:
+        os.close(slave_fd)
+        os.close(master_fd)
+        raise OSError(f"Executable not found: {e}") from e
+    except OSError as e:
+        os.close(slave_fd)
+        os.close(master_fd)
+        raise OSError(f"Spawn failed: {e}") from e
 
     os.close(slave_fd)
 
@@ -106,7 +122,7 @@ def record(
             stdout_events.append([delay, text])
     except KeyboardInterrupt:
         interrupt_requested = True
-        # Fall through to save
+        # Fall through: finally runs, then current buffer is saved to .cast below
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         try:

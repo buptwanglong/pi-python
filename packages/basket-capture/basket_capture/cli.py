@@ -13,7 +13,15 @@ from basket_capture.recorder import record as recorder_record
 
 def _cmd_generate_prd(cast_path: Path, output_path: Path | None) -> None:
     """Run generate-prd pipeline: parse_cast → infer_regions → detect_interactions → render_prd."""
-    cast_result = parse_cast(cast_path)
+    try:
+        cast_result = parse_cast(cast_path)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
     regions = infer_regions(cast_result)
     interactions = detect_interactions(cast_result)
     analysis = AnalysisResult(
@@ -22,7 +30,15 @@ def _cmd_generate_prd(cast_path: Path, output_path: Path | None) -> None:
         screenshots=[],
     )
     out = output_path or (cast_path.parent / f"{cast_path.stem}_prd.md")
-    render_prd(analysis, out)
+    try:
+        render_prd(analysis, out)
+    except OSError as e:
+        print(f"Error: cannot write output to {out}: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except PermissionError as e:
+        print(f"Error: output path not writable: {out}: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
     print(f"PRD written to {out}", file=sys.stderr)
 
 
@@ -33,7 +49,15 @@ def _cmd_record(
     timeout: float | None,
 ) -> None:
     """Record command to .cast; optionally run generate-prd on the result."""
-    recorder_record(command, output_path, timeout=timeout)
+    try:
+        recorder_record(command, output_path, timeout=timeout)
+    except OSError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
     print(f"Cast written to {output_path}", file=sys.stderr)
     if auto_generate:
         _cmd_generate_prd(output_path, None)

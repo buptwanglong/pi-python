@@ -41,12 +41,26 @@ def parse_cast(path: str | Path) -> CastResult:
         raise FileNotFoundError(f"Cast file not found: {path}")
 
     raw = path.read_text(encoding="utf-8")
-    data = json.loads(raw)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid or corrupted cast file (not valid JSON): {path}: {e}"
+        ) from e
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid cast file: root must be a JSON object: {path}"
+        )
 
     version = data.get("version", 2)
     width = int(data.get("width", 80))
     height = int(data.get("height", 24))
-    stdout: list[list[float | str]] = data.get("stdout", [])
+    stdout = data.get("stdout", [])
+    if not isinstance(stdout, list):
+        raise ValueError(
+            f"Invalid cast file: 'stdout' must be a list: {path}"
+        )
 
     cumulative = 0.0
     frames: list[CastFrame] = []

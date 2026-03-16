@@ -7,6 +7,30 @@ from pydantic import BaseModel, Field
 from basket_capture.layout import Region
 from basket_capture.interactions import Interaction
 
+# Embedded default so the package works even if prd_template.md is removed
+DEFAULT_TEMPLATE = """# PRD (Product Requirements Document)
+
+## Layout
+
+{{layout}}
+
+## Components
+
+{{components}}
+
+## Shortcuts
+
+{{shortcuts}}
+
+## Flows
+
+{{flows}}
+
+## Screenshots
+
+{{screenshots}}
+"""
+
 
 class AnalysisResult(BaseModel):
     """Result of layout + interaction analysis for PRD rendering."""
@@ -22,7 +46,7 @@ def _template_path() -> Path:
 
 def _format_layout(regions: list[Region]) -> str:
     if not regions:
-        return "No layout regions inferred."
+        return "布局未识别"
     lines = ["| Type | Start line | End line |"]
     lines.append("|------|------------|----------|")
     for r in regions:
@@ -32,7 +56,7 @@ def _format_layout(regions: list[Region]) -> str:
 
 def _format_components(regions: list[Region]) -> str:
     if not regions:
-        return "No components."
+        return "布局未识别"
     return "\n".join(f"- **{r.type}** (lines {r.start_line}–{r.end_line})" for r in regions)
 
 
@@ -65,10 +89,10 @@ def render_prd(
     No LLM calls.
     """
     template_path = _template_path()
-    if not template_path.exists():
-        raise FileNotFoundError(f"PRD template not found: {template_path}")
-
-    text = template_path.read_text(encoding="utf-8")
+    if template_path.exists():
+        text = template_path.read_text(encoding="utf-8")
+    else:
+        text = DEFAULT_TEMPLATE
 
     text = text.replace("{{layout}}", _format_layout(analysis_result.layout))
     text = text.replace("{{components}}", _format_components(analysis_result.layout))
