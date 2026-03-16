@@ -1,0 +1,1 @@
+{"version": 2, "width": 80, "height": 24, "timestamp": 1234567890, "env": {}, "title": "", "stdout": [[0.1, "hello"], [0.2, " world\n"], [0.05, "done\n"]]}
