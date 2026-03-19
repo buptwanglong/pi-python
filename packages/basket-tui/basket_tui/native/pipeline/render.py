@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 # 256-color friendly backgrounds (avoid role-prefix labels; color carries meaning).
 _USER_PANEL_STYLE = "on grey23"
 _USER_TEXT_STYLE = "white on grey23"
-# Dark grey (grey19) so tool block is not bright; header uses dim green tint.
-_TOOL_BG = "on grey19"
-_TOOL_HEADER_STYLE = "bold dim yellow on grey19"
-_TOOL_BODY_STYLE = "dim white on grey19"
+# Dark green (256 color 22) so tool block is distinct from user (grey23).
+_TOOL_BG = "on color(22)"
+_TOOL_HEADER_STYLE = "bold yellow on color(22)"
+_TOOL_BODY_STYLE = "dim white on color(22)"
 
 
 def stream_preview_lines(text: str, width: int) -> list[str]:

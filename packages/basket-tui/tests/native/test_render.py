@@ -109,3 +109,13 @@ def test_render_messages_markdown_code_block():
     assert len(lines) >= 1
     text = "".join(lines)
     assert "hi" in text or "print" in text
+
+
+def test_render_messages_tool_block_uses_green_style_not_grey19():
+    """Tool block uses green background (256-color) so it's distinct from user (grey23)."""
+    messages = [{"role": "tool", "content": "read_file\nok"}]
+    lines = render_messages(messages, width=80)
+    text = "\n".join(lines)
+    # Tool block must not use grey19 (user block uses grey23); we use color(22) dark green
+    assert "grey19" not in text, "Tool block should not use grey19"
+    assert "read_file" in text and "ok" in text
