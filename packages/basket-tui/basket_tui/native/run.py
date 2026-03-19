@@ -7,13 +7,24 @@ WebSocket runs via GatewayWsConnection; TUI sends via conn.send_* and receives v
 import asyncio
 import logging
 import shutil
+import time
 from typing import Any, Optional
 
 from .connection import GatewayWsConnection
 from .handle import make_handlers
 from .logging_config import setup_logging
 from .pipeline import StreamAssembler
-from .ui import build_layout, handle_input, open_picker
+from .ui import (
+    ExitConfirmState,
+    build_banner_lines,
+    build_layout,
+    collect_doctor_notices,
+    format_doctor_panel,
+    format_footer,
+    handle_input,
+    open_picker,
+    resolve_basket_version,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +128,14 @@ async def run_tui_native_attach(
         logger.info("Connection ready", extra={})
     except asyncio.TimeoutError:
         logger.error("Connection timeout", extra={"timeout_sec": 15.0})
+        for line in build_banner_lines(resolve_basket_version()):
+            print(line, flush=True)
+        notices = collect_doctor_notices(
+            ws_url=ws_url,
+            connection_error="Connection timed out after 15s",
+        )
+        for line in format_doctor_panel(notices, width):
+            print(line, flush=True)
         print("[system] Connection timed out.", flush=True)
         ws_task.cancel()
         try:
@@ -126,6 +145,75 @@ async def run_tui_native_attach(
         return
 
     body_lines.append("[system] Connected (native). Type /help for commands.")
+
+    banner_lines = build_banner_lines(resolve_basket_version())
+    doctor_lines: list[str] = []
+
+    phase_mark: list[float | None] = [None]
+    last_seen_phase: list[str] = [""]
+    spinner_idx: list[int] = [0]
+
+    def _sync_phase_clock() -> None:
+        p = ui_state.get("phase", "idle")
+        if p != last_seen_phase[0]:
+            last_seen_phase[0] = p
+            if p in ("tool_running", "streaming"):
+                phase_mark[0] = time.monotonic()
+            else:
+                phase_mark[0] = None
+
+    def _elapsed_s() -> int:
+        m = phase_mark[0]
+        if m is None:
+            return 0
+        return int(time.monotonic() - m)
+
+    exit_confirm = ExitConfirmState()
+    exit_arm_task: list[asyncio.Task[None] | None] = [None]
+    ticker_task: list[asyncio.Task[None] | None] = [None]
+
+    def schedule_exit_arm_reset() -> None:
+        async def _later() -> None:
+            try:
+                await asyncio.sleep(8.0)
+            except asyncio.CancelledError:
+                raise
+            exit_confirm.reset_pending()
+            if app_ref:
+                app_ref[0].invalidate()
+
+        prev = exit_arm_task[0]
+        if prev is not None and not prev.done():
+            prev.cancel()
+        exit_arm_task[0] = asyncio.create_task(_later())
+
+    def footer_plain() -> str:
+        _sync_phase_clock()
+        return format_footer(
+            connection=ui_state.get("connection", "?"),
+            phase=ui_state.get("phase", "idle"),
+            elapsed_s=_elapsed_s(),
+            spinner_index=spinner_idx[0],
+            exit_pending=exit_confirm.is_pending,
+        )
+
+    async def _footer_ticker() -> None:
+        try:
+            while True:
+                await asyncio.sleep(0.25)
+                spinner_idx[0] += 1
+                if app_ref:
+                    app_ref[0].invalidate()
+        except asyncio.CancelledError:
+            pass
+
+    def _cancel_aux_tasks() -> None:
+        t_arm = exit_arm_task[0]
+        if t_arm is not None and not t_arm.done():
+            t_arm.cancel()
+        t_tick = ticker_task[0]
+        if t_tick is not None and not t_tick.done():
+            t_tick.cancel()
 
     input_buffer = Buffer(name="input", multiline=False)
     kb = KeyBindings()
@@ -138,6 +226,7 @@ async def run_tui_native_attach(
         result = handle_input(text, base_url, conn, body_lines)
         logger.info("User input received", extra={"text_len": len(text), "result": result})
         if result == "exit":
+            _cancel_aux_tasks()
             asyncio.get_running_loop().create_task(conn.close())
             get_app().exit()
             return
@@ -177,6 +266,7 @@ async def run_tui_native_attach(
 
     def _do_exit() -> None:
         logger.info("TUI shutting down", extra={})
+        _cancel_aux_tasks()
         asyncio.get_running_loop().create_task(conn.close())
         from prompt_toolkit.application import get_app
 
@@ -185,7 +275,13 @@ async def run_tui_native_attach(
     @kb.add("c-c")
     @kb.add("c-d")
     def _on_exit(_event: Any) -> None:
-        _do_exit()
+        from prompt_toolkit.application import get_app
+
+        if exit_confirm.handle_ctrl_c():
+            _do_exit()
+            return
+        schedule_exit_arm_reset()
+        get_app().invalidate()
 
     @kb.add("escape")
     def _on_escape(_event: Any) -> None:
@@ -196,7 +292,15 @@ async def run_tui_native_attach(
         get_app().invalidate()
 
     layout = build_layout(
-        width, base_url, header_state, ui_state, body_lines, input_buffer
+        width,
+        base_url,
+        header_state,
+        ui_state,
+        body_lines,
+        input_buffer,
+        banner_lines=banner_lines,
+        doctor_lines=doctor_lines,
+        footer_line=footer_plain,
     )
     app = Application(
         layout=layout,
@@ -206,10 +310,25 @@ async def run_tui_native_attach(
     )
     app_ref.append(app)
 
+    ticker_task[0] = asyncio.create_task(_footer_ticker())
     try:
         await app.run_async()
     finally:
         logger.info("TUI cleanup complete", extra={})
+        t_arm = exit_arm_task[0]
+        if t_arm is not None and not t_arm.done():
+            t_arm.cancel()
+            try:
+                await t_arm
+            except asyncio.CancelledError:
+                pass
+        t_tick = ticker_task[0]
+        if t_tick is not None and not t_tick.done():
+            t_tick.cancel()
+            try:
+                await t_tick
+            except asyncio.CancelledError:
+                pass
         app_ref.clear()
         await conn.close()
         ws_task.cancel()

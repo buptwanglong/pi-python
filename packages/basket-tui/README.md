@@ -5,9 +5,12 @@ Terminal-native TUI for Basket: line-by-line output with [prompt_toolkit](https:
 ## Features
 
 - **Line output** – Assistant and tool output printed as lines (no full-screen Textual UI)
+- **Banner + chrome** – Startup banner (version + tagline), two-line header (URL/connection, agent/session), optional boxed **Doctor** panel when the gateway cannot be reached (local heuristics only)
+- **Status bar** – Connection state, phase (`running` / `streaming` with elapsed seconds + braille spinner, or `idle` / `error`), OpenClaw-style footer
 - **prompt_toolkit input** – Single-line input with history
 - **Slash commands** – `/help`, `/new`, `/abort`, `/session`, `/agent`, `/model`
 - **Pickers** – Ctrl+P (session), Ctrl+G (agent), Ctrl+L (model)
+- **Exit** – **Ctrl+C** or **Ctrl+D** twice to quit (first press arms “press again”; **`/exit`** quits immediately). Pending exit clears after 8s of inactivity.
 
 ## Installation
 
