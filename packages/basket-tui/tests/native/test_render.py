@@ -5,6 +5,7 @@ import re
 import pytest
 
 from basket_tui.native.pipeline import render_messages
+from basket_tui.native.pipeline.render import stream_preview_lines
 
 
 def _visible_width(line: str) -> int:
@@ -74,6 +75,29 @@ def test_render_messages_very_long_line_renders():
     lines = render_messages(messages, width=40)
     assert len(lines) >= 1
     assert any("x" in line for line in lines)
+
+
+def test_stream_preview_lines_empty_returns_empty_list():
+    assert stream_preview_lines("", 80) == []
+
+
+def test_stream_preview_lines_short_line_one_line():
+    assert stream_preview_lines("hello", 80) == ["hello"]
+
+
+def test_stream_preview_lines_long_line_wraps():
+    text = "a" * 100
+    lines = stream_preview_lines(text, 40)
+    assert len(lines) >= 3
+    assert all(len(ln) <= 40 for ln in lines)
+    assert "".join(lines) == text
+
+
+def test_stream_preview_lines_preserves_newlines():
+    text = "line1\nline2"
+    lines = stream_preview_lines(text, 80)
+    assert lines[0] == "line1"
+    assert lines[1] == "line2"
 
 
 def test_render_messages_markdown_code_block():

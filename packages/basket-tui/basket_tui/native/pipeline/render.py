@@ -10,6 +10,7 @@ Visual layering (OpenClaw-style):
 """
 
 import logging
+import textwrap
 from io import StringIO
 from typing import Any
 
@@ -23,9 +24,24 @@ logger = logging.getLogger(__name__)
 # 256-color friendly backgrounds (avoid role-prefix labels; color carries meaning).
 _USER_PANEL_STYLE = "on grey23"
 _USER_TEXT_STYLE = "white on grey23"
-_TOOL_BG = "on dark_green"
-_TOOL_HEADER_STYLE = "bold yellow on dark_green"
-_TOOL_BODY_STYLE = "white on dark_green"
+# Dark grey (grey19) so tool block is not bright; header uses dim green tint.
+_TOOL_BG = "on grey19"
+_TOOL_HEADER_STYLE = "bold dim yellow on grey19"
+_TOOL_BODY_STYLE = "dim white on grey19"
+
+
+def stream_preview_lines(text: str, width: int) -> list[str]:
+    """Plain-text wrap for streaming preview; no Markdown. Returns [] for empty text."""
+    if not text or width <= 0:
+        return []
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+        for wline in textwrap.wrap(paragraph, width=width):
+            lines.append(wline)
+    return lines
 
 
 def _print_assistant(console: Console, content: str) -> None:
@@ -43,7 +59,7 @@ def _print_user_block(console: Console, content: str) -> None:
     console.print(
         Padding(
             Text(content, style=_USER_TEXT_STYLE),
-            pad=(0, 1, 0, 1),
+            pad=(1, 1, 1, 1),
             style=_USER_PANEL_STYLE,
             expand=True,
         )
@@ -63,7 +79,7 @@ def _print_tool_block(console: Console, content: str) -> None:
     console.print(
         Padding(
             inner,
-            pad=(0, 1, 0, 1),
+            pad=(1, 1, 1, 1),
             style=_TOOL_BG,
             expand=True,
         )
@@ -112,7 +128,8 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
             if content:
                 console.print(Text(content, style="yellow"))
 
-        console.print()  # blank line between messages
+        console.print()
+        console.print()  # two blank lines between message blocks
 
     result = out.getvalue().rstrip("\n")
     if not result:
