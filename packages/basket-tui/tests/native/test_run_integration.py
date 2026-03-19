@@ -5,7 +5,7 @@ import re
 import pytest
 
 from basket_tui.native.handle.dispatch import _dispatch_ws_message
-from basket_tui.native.pipeline import StreamAssembler
+from basket_tui.native.pipeline import StreamAssembler, stream_preview_lines
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m|\x1b\]8;;.*?\x1b\\\\")
 
@@ -167,3 +167,42 @@ def test_dispatch_two_rounds_agent_complete():
     combined = _strip_ansi(" ".join(printed))
     assert "First" in combined and "Second" in combined
     assert combined.find("First") < combined.find("Second")
+
+
+def test_streaming_overlay_get_body_lines_includes_preview_when_phase_streaming():
+    """When phase is streaming and buffer non-empty, get_body_lines logic returns body + stream preview."""
+    assembler = StreamAssembler()
+    width = 80
+    body_lines: list[str] = ["existing line"]
+    ui_state: dict[str, str] = {"phase": "streaming"}
+
+    # Simulate text_delta so buffer has content
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "Streaming "},
+        assembler,
+        width,
+        body_lines.append,
+        [0],
+        ui_state=ui_state,
+    )
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "content"},
+        assembler,
+        width,
+        body_lines.append,
+        [0],
+        ui_state=ui_state,
+    )
+
+    # Replicate get_body_lines() logic from run.py
+    def get_body_lines() -> list[str]:
+        base = list(body_lines)
+        if ui_state.get("phase") == "streaming" and assembler._buffer:
+            base.extend(stream_preview_lines(assembler._buffer, width))
+        return base
+
+    lines = get_body_lines()
+    assert lines[0] == "existing line"
+    assert any("Streaming" in ln and "content" in ln for ln in lines[1:]) or (
+        "Streaming content" in " ".join(lines[1:])
+    )
