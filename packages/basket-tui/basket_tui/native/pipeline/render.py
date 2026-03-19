@@ -114,7 +114,9 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
         if role == "assistant":
             if not content:
                 continue
+            console.print()  # one blank line before assistant
             _print_assistant(console, content)
+            console.print()  # one blank line after assistant
         elif role == "user":
             if not content:
                 continue

@@ -119,3 +119,22 @@ def test_render_messages_tool_block_uses_green_style_not_grey19():
     # Tool block must not use grey19 (user block uses grey23); we use color(22) dark green
     assert "grey19" not in text, "Tool block should not use grey19"
     assert "read_file" in text and "ok" in text
+
+
+def test_render_messages_assistant_has_blank_lines_above_and_below():
+    """Assistant content has one blank line before and after."""
+    messages = [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello."},
+        {"role": "user", "content": "Bye"},
+    ]
+    lines = render_messages(messages, width=80)
+    text = "\n".join(lines)
+    idx_hi = text.find("Hi")
+    idx_hello = text.find("Hello")
+    idx_bye = text.find("Bye")
+    assert idx_hi < idx_hello < idx_bye
+    between_hi_hello = text[idx_hi:idx_hello]
+    between_hello_bye = text[idx_hello:idx_bye]
+    assert "\n\n" in between_hi_hello, "blank before assistant"
+    assert "\n\n" in between_hello_bye, "blank after assistant"
