@@ -20,7 +20,7 @@ poetry install
 ## Usage
 
 - `basket` — interactive mode
-- `basket tui` — terminal UI
+- `basket tui` — terminal UI (native: banner + status bar with phase/timer; **press Ctrl+C or Ctrl+D twice** to quit, or `/exit` to quit immediately)
 - `basket --remote` — remote web terminal (for phone/LAN access; see below)
 - `basket "message"` — one-shot
 
