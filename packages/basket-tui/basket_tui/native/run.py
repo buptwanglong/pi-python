@@ -15,7 +15,7 @@ from typing import Any, Optional
 from .connection import GatewayWsConnection
 from .handle import make_handlers
 from .logging_config import setup_logging
-from .pipeline import StreamAssembler, render_messages
+from .pipeline import StreamAssembler, render_messages, stream_preview_lines
 from .ui.scroll_state import (
     at_bottom,
     clamp_scroll,
@@ -156,8 +156,14 @@ async def run_tui_native_attach(
             pass
         return
 
+    def get_body_lines() -> list[str]:
+        base = list(body_lines)
+        if ui_state.get("phase") == "streaming" and assembler._buffer:
+            base.extend(stream_preview_lines(assembler._buffer, width))
+        return base
+
     def _body_line_count() -> int:
-        raw = "\n".join(body_lines)
+        raw = "\n".join(get_body_lines())
         return len(raw.split("\n")) if raw else 0
 
     def get_vertical_scroll(win: Any) -> int:
@@ -376,7 +382,7 @@ async def run_tui_native_attach(
         base_url,
         header_state,
         ui_state,
-        body_lines,
+        get_body_lines,
         input_buffer,
         banner_lines=banner_lines,
         doctor_lines=doctor_lines,

@@ -44,7 +44,7 @@ def build_layout(
     base_url: str,
     header_state: dict[str, str],
     ui_state: dict[str, str],
-    body_lines: list[str],
+    get_body_lines: Callable[[], list[str]],
     input_buffer: Any,
     *,
     banner_lines: list[str] | None = None,
@@ -59,9 +59,12 @@ def build_layout(
 
     The conversation body uses ``wrap_lines=False`` so ``Window.get_vertical_scroll`` is honored
     (wrapped mode uses a different scroll path). Transcript lines should already be width-shaped
-    by ``render_messages``.
+    by ``render_messages``. Body content is obtained by calling ``get_body_lines()`` (may include
+    streaming preview overlay when phase is streaming).
 
     Args:
+        get_body_lines: Callable returning the current list of body lines (committed + optional
+            streaming preview).
         banner_lines: Optional ANSI lines shown at the top (fixed height).
         doctor_lines: Optional ANSI lines (e.g. boxed doctor panel); fixed height.
         footer_line: Callable returning the footer string (may include ANSI); if omitted, uses
@@ -73,7 +76,7 @@ def build_layout(
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             "Building layout",
-            extra={"width": width, "body_lines_count": len(body_lines)},
+            extra={"width": width, "body_lines_count": len(get_body_lines())},
         )
 
     sep_char = "─"
@@ -103,7 +106,7 @@ def build_layout(
         focusable=False,
     )
     body_control = FormattedTextControl(
-        text=lambda: ANSI("\n".join(body_lines)),
+        text=lambda: ANSI("\n".join(get_body_lines())),
         focusable=False,
         show_cursor=False,
         get_cursor_position=get_cursor_position,
