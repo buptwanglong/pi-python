@@ -3,7 +3,13 @@
 import pytest
 from pathlib import Path
 
-from basket_assistant.core import get_skill_base_dir, get_skill_full_content, get_skills_index
+from basket_assistant.core import (
+    get_skill_base_dir,
+    get_skill_full_content,
+    get_skill_references_index,
+    get_skill_scripts_index,
+    get_skills_index,
+)
 
 
 @pytest.fixture
@@ -14,6 +20,12 @@ def skills_dir(tmp_path):
         "---\nname: some-skill\ndescription: A test skill for refactoring\n---\n\n# Some skill\n\nStep 1: Run formatter.\nStep 2: Apply patterns.",
         encoding="utf-8",
     )
+    # some-skill has references/ and scripts/ (engineering-style)
+    (tmp_path / "some-skill" / "references").mkdir()
+    (tmp_path / "some-skill" / "references" / "schema.md").write_text("# Schema", encoding="utf-8")
+    (tmp_path / "some-skill" / "references" / "api_docs.md").write_text("# API", encoding="utf-8")
+    (tmp_path / "some-skill" / "scripts").mkdir()
+    (tmp_path / "some-skill" / "scripts" / "rotate.py").write_text("# rotate", encoding="utf-8")
     (tmp_path / "git-release").mkdir()
     (tmp_path / "git-release" / "SKILL.md").write_text(
         "---\nname: git-release\ndescription: Create consistent releases and changelogs\n---\n\n## What I do\n\n- Draft release notes.",
@@ -64,6 +76,22 @@ def test_get_skill_base_dir(skills_dir):
     assert base.name == "some-skill"
     assert (base / "SKILL.md").exists()
     assert get_skill_base_dir("nonexistent", [skills_dir]) is None
+
+
+def test_get_skill_references_index(skills_dir):
+    """references/ index returns sorted relative paths; missing skill or dir returns []."""
+    refs = get_skill_references_index("some-skill", [skills_dir])
+    assert refs == ["references/api_docs.md", "references/schema.md"]
+    assert get_skill_references_index("git-release", [skills_dir]) == []
+    assert get_skill_references_index("nonexistent", [skills_dir]) == []
+
+
+def test_get_skill_scripts_index(skills_dir):
+    """scripts/ index returns sorted relative paths; missing skill or dir returns []."""
+    scripts = get_skill_scripts_index("some-skill", [skills_dir])
+    assert scripts == ["scripts/rotate.py"]
+    assert get_skill_scripts_index("git-release", [skills_dir]) == []
+    assert get_skill_scripts_index("nonexistent", [skills_dir]) == []
 
 
 def test_name_mismatch_skipped(tmp_path):

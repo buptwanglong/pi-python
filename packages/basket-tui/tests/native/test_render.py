@@ -22,6 +22,26 @@ def test_render_messages_returns_list_of_strings():
     assert len(lines) >= 1
 
 
+def test_render_messages_no_role_prefix_in_output():
+    """User/assistant/tool are distinguished by styling, not [role] prefixes."""
+    text = "".join(
+        render_messages(
+            [
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "收到。"},
+                {"role": "tool", "content": "Exec\n{}"},
+            ],
+            width=80,
+        )
+    )
+    assert "[user]" not in text
+    assert "[assistant]" not in text
+    assert "[tool]" not in text
+    assert "你好" in text
+    assert "收到" in text
+    assert "Exec" in text
+
+
 def test_render_messages_no_line_exceeds_width():
     """Each line has visible length <= width."""
     messages = [

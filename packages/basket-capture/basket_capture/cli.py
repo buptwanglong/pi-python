@@ -1,76 +1,112 @@
-"""CLI for basket-capture: record TUI sessions and generate PRD from .cast files."""
+"""CLI for basket-capture: record TUI sessions to asciinema v2 .cast files."""
+
+from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from basket_capture.cast import parse_cast
-from basket_capture.layout import infer_regions
-from basket_capture.interactions import detect_interactions
-from basket_capture.renderer import AnalysisResult, render_prd
 from basket_capture.recorder import record as recorder_record
+from basket_capture.session_bundle import (
+    SessionBundleWriter,
+    create_session_bundle,
+    default_sessions_parent,
+)
 
 
-def _cmd_generate_prd(cast_path: Path, output_path: Path | None) -> None:
-    """Run generate-prd pipeline: parse_cast → infer_regions → detect_interactions → render_prd."""
-    try:
-        cast_result = parse_cast(cast_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
+def resolve_record_output_path(
+    output: Path | None,
+    *,
+    home: Path | None = None,
+    now: datetime | None = None,
+) -> Path:
+    """
+    Default: ~/.basket/capture/capture-YYYYMMDD-HHMMSS.cast (directory created if needed).
 
-    regions = infer_regions(cast_result)
-    interactions = detect_interactions(cast_result)
-    analysis = AnalysisResult(
-        layout=regions,
-        interactions=interactions,
-        screenshots=[],
-    )
-    out = output_path or (cast_path.parent / f"{cast_path.stem}_prd.md")
-    try:
-        render_prd(analysis, out)
-    except OSError as e:
-        print(f"Error: cannot write output to {out}: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
-    except PermissionError as e:
-        print(f"Error: output path not writable: {out}: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
+    If ``output`` is a path ending in ``.cast``, use that file (parent dirs created).
+    Otherwise treat ``output`` as a directory and write capture-<timestamp>.cast inside it.
+    """
+    root = Path.home() if home is None else home
+    ts = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    filename = f"capture-{ts}.cast"
 
-    print(f"PRD written to {out}", file=sys.stderr)
+    if output is None:
+        out_dir = root / ".basket" / "capture"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir / filename
+
+    out = output.expanduser()
+    if out.suffix.lower() == ".cast":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        return out
+
+    out.mkdir(parents=True, exist_ok=True)
+    return out / filename
+
+
+def resolve_sessions_parent(
+    output: Path | None,
+    *,
+    home: Path | None = None,
+) -> Path:
+    """Parent directory for bundle mode session-* folders."""
+    if output is None:
+        return default_sessions_parent(home)
+    p = output.expanduser()
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _parse_byte(s: str) -> int:
+    return int(s, 0)
 
 
 def _cmd_record(
     command: str,
     output_path: Path,
-    auto_generate: bool,
     timeout: float | None,
+    *,
+    bundle: SessionBundleWriter | None,
+    action_boundary_byte: int,
+    forward_action_boundary: bool,
+    screenshot_cmd: str | None,
 ) -> None:
-    """Record command to .cast; optionally run generate-prd on the result."""
+    """Record command to .cast file (and optional session bundle)."""
     try:
-        recorder_record(command, output_path, timeout=timeout)
+        recorder_record(
+            command,
+            output_path,
+            timeout=timeout,
+            bundle=bundle,
+            action_boundary_byte=action_boundary_byte,
+            forward_action_boundary=forward_action_boundary,
+            screenshot_cmd=screenshot_cmd,
+        )
     except OSError as e:
         print(f"Error: {e}", file=sys.stderr)
         raise SystemExit(1) from e
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         raise SystemExit(1) from e
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(2) from e
 
     print(f"Cast written to {output_path}", file=sys.stderr)
-    if auto_generate:
-        _cmd_generate_prd(output_path, None)
+    if bundle is not None:
+        root = getattr(bundle, "root", None)
+        if root is not None:
+            print(f"Session bundle: {root}", file=sys.stderr)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="basket-capture",
-        description="Record TUI terminal sessions to .cast and generate PRD from cast files.",
+        description="Record TUI terminal sessions to asciinema v2 .cast files.",
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
 
-    # record
     rec = subparsers.add_parser("record", help="Record a command in a PTY to a .cast file")
     rec.add_argument(
         "--command",
@@ -81,13 +117,12 @@ def main() -> None:
     rec.add_argument(
         "--output",
         type=Path,
-        required=True,
-        help="Output .cast file path",
-    )
-    rec.add_argument(
-        "--auto-generate",
-        action="store_true",
-        help="After recording, run generate-prd on the new cast and write PRD next to it",
+        default=None,
+        help=(
+            "Without --bundle: .cast file or directory for capture-*.cast "
+            "(default ~/.basket/capture/). With --bundle: parent directory for "
+            "session-* folders (default ~/.basket/capture/sessions/)."
+        ),
     )
     rec.add_argument(
         "--timeout",
@@ -96,38 +131,67 @@ def main() -> None:
         metavar="SECS",
         help="Max recording time in seconds (default: until process exits)",
     )
-
-    # generate-prd
-    gen = subparsers.add_parser(
-        "generate-prd",
-        help="Parse a .cast file and render a PRD Markdown file",
+    rec.add_argument(
+        "--bundle",
+        action="store_true",
+        help=(
+            "Write a session bundle: session.cast, input.jsonl, actions/*/meta.json, "
+            "session_manifest.json under ~/.basket/capture/sessions/session-TIMESTAMP/ "
+            "(or under --output when combined with --bundle)."
+        ),
     )
-    gen.add_argument(
-        "--cast",
-        type=Path,
-        required=True,
-        help="Input .cast file path",
+    rec.add_argument(
+        "--forward-action-boundary",
+        action="store_true",
+        help=(
+            "Forward the action-boundary byte to the child PTY (default: consume "
+            "Ctrl+\\ / 0x1C so the TUI does not see it)."
+        ),
     )
-    gen.add_argument(
-        "--output",
-        type=Path,
+    rec.add_argument(
+        "--action-boundary-byte",
+        type=_parse_byte,
+        default=0x1C,
+        metavar="N",
+        help="Byte that ends an action segment (default: 0x1C = Ctrl+\\).",
+    )
+    rec.add_argument(
+        "--screenshot-cmd",
         default=None,
-        metavar="PATH",
-        help="Output PRD path (default: same dir as cast, <cast_stem>_prd.md)",
+        metavar="CMD",
+        help=(
+            "Shell command run at each action end; {out_path} is replaced with the "
+            "PNG path (e.g. a script that captures the terminal window)."
+        ),
     )
 
     args = parser.parse_args()
 
     if args.action == "record":
-        _cmd_record(
-            command=args.record_command,
-            output_path=args.output,
-            auto_generate=args.auto_generate,
-            timeout=args.timeout,
-        )
-        return
-    if args.action == "generate-prd":
-        _cmd_generate_prd(args.cast, args.output)
+        if args.bundle:
+            parent = resolve_sessions_parent(args.output, home=None)
+            bundle = create_session_bundle(parent)
+            out = bundle.cast_path
+            _cmd_record(
+                command=args.record_command,
+                output_path=out,
+                timeout=args.timeout,
+                bundle=bundle,
+                action_boundary_byte=args.action_boundary_byte,
+                forward_action_boundary=args.forward_action_boundary,
+                screenshot_cmd=args.screenshot_cmd,
+            )
+        else:
+            out = resolve_record_output_path(args.output)
+            _cmd_record(
+                command=args.record_command,
+                output_path=out,
+                timeout=args.timeout,
+                bundle=None,
+                action_boundary_byte=args.action_boundary_byte,
+                forward_action_boundary=False,
+                screenshot_cmd=None,
+            )
         return
 
     parser.error("Unknown subcommand")

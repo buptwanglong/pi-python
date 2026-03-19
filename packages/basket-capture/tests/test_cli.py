@@ -1,86 +1,78 @@
-"""Integration tests for CLI generate-prd pipeline."""
+"""Integration tests for CLI record command."""
 
 import subprocess
 import sys
-import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from basket_capture.cast import parse_cast
-from basket_capture.layout import infer_regions
-from basket_capture.interactions import detect_interactions
-from basket_capture.renderer import AnalysisResult, render_prd
+from basket_capture.cli import resolve_record_output_path, resolve_sessions_parent
 
 
-def test_cli_generate_prd_nonexistent_cast_exits_nonzero(tmp_path: Path) -> None:
-    """generate-prd with non-existent --cast file prints error and exits with code 1."""
-    nonexistent = tmp_path / "nonexistent.cast"
-    assert not nonexistent.exists()
+def test_resolve_record_output_path_default(tmp_path: Path) -> None:
+    """No --output -> ~/.basket/capture under given home with timestamped name."""
+    fixed = datetime(2026, 3, 19, 14, 30, 5)
+    p = resolve_record_output_path(None, home=tmp_path, now=fixed)
+    assert p == tmp_path / ".basket" / "capture" / "capture-20260319-143005.cast"
+    assert p.parent.is_dir()
+
+
+def test_resolve_record_output_path_explicit_cast(tmp_path: Path) -> None:
+    """--output foo.cast uses that path (no forced timestamp in name)."""
+    out = tmp_path / "mysession.cast"
+    p = resolve_record_output_path(out, home=tmp_path)
+    assert p == out
+    assert p.parent.is_dir()
+
+
+def test_resolve_record_output_path_directory(tmp_path: Path) -> None:
+    """--output somedir/ writes capture-<ts>.cast inside."""
+    fixed = datetime(2026, 1, 2, 3, 4, 5)
+    d = tmp_path / "sessions"
+    p = resolve_record_output_path(d, home=tmp_path, now=fixed)
+    assert p == d / "capture-20260102-030405.cast"
+
+
+def test_cli_record_help() -> None:
+    """record subcommand shows help."""
     result = subprocess.run(
-        [sys.executable, "-m", "basket_capture.cli", "generate-prd", "--cast", str(nonexistent)],
+        [sys.executable, "-m", "basket_capture.cli", "record", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "record" in result.stdout
+    assert ".cast" in result.stdout
+    assert "--output" in result.stdout
+    assert "--bundle" in result.stdout
+    assert "--screenshot-cmd" in result.stdout
+
+
+def test_resolve_sessions_parent_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    p = resolve_sessions_parent(None)
+    assert p == tmp_path / ".basket" / "capture" / "sessions"
+
+
+def test_resolve_sessions_parent_explicit(tmp_path: Path) -> None:
+    custom = tmp_path / "my-sessions"
+    p = resolve_sessions_parent(custom)
+    assert p == custom
+    assert p.is_dir()
+
+
+def test_cli_record_without_output_uses_default_path_not_argparse_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """record without --output resolves default path; fails later if not a TTY."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-m", "basket_capture.cli", "record", "--timeout", "0.01"],
         capture_output=True,
         text=True,
         cwd=tmp_path,
     )
     assert result.returncode != 0
-    assert "Error" in result.stderr or "not found" in result.stderr.lower() or "Cast file" in result.stderr
-
-
-def test_cli_generate_prd_invalid_output_path_exits_nonzero(tmp_path: Path) -> None:
-    """generate-prd with --output pointing to a directory (non-writable as file) exits non-zero."""
-    fixture_dir = Path(__file__).parent / "fixtures"
-    cast_path = fixture_dir / "sample.cast"
-    if not cast_path.exists():
-        pytest.skip("Fixture sample.cast not found")
-    # Output to a path that is a directory -> write will fail
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "basket_capture.cli",
-            "generate-prd",
-            "--cast",
-            str(cast_path),
-            "--output",
-            str(out_dir),
-        ],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-    )
-    assert result.returncode != 0
-    assert "Error" in result.stderr or "write" in result.stderr.lower() or "writable" in result.stderr.lower()
-
-
-def test_generate_prd_pipeline_programmatically() -> None:
-    """Run generate-prd pipeline on fixture and assert output file has expected sections."""
-    fixture_dir = Path(__file__).parent / "fixtures"
-    cast_path = fixture_dir / "sample.cast"
-    assert cast_path.exists(), f"Fixture missing: {cast_path}"
-
-    cast_result = parse_cast(cast_path)
-    regions = infer_regions(cast_result)
-    interactions = detect_interactions(cast_result)
-    analysis = AnalysisResult(
-        layout=regions,
-        interactions=interactions,
-        screenshots=[],
-    )
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".md",
-        delete=False,
-    ) as f:
-        out_path = Path(f.name)
-    try:
-        render_prd(analysis, out_path)
-        content = out_path.read_text(encoding="utf-8")
-        assert "Layout" in content
-        assert "PRD" in content or "Product Requirements" in content
-        assert out_path.exists()
-    finally:
-        out_path.unlink(missing_ok=True)
+    assert "required" not in result.stderr.lower()
+    assert "终端" in result.stderr or "terminal" in result.stderr.lower()

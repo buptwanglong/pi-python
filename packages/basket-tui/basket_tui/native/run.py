@@ -13,7 +13,7 @@ from typing import Any, Optional
 from .connection import GatewayWsConnection
 from .handle import make_handlers
 from .logging_config import setup_logging
-from .pipeline import StreamAssembler
+from .pipeline import StreamAssembler, render_messages
 from .ui import (
     ExitConfirmState,
     build_banner_lines,
@@ -234,8 +234,9 @@ async def run_tui_native_attach(
             get_app().invalidate()
             return
         if result == "send":
-            # Display user message in the UI
-            body_lines.append(f"[user] {text}")
+            # Display user message as gray block (same as render_messages; no [user] prefix).
+            for line in render_messages([{"role": "user", "content": text}], width):
+                body_lines.append(line)
             get_app().invalidate()
 
     @kb.add("enter")

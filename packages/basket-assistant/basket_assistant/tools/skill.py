@@ -7,7 +7,13 @@ from typing import Callable, List, Optional
 
 from pydantic import BaseModel, Field
 
-from basket_assistant.core import get_skill_base_dir, get_skill_full_content, get_skills_index
+from basket_assistant.core import (
+    get_skill_base_dir,
+    get_skill_full_content,
+    get_skill_references_index,
+    get_skill_scripts_index,
+    get_skills_index,
+)
 
 
 class SkillParams(BaseModel):
@@ -61,7 +67,15 @@ def create_skill_tool(
         if base_dir is not None:
             lines.append("")
             lines.append(f"Base directory for this skill: {base_dir}")
-            lines.append("Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.")
+            lines.append(
+                "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory."
+            )
+            refs = get_skill_references_index(name, dirs_inner)
+            scripts = get_skill_scripts_index(name, dirs_inner)
+            if refs:
+                lines.append(f"References (load with read when needed): {', '.join(refs)}")
+            if scripts:
+                lines.append(f"Scripts (run from skill base dir): {', '.join(scripts)}")
         return "\n".join(lines)
 
     return {

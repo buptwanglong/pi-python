@@ -17,6 +17,21 @@ def skill_dir(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def skill_dir_with_resources(tmp_path):
+    """Create a temp dir with one skill that has references/ and scripts/."""
+    (tmp_path / "pdf-rotate").mkdir()
+    (tmp_path / "pdf-rotate" / "SKILL.md").write_text(
+        "---\nname: pdf-rotate\ndescription: Rotate PDF pages\n---\n\n# PDF Rotate\n\nUse scripts/rotate_pdf.py.",
+        encoding="utf-8",
+    )
+    (tmp_path / "pdf-rotate" / "references").mkdir()
+    (tmp_path / "pdf-rotate" / "references" / "api.md").write_text("# API", encoding="utf-8")
+    (tmp_path / "pdf-rotate" / "scripts").mkdir()
+    (tmp_path / "pdf-rotate" / "scripts" / "rotate_pdf.py").write_text("#!/usr/bin/env python", encoding="utf-8")
+    return tmp_path
+
+
 @pytest.mark.asyncio
 async def test_skill_tool_loads_content(skill_dir):
     """Skill tool returns skill content (Markdown with # Skill: name and body)."""
@@ -89,3 +104,27 @@ async def test_skill_tool_not_found_respects_include_ids(skill_dir):
     assert "not found" in result.lower()
     assert "refactor" in result
     assert "other" not in result
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_includes_references_and_scripts_when_present(skill_dir_with_resources):
+    """When skill has references/ and scripts/, tool output lists them."""
+    def dirs_getter():
+        return [skill_dir_with_resources]
+    tool = create_skill_tool(dirs_getter, include_ids=None)
+    result = await tool["execute_fn"](name="pdf-rotate")
+    assert "References (load with read" in result
+    assert "Scripts (run from skill base dir)" in result
+    assert "references/api.md" in result
+    assert "scripts/rotate_pdf.py" in result
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_no_references_scripts_lines_when_absent(skill_dir):
+    """When skill has only SKILL.md, output does not add References/Scripts lines (backward compat)."""
+    def dirs_getter():
+        return [skill_dir]
+    tool = create_skill_tool(dirs_getter, include_ids=None)
+    result = await tool["execute_fn"](name="refactor")
+    assert "References (load with read" not in result
+    assert "Scripts (run from skill base dir)" not in result

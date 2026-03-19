@@ -131,3 +131,43 @@ def get_skill_base_dir(skill_id: str, dirs: List[Path]) -> Optional[Path]:
             continue
         return path.parent
     return None
+
+
+def get_skill_references_index(skill_id: str, dirs: List[Path]) -> List[str]:
+    """
+    Return relative paths of files under this skill's references/ directory.
+    Example: ["references/schema.md", "references/api_docs.md"].
+    Empty list if skill not found or references/ does not exist.
+    """
+    base_dir = get_skill_base_dir(skill_id, dirs)
+    if base_dir is None:
+        return []
+    ref_dir = base_dir / "references"
+    if not ref_dir.is_dir():
+        return []
+    paths = [
+        f"references/{f.name}"
+        for f in sorted(ref_dir.iterdir())
+        if f.is_file()
+    ]
+    return sorted(paths)
+
+
+def get_skill_scripts_index(skill_id: str, dirs: List[Path]) -> List[str]:
+    """
+    Return relative paths of files under this skill's scripts/ directory.
+    Example: ["scripts/rotate_pdf.py", "scripts/validate.sh"].
+    Empty list if skill not found or scripts/ does not exist.
+    """
+    base_dir = get_skill_base_dir(skill_id, dirs)
+    if base_dir is None:
+        return []
+    scripts_dir = base_dir / "scripts"
+    if not scripts_dir.is_dir():
+        return []
+    paths = [
+        f"scripts/{f.name}"
+        for f in sorted(scripts_dir.iterdir())
+        if f.is_file()
+    ]
+    return sorted(paths)

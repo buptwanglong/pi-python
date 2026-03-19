@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "basket-capture"
 version = "0.1.0"
-description = "Record TUI terminal sessions and generate PRD from cast"
+description = "Record TUI terminal sessions to asciinema v2 .cast files"
 authors = ["Pi Python Team"]
 readme = "README.md"
 packages = [{include = "basket_capture"}]
