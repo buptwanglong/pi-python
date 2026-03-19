@@ -11,6 +11,8 @@ _ORANGE = "\x1b[38;2;255;90;45m"
 _ORANGE_LIGHT = "\x1b[38;2;255;138;91m"
 _GRAY = "\x1b[38;2;139;127;119m"
 _RESET = "\x1b[0m"
+BOLD = "\x1b[1m"
+DIM = "\x1b[2m"
 
 _TAGLINE = (
     'Say "stop" and I\'ll stop—say "ship" and we\'ll both learn a lesson.'
@@ -29,14 +31,15 @@ def resolve_basket_version() -> str:
 
 def build_banner_lines(version: str | None = None) -> list[str]:
     """
-    Build 3-line ANSI banner: brand, version, tagline.
+    Build 4-line ANSI banner: brand, version, blank, tagline.
 
     Args:
         version: Explicit version; if omitted, uses :func:`resolve_basket_version`.
     """
     v = (version or "").strip() or resolve_basket_version()
     return [
-        f"{_ORANGE}  Basket{_RESET}",
-        f"{_GRAY}  version {v}{_RESET}",
-        f"{_ORANGE_LIGHT}  {_TAGLINE}{_RESET}",
+        f"{_ORANGE}{BOLD}  Basket{_RESET}",
+        f"{DIM}{_GRAY}  version {v}{_RESET}",
+        "",
+        f"{_ORANGE_LIGHT}  │ {_TAGLINE}{_RESET}",
     ]
