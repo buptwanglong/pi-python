@@ -127,8 +127,18 @@ async def run_tui_native_attach(
         if app_ref:
             app_ref[0].invalidate()
 
+    def _on_streaming_update() -> None:
+        if app_ref:
+            app_ref[0].invalidate()
+
     handlers = make_handlers(
-        assembler, width, output_put, last_output_count, header_state, ui_state
+        assembler,
+        width,
+        output_put,
+        last_output_count,
+        header_state,
+        ui_state,
+        on_streaming_update=_on_streaming_update,
     )
     conn = GatewayWsConnection(
         ws_url, handlers, ready_event, header_state=header_state, ui_state=ui_state

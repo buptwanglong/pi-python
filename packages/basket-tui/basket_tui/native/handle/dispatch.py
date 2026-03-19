@@ -30,11 +30,14 @@ def handle_text_delta(
     assembler: StreamAssembler,
     delta: str,
     ui_state: Optional[dict[str, str]] = None,
+    on_streaming_update: Optional[Callable[[], None]] = None,
 ) -> None:
     """Handle text_delta: set phase streaming, append to assembler buffer."""
     if ui_state is not None:
         ui_state["phase"] = "streaming"
     assembler.text_delta(delta)
+    if on_streaming_update is not None:
+        on_streaming_update()
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             "Text delta processed",

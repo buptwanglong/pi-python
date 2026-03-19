@@ -30,11 +30,15 @@ def make_handlers(
     last_output_count: list[int],
     header_state: Optional[dict[str, str]] = None,
     ui_state: Optional[dict[str, str]] = None,
+    on_streaming_update: Optional[Callable[[], None]] = None,
 ) -> GatewayHandlers:
     """Build GatewayHandlers that delegate to dispatch handle_* with closed-over state."""
     handlers: GatewayHandlers = {
         "on_text_delta": lambda event: handle_text_delta(
-            assembler, event.delta, ui_state=ui_state
+            assembler,
+            event.delta,
+            ui_state=ui_state,
+            on_streaming_update=on_streaming_update,
         ),
         "on_thinking_delta": lambda event: handle_thinking_delta(assembler, event.delta),
         "on_tool_call_start": lambda event: handle_tool_call_start(
