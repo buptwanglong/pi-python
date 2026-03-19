@@ -4,6 +4,8 @@ Single asyncio loop: no threads, no queue.Queue, no polling.
 WebSocket runs via GatewayWsConnection; TUI sends via conn.send_* and receives via handlers (no queue).
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import shutil
@@ -14,6 +16,13 @@ from .connection import GatewayWsConnection
 from .handle import make_handlers
 from .logging_config import setup_logging
 from .pipeline import StreamAssembler, render_messages
+from .ui.scroll_state import (
+    at_bottom,
+    clamp_scroll,
+    max_scroll,
+    scroll_page_down,
+    scroll_page_up,
+)
 from .ui import (
     ExitConfirmState,
     build_banner_lines,
@@ -101,6 +110,9 @@ async def run_tui_native_attach(
     }
 
     body_lines: list[str] = []
+    follow_tail: list[bool] = [True]
+    body_scroll: list[int] = [0]
+    last_viewport: list[tuple[int, int] | None] = [None]
     app_ref: list[Any] = []
     assembler = StreamAssembler()
     last_output_count: list[int] = [0]
@@ -144,7 +156,48 @@ async def run_tui_native_attach(
             pass
         return
 
-    body_lines.append("[system] Connected (native). Type /help for commands.")
+    def _body_line_count() -> int:
+        raw = "\n".join(body_lines)
+        return len(raw.split("\n")) if raw else 0
+
+    def get_vertical_scroll(win: Any) -> int:
+        info = win.render_info
+        if info is not None:
+            last_viewport[0] = (info.content_height, info.window_height)
+            ch, wh = info.content_height, info.window_height
+            if follow_tail[0]:
+                ms = max_scroll(ch, wh)
+                body_scroll[0] = ms
+                return ms
+            body_scroll[0] = clamp_scroll(body_scroll[0], ch, wh)
+            return body_scroll[0]
+        return body_scroll[0]
+
+    def get_cursor_position():
+        from prompt_toolkit.data_structures import Point
+
+        lc = _body_line_count()
+        if lc == 0:
+            return Point(0, 0)
+        last = lc - 1
+        if follow_tail[0]:
+            return Point(x=0, y=last)
+        return Point(x=0, y=min(body_scroll[0], last))
+
+    def on_body_mouse_scroll(win: Any) -> None:
+        info = win.render_info
+        if info is None:
+            return
+        body_scroll[0] = clamp_scroll(
+            win.vertical_scroll, info.content_height, info.window_height
+        )
+        follow_tail[0] = at_bottom(
+            body_scroll[0], info.content_height, info.window_height
+        )
+        if app_ref:
+            app_ref[0].invalidate()
+
+    output_put("[system] Connected (native). Type /help for commands.")
 
     banner_lines = build_banner_lines(resolve_basket_version())
     doctor_lines: list[str] = []
@@ -223,7 +276,7 @@ async def run_tui_native_attach(
 
         text = (input_buffer.text or "").strip()
         input_buffer.reset()
-        result = handle_input(text, base_url, conn, body_lines)
+        result = handle_input(text, base_url, conn, output_put)
         logger.info("User input received", extra={"text_len": len(text), "result": result})
         if result == "exit":
             _cancel_aux_tasks()
@@ -236,7 +289,7 @@ async def run_tui_native_attach(
         if result == "send":
             # Display user message as gray block (same as render_messages; no [user] prefix).
             for line in render_messages([{"role": "user", "content": text}], width):
-                body_lines.append(line)
+                output_put(line)
             get_app().invalidate()
 
     @kb.add("enter")
@@ -246,21 +299,21 @@ async def run_tui_native_attach(
 
     @kb.add("c-p")
     def _on_ctrl_p(_event: Any) -> None:
-        open_picker("session", base_url, conn, body_lines)
+        open_picker("session", base_url, conn, output_put)
         from prompt_toolkit.application import get_app
 
         get_app().invalidate()
 
     @kb.add("c-g")
     def _on_ctrl_g(_event: Any) -> None:
-        open_picker("agent", base_url, conn, body_lines)
+        open_picker("agent", base_url, conn, output_put)
         from prompt_toolkit.application import get_app
 
         get_app().invalidate()
 
     @kb.add("c-l")
     def _on_ctrl_l(_event: Any) -> None:
-        open_picker("model", base_url, conn, body_lines)
+        open_picker("model", base_url, conn, output_put)
         from prompt_toolkit.application import get_app
 
         get_app().invalidate()
@@ -292,6 +345,32 @@ async def run_tui_native_attach(
 
         get_app().invalidate()
 
+    @kb.add("pageup")
+    def _on_pageup(event: Any) -> None:
+        follow_tail[0] = False
+        lv = last_viewport[0]
+        if lv:
+            ch, wh = lv
+            step = max(1, wh - 1)
+            body_scroll[0] = scroll_page_up(body_scroll[0], step, ch, wh)
+        event.app.invalidate()
+
+    @kb.add("pagedown")
+    def _on_pagedown(event: Any) -> None:
+        lv = last_viewport[0]
+        if lv:
+            ch, wh = lv
+            step = max(1, wh - 1)
+            body_scroll[0] = scroll_page_down(body_scroll[0], step, ch, wh)
+            if at_bottom(body_scroll[0], ch, wh):
+                follow_tail[0] = True
+        event.app.invalidate()
+
+    @kb.add("c-end")
+    def _on_ctrl_end(event: Any) -> None:
+        follow_tail[0] = True
+        event.app.invalidate()
+
     layout = build_layout(
         width,
         base_url,
@@ -302,12 +381,15 @@ async def run_tui_native_attach(
         banner_lines=banner_lines,
         doctor_lines=doctor_lines,
         footer_line=footer_plain,
+        get_vertical_scroll=get_vertical_scroll,
+        get_cursor_position=get_cursor_position,
+        on_body_mouse_scroll=on_body_mouse_scroll,
     )
     app = Application(
         layout=layout,
         key_bindings=kb,
         full_screen=True,
-        mouse_support=False,
+        mouse_support=True,
     )
     app_ref.append(app)
 

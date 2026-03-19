@@ -10,6 +10,7 @@ Terminal-native TUI for Basket: line-by-line output with [prompt_toolkit](https:
 - **prompt_toolkit input** – Single-line input with history
 - **Slash commands** – `/help`, `/new`, `/abort`, `/session`, `/agent`, `/model`
 - **Pickers** – Ctrl+P (session), Ctrl+G (agent), Ctrl+L (model)
+- **Conversation scroll** – Mouse wheel or PgUp/PgDn; **Ctrl+End** follows the latest output again (scrolling up pauses auto-scroll until then)
 - **Exit** – **Ctrl+C** or **Ctrl+D** twice to quit (first press arms “press again”; **`/exit`** quits immediately). Pending exit clears after 8s of inactivity.
 
 ## Installation
