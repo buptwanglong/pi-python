@@ -11,8 +11,8 @@ _ORANGE = "\x1b[38;2;255;90;45m"
 _ORANGE_LIGHT = "\x1b[38;2;255;138;91m"
 _GRAY = "\x1b[38;2;139;127;119m"
 _RESET = "\x1b[0m"
-BOLD = "\x1b[1m"
-DIM = "\x1b[2m"
+_BOLD = "\x1b[1m"
+_DIM = "\x1b[2m"
 
 _TAGLINE = (
     'Say "stop" and I\'ll stop—say "ship" and we\'ll both learn a lesson.'
@@ -38,8 +38,8 @@ def build_banner_lines(version: str | None = None) -> list[str]:
     """
     v = (version or "").strip() or resolve_basket_version()
     return [
-        f"{_ORANGE}{BOLD}  Basket{_RESET}",
-        f"{DIM}{_GRAY}  version {v}{_RESET}",
+        f"{_ORANGE}{_BOLD}  Basket{_RESET}",
+        f"{_DIM}{_GRAY}  version {v}{_RESET}",
         "",
         f"{_ORANGE_LIGHT}  │ {_TAGLINE}{_RESET}",
     ]
