@@ -34,6 +34,7 @@ from .ui import (
     open_picker,
     resolve_basket_version,
 )
+from .ui.todo_panel import format_todo_panel, todo_panel_height
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ async def run_tui_native_attach(
     app_ref: list[Any] = []
     assembler = StreamAssembler()
     last_output_count: list[int] = [0]
+    todo_state: list[dict] = []
 
     def output_put(line: str) -> None:
         body_lines.append(line)
@@ -139,6 +141,7 @@ async def run_tui_native_attach(
         header_state,
         ui_state,
         on_streaming_update=_on_streaming_update,
+        todo_state=todo_state,
     )
     conn = GatewayWsConnection(
         ws_url, handlers, ready_event, header_state=header_state, ui_state=ui_state
@@ -387,6 +390,12 @@ async def run_tui_native_attach(
         follow_tail[0] = True
         event.app.invalidate()
 
+    def get_todo_lines() -> str:
+        return format_todo_panel(todo_state, width)
+
+    def get_todo_height() -> int:
+        return todo_panel_height(todo_state)
+
     layout = build_layout(
         width,
         base_url,
@@ -400,6 +409,8 @@ async def run_tui_native_attach(
         get_vertical_scroll=get_vertical_scroll,
         get_cursor_position=get_cursor_position,
         on_body_mouse_scroll=on_body_mouse_scroll,
+        get_todo_lines=get_todo_lines,
+        get_todo_height=get_todo_height,
     )
     app = Application(
         layout=layout,
