@@ -2,10 +2,24 @@
 /create-skill command: create a reusable skill from conversation content.
 """
 
+import json
+import logging
 import re
 from enum import Enum
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from basket_ai.api import complete
+from basket_ai.types import (
+    AssistantMessage,
+    Context,
+    Message,
+    TextContent,
+    UserMessage,
+)
+
+logger = logging.getLogger(__name__)
 
 # Same constants as skills_loader
 _NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -59,3 +73,188 @@ def sanitize_skill_name(raw: str) -> str:
     if len(result) > _NAME_MAX_LEN:
         result = result[:_NAME_MAX_LEN].rstrip("-")
     return result
+
+
+# ---------------------------------------------------------------------------
+# System prompt for LLM-based skill generation
+# ---------------------------------------------------------------------------
+
+_GENERATION_SYSTEM_PROMPT = """You are a skill generator. Given a conversation summary, create a reusable skill document.
+
+Respond with a JSON object (no markdown fences) containing exactly these fields:
+- "name": lowercase alphanumeric with hyphens only (e.g. "docker-deploy"), max 64 chars
+- "description": one-line description of what this skill teaches (max 200 chars)
+- "body": Markdown body with sections like ## Overview, ## Steps, ## Examples
+
+Focus on extracting actionable knowledge, patterns, and step-by-step instructions.
+Make the skill self-contained so someone can follow it without the original conversation."""
+
+
+# ---------------------------------------------------------------------------
+# Conversation extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_conversation_text(
+    messages: List[Message],
+    *,
+    max_messages: int = 50,
+    topic_hint: Optional[str] = None,
+) -> str:
+    """
+    Extract readable text from a list of Message objects.
+
+    Takes the last *max_messages* messages, extracts user and assistant text,
+    and optionally prepends a topic hint.
+
+    Args:
+        messages: Conversation messages (UserMessage, AssistantMessage, etc.).
+        max_messages: Maximum number of recent messages to include.
+        topic_hint: Optional topic hint to prepend for context.
+
+    Returns:
+        A single string with the extracted conversation text, or "" if empty.
+    """
+    if not messages:
+        return ""
+
+    # Take only the last N messages (immutable slice, no mutation)
+    truncated = messages[-max_messages:]
+
+    lines: list[str] = []
+
+    if topic_hint:
+        lines.append(f"Topic: {topic_hint}")
+        lines.append("")
+
+    for msg in truncated:
+        if isinstance(msg, UserMessage):
+            # content can be str or list of content blocks
+            if isinstance(msg.content, str):
+                lines.append(f"User: {msg.content}")
+            else:
+                # List of TextContent / ImageContent blocks
+                text_parts = [
+                    block.text for block in msg.content if hasattr(block, "text")
+                ]
+                if text_parts:
+                    lines.append(f"User: {' '.join(text_parts)}")
+        elif isinstance(msg, AssistantMessage):
+            text_parts = [
+                block.text
+                for block in msg.content
+                if isinstance(block, TextContent)
+            ]
+            if text_parts:
+                lines.append(f"Assistant: {' '.join(text_parts)}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md formatting
+# ---------------------------------------------------------------------------
+
+
+def format_skill_md(draft: SkillDraft) -> str:
+    """
+    Format a SkillDraft as SKILL.md content with YAML frontmatter.
+
+    Args:
+        draft: Validated skill draft to format.
+
+    Returns:
+        String with YAML frontmatter and Markdown body.
+    """
+    return (
+        f"---\n"
+        f"name: {draft.name}\n"
+        f"description: {draft.description}\n"
+        f"---\n"
+        f"{draft.body}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# LLM-based skill generation
+# ---------------------------------------------------------------------------
+
+
+async def generate_skill_draft(
+    model,
+    conversation_text: str,
+    topic_hint: Optional[str] = None,
+) -> SkillDraft:
+    """
+    Call an LLM to generate a SkillDraft from conversation text.
+
+    The LLM is prompted to return a JSON object with name, description, and body.
+    The returned name is sanitized to guarantee it matches the required pattern.
+
+    Args:
+        model: Model configuration (passed to ``basket_ai.api.complete``).
+        conversation_text: Extracted conversation text to summarize.
+        topic_hint: Optional topic hint to include in the prompt.
+
+    Returns:
+        A validated SkillDraft.
+
+    Raises:
+        ValueError: If the LLM response cannot be parsed as valid JSON
+            or is missing required fields.
+    """
+    user_prompt_parts = ["Create a skill from this conversation:\n"]
+    if topic_hint:
+        user_prompt_parts.append(f"Topic hint: {topic_hint}\n")
+    user_prompt_parts.append(conversation_text)
+    user_prompt = "\n".join(user_prompt_parts)
+
+    context = Context(
+        systemPrompt=_GENERATION_SYSTEM_PROMPT,
+        messages=[
+            UserMessage(role="user", content=user_prompt, timestamp=0),
+        ],
+    )
+
+    response: AssistantMessage = await complete(model, context)
+
+    # Extract text from the first TextContent block
+    raw_text = ""
+    for block in response.content:
+        if isinstance(block, TextContent):
+            raw_text = block.text
+            break
+
+    if not raw_text:
+        raise ValueError("LLM returned no text content")
+
+    # Strip markdown fences if present (```json ... ```)
+    stripped = raw_text.strip()
+    if stripped.startswith("```"):
+        # Remove opening fence (with optional language tag) and closing fence
+        lines = stripped.split("\n")
+        # Drop first line (```json or ```) and last line (```)
+        lines = [ln for ln in lines[1:] if not ln.strip().startswith("```")]
+        stripped = "\n".join(lines)
+
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM returned invalid JSON: {exc}") from exc
+
+    # Validate required fields
+    for field in ("name", "description", "body"):
+        if field not in data:
+            raise ValueError(f"LLM response missing required field: {field!r}")
+
+    # Sanitize the name to ensure it matches the pattern
+    raw_name = str(data["name"])
+    sanitized_name = sanitize_skill_name(raw_name)
+    if not sanitized_name:
+        raise ValueError(f"Could not sanitize skill name from LLM response: {raw_name!r}")
+
+    return SkillDraft(
+        name=sanitized_name,
+        description=str(data["description"]),
+        body=str(data["body"]),
+    )
