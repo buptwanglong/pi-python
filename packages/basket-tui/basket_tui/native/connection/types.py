@@ -11,6 +11,7 @@ from basket_protocol import (
     System,
     TextDelta,
     ThinkingDelta,
+    TodoUpdate,
     ToolCallEnd,
     ToolCallStart,
 )
@@ -29,6 +30,7 @@ class GatewayHandlers(TypedDict, total=False):
     on_agent_switched: Callable[[AgentSwitched], None]
     on_agent_aborted: Callable[[AgentAborted], None]
     on_system: Callable[[System], None]
+    on_todo_update: Callable[[TodoUpdate], None]
 
 
 class GatewayConnectionProtocol(Protocol):

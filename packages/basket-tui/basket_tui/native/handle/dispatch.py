@@ -228,6 +228,16 @@ def handle_system(
     # ready, agent_disconnected: no-op
 
 
+def handle_todo_update(
+    todo_state: list[dict[str, Any]],
+    todos: list[dict[str, Any]],
+) -> None:
+    """Handle todo_update: replace todo_state with new snapshot."""
+    todo_state.clear()
+    todo_state.extend(todos)
+    logger.info("Todo state updated", extra={"count": len(todos)})
+
+
 def _dispatch_ws_message(
     msg: dict[str, Any],
     assembler: StreamAssembler,

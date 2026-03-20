@@ -31,6 +31,7 @@ def make_handlers(
     header_state: Optional[dict[str, str]] = None,
     ui_state: Optional[dict[str, str]] = None,
     on_streaming_update: Optional[Callable[[], None]] = None,
+    todo_state: Optional[list[dict]] = None,
 ) -> GatewayHandlers:
     """Build GatewayHandlers that delegate to dispatch handle_* with closed-over state."""
     handlers: GatewayHandlers = {
@@ -76,6 +77,12 @@ def make_handlers(
             event.event, event.payload or {}, output_put
         ),
     }
+
+    if todo_state is not None:
+        from .dispatch import handle_todo_update
+        handlers["on_todo_update"] = lambda event: handle_todo_update(
+            todo_state, list(event.todos)
+        )
 
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Handler mapping created", extra={"handler_count": len(handlers)})

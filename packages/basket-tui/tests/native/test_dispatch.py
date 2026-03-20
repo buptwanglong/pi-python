@@ -8,6 +8,7 @@ from basket_tui.native.handle.dispatch import (
     handle_session_switched,
     handle_text_delta,
     handle_thinking_delta,
+    handle_todo_update,
     handle_tool_call_end,
     handle_tool_call_start,
 )
@@ -290,3 +291,31 @@ def test_consecutive_tool_blocks_have_spacing_between_them():
     assert "\n\n" in between, (
         f"Expected blank line between consecutive tool blocks, got: {between!r}"
     )
+
+
+def test_handle_todo_update_stores_todos():
+    """handle_todo_update stores the todo list snapshot."""
+    todo_state: list[dict] = []
+    todos = [
+        {"id": "1", "content": "Task A", "status": "pending"},
+        {"id": "2", "content": "Task B", "status": "in_progress"},
+    ]
+    handle_todo_update(todo_state, todos)
+    assert len(todo_state) == 2
+    assert todo_state[0]["content"] == "Task A"
+    assert todo_state[1]["status"] == "in_progress"
+
+
+def test_handle_todo_update_replaces_previous():
+    """handle_todo_update replaces previous state (snapshot semantics)."""
+    todo_state: list[dict] = [{"id": "old", "content": "Old", "status": "completed"}]
+    handle_todo_update(todo_state, [{"id": "new", "content": "New", "status": "pending"}])
+    assert len(todo_state) == 1
+    assert todo_state[0]["id"] == "new"
+
+
+def test_handle_todo_update_empty_clears_state():
+    """handle_todo_update with empty list clears state."""
+    todo_state: list[dict] = [{"id": "1", "content": "X", "status": "pending"}]
+    handle_todo_update(todo_state, [])
+    assert len(todo_state) == 0

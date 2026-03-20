@@ -18,6 +18,7 @@ from basket_protocol import (
     System,
     TextDelta,
     ThinkingDelta,
+    TodoUpdate,
     ToolCallEnd,
     ToolCallStart,
     Unknown,
@@ -112,6 +113,10 @@ class GatewayWsConnection:
                     h(parsed)
             elif isinstance(parsed, System):
                 h = self._handlers.get("on_system")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, TodoUpdate):
+                h = self._handlers.get("on_todo_update")
                 if h:
                     h(parsed)
         except Exception:  # noqa: BLE001

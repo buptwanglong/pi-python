@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_protocol import AgentComplete, TextDelta, ToolCallEnd, ToolCallStart
+from basket_protocol import AgentComplete, TextDelta, TodoUpdate, ToolCallEnd, ToolCallStart
 from basket_tui.native.handle import make_handlers
 from basket_tui.native.pipeline import StreamAssembler
 
@@ -118,3 +118,26 @@ def test_make_handlers_tool_call_end_renders_immediately() -> None:
     # Rendered immediately
     assert len(lines_out) >= 1
     assert last_output_count[0] >= 1
+
+
+def test_make_handlers_on_todo_update_stores_state() -> None:
+    """on_todo_update handler stores todos in closed-over todo_state."""
+    assembler = StreamAssembler()
+    width = 80
+    lines_out: list[str] = []
+    last_output_count = [0]
+    header_state: dict[str, str] = {}
+    ui_state: dict[str, str] = {}
+    todo_state: list[dict] = []
+
+    handlers = make_handlers(
+        assembler, width, lines_out.append, last_output_count,
+        header_state, ui_state, todo_state=todo_state,
+    )
+
+    assert "on_todo_update" in handlers
+    handlers["on_todo_update"](TodoUpdate(todos=(
+        {"id": "1", "content": "Test", "status": "pending"},
+    )))
+    assert len(todo_state) == 1
+    assert todo_state[0]["content"] == "Test"
