@@ -98,9 +98,20 @@ def handle_tool_call_end(
     tool_name: str,
     result: Any = None,
     error: Optional[str] = None,
+    width: int = 80,
+    output_put: Optional[Callable[[str], None]] = None,
+    last_output_count: Optional[list[int]] = None,
 ) -> None:
-    """Handle tool_call_end: append tool message to assembler."""
+    """Handle tool_call_end: append tool message and render immediately."""
     assembler.tool_call_end(tool_name, result=result, error=error)
+
+    # Render tool block immediately instead of waiting for agent_complete
+    if output_put is not None and last_output_count is not None:
+        msg = assembler.messages[-1]
+        for line in render_messages([msg], width):
+            output_put(line)
+        last_output_count[0] = len(assembler.messages)
+
     logger.info(
         "Tool call ended",
         extra={

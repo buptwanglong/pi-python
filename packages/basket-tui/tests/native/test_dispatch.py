@@ -217,3 +217,46 @@ def test_handle_tool_call_start_empty_buffer_no_flush():
     # Tool recorded
     assert assembler._current_tool is not None
     assert assembler._current_tool["tool_name"] == "bash"
+
+
+def test_handle_tool_call_end_renders_immediately():
+    """tool_call_end renders tool block via output_put immediately (not waiting for agent_complete)."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+    handle_tool_call_start(assembler, "bash", arguments={"cmd": "echo hi"})
+    handle_tool_call_end(
+        assembler,
+        "bash",
+        result="hello",
+        error=None,
+        width=width,
+        output_put=output_put,
+        last_output_count=last_output_count,
+    )
+
+    # Tool message in assembler
+    assert len(assembler.messages) == 1
+    assert assembler.messages[0]["role"] == "tool"
+    # Rendered immediately via output_put
+    assert len(out) >= 1
+    # last_output_count tracks the rendered tool message
+    assert last_output_count[0] == 1
+
+
+def test_handle_tool_call_end_error_renders_immediately():
+    """tool_call_end with error renders error tool block via output_put immediately."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+    handle_tool_call_start(assembler, "bash", arguments={})
+    handle_tool_call_end(
+        assembler,
+        "bash",
+        result=None,
+        error="command not found",
+        width=width,
+        output_put=output_put,
+        last_output_count=last_output_count,
+    )
+
+    assert len(assembler.messages) == 1
+    assert assembler.messages[0]["role"] == "tool"
+    assert len(out) >= 1
+    assert last_output_count[0] == 1
