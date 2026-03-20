@@ -260,3 +260,33 @@ def test_handle_tool_call_end_error_renders_immediately():
     assert assembler.messages[0]["role"] == "tool"
     assert len(out) >= 1
     assert last_output_count[0] == 1
+
+
+def test_consecutive_tool_blocks_have_spacing_between_them():
+    """Two consecutive tool blocks rendered via handle_tool_call_end must have blank-line spacing."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+
+    # First tool call
+    handle_tool_call_start(assembler, "read", arguments={"path": "/a"})
+    handle_tool_call_end(
+        assembler, "read", result="content-a", error=None,
+        width=width, output_put=output_put, last_output_count=last_output_count,
+    )
+
+    # Second tool call
+    handle_tool_call_start(assembler, "write", arguments={"path": "/b"})
+    handle_tool_call_end(
+        assembler, "write", result="ok", error=None,
+        width=width, output_put=output_put, last_output_count=last_output_count,
+    )
+
+    # There must be at least one empty line between the two tool blocks
+    joined = "\n".join(out)
+    idx_content_a = joined.find("content-a")
+    idx_write = joined.find("write", idx_content_a + 1 if idx_content_a >= 0 else 0)
+    assert idx_content_a >= 0, "First tool result must appear in output"
+    assert idx_write > idx_content_a, "Second tool must appear after first"
+    between = joined[idx_content_a:idx_write]
+    assert "\n\n" in between, (
+        f"Expected blank line between consecutive tool blocks, got: {between!r}"
+    )

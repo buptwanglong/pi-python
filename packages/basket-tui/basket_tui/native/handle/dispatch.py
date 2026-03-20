@@ -26,6 +26,22 @@ from ..pipeline.stream import StreamAssembler
 logger = logging.getLogger(__name__)
 
 
+def _render_and_output(
+    msg: dict[str, Any],
+    width: int,
+    output_put: Callable[[str], None],
+) -> None:
+    """Render a single message and output it with a trailing blank-line separator."""
+    lines = render_messages([msg], width)
+    if not lines:
+        return
+    for line in lines:
+        output_put(line)
+    # Add blank line separator so consecutive blocks don't appear glued together.
+    # render_messages strips trailing newlines via rstrip, so we must add spacing here.
+    output_put("")
+
+
 def handle_text_delta(
     assembler: StreamAssembler,
     delta: str,
@@ -75,9 +91,7 @@ def handle_tool_call_start(
     # Flush streaming buffer BEFORE tool starts so text appears before tool block
     if output_put is not None and last_output_count is not None:
         if assembler.flush_buffer():
-            msg = assembler.messages[-1]
-            for line in render_messages([msg], width):
-                output_put(line)
+            _render_and_output(assembler.messages[-1], width, output_put)
             last_output_count[0] = len(assembler.messages)
 
     if ui_state is not None:
@@ -107,9 +121,7 @@ def handle_tool_call_end(
 
     # Render tool block immediately instead of waiting for agent_complete
     if output_put is not None and last_output_count is not None:
-        msg = assembler.messages[-1]
-        for line in render_messages([msg], width):
-            output_put(line)
+        _render_and_output(assembler.messages[-1], width, output_put)
         last_output_count[0] = len(assembler.messages)
 
     logger.info(
@@ -147,9 +159,7 @@ def handle_agent_complete(
     if assembler.messages:
         start = last_output_count[0]
         for m in assembler.messages[start:]:
-            lines = render_messages([m], width)
-            for line in lines:
-                output_put(line)
+            _render_and_output(m, width, output_put)
         last_output_count[0] = len(assembler.messages)
 
 
