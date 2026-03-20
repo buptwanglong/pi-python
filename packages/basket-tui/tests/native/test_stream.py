@@ -53,3 +53,24 @@ def test_thinking_delta_and_agent_complete_clears_buffers():
     assert a.messages[0]["content"] == "reply"
     assert getattr(a, "_thinking_buffer", "") == ""
     assert getattr(a, "_buffer", "") == ""
+
+
+def test_flush_buffer_commits_and_clears():
+    """flush_buffer() commits non-empty _buffer as assistant message, clears buffer, returns True."""
+    a = StreamAssembler()
+    a.text_delta("Hello")
+    a.text_delta(" world")
+    result = a.flush_buffer()
+    assert result is True
+    assert len(a.messages) == 1
+    assert a.messages[0] == {"role": "assistant", "content": "Hello world"}
+    assert a._buffer == ""
+
+
+def test_flush_buffer_empty_noop():
+    """flush_buffer() on empty buffer returns False and adds no message."""
+    a = StreamAssembler()
+    result = a.flush_buffer()
+    assert result is False
+    assert len(a.messages) == 0
+    assert a._buffer == ""

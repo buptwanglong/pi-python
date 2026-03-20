@@ -107,6 +107,23 @@ class StreamAssembler:
         self._buffer = ""
         self._thinking_buffer = ""
 
+    def flush_buffer(self) -> bool:
+        """Commit current _buffer as assistant message if non-empty.
+
+        Returns True if content was committed, False if buffer was empty.
+        Used by tool_call_start to commit streaming text before the tool block.
+        """
+        if not self._buffer:
+            return False
+        self.messages.append({"role": "assistant", "content": self._buffer})
+        buffer_len = len(self._buffer)
+        self._buffer = ""
+        logger.info(
+            "Buffer flushed",
+            extra={"buffer_len": buffer_len, "total_messages": len(self.messages)},
+        )
+        return True
+
     def abort(self) -> None:
         """Clear all buffers and current tool state (abort operation)."""
         had_buffer = bool(self._buffer)
