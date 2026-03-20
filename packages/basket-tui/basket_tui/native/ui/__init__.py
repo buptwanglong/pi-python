@@ -13,10 +13,12 @@ from .doctor import collect_doctor_notices, format_doctor_panel
 from .exit_confirm import ExitConfirmState
 from .footer import SPINNER_FRAMES, format_footer, spinner_frame
 from .layout import build_layout
+from .todo_panel import MAX_PANEL_LINES, format_todo_panel, todo_panel_height
 
 __all__ = [
     "HELP_LINES",
     "InputResult",
+    "MAX_PANEL_LINES",
     "OutputPut",
     "SPINNER_FRAMES",
     "ExitConfirmState",
@@ -25,9 +27,11 @@ __all__ = [
     "collect_doctor_notices",
     "format_doctor_panel",
     "format_footer",
+    "format_todo_panel",
     "resolve_basket_version",
     "spinner_frame",
     "handle_input",
     "handle_slash_command",
     "open_picker",
+    "todo_panel_height",
 ]
