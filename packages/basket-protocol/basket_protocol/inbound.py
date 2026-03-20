@@ -75,6 +75,13 @@ class System:
 
 
 @dataclass(frozen=True)
+class TodoUpdate:
+    """Todo list snapshot (full replacement)."""
+
+    todos: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class Unknown:
     """Unknown message type (parse but do not handle)."""
 
@@ -93,6 +100,7 @@ InboundMessage = Union[
     AgentSwitched,
     AgentAborted,
     System,
+    TodoUpdate,
     Unknown,
 ]
 
@@ -133,6 +141,9 @@ def parse_inbound(data: dict[str, Any]) -> InboundMessage:
         return AgentAborted()
     if typ in ("ready", "agent_disconnected", "reconnected", "error"):
         return System(event=typ, payload=data)
+    if typ == "todos":
+        raw_todos = data.get("todos") or []
+        return TodoUpdate(todos=tuple(raw_todos))
 
     return Unknown(type=typ, payload=data)
 
@@ -167,6 +178,8 @@ def inbound_to_dict(msg: InboundMessage) -> dict[str, Any]:
         return {"type": "agent_aborted"}
     if isinstance(msg, System):
         return {"type": msg.event, **(msg.payload or {})}
+    if isinstance(msg, TodoUpdate):
+        return {"type": "todos", "todos": list(msg.todos)}
     if isinstance(msg, Unknown):
         return dict(msg.payload) if msg.payload else {"type": msg.type}
     raise TypeError(f"Unknown inbound message type: {type(msg)}")

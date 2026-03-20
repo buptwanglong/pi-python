@@ -9,6 +9,7 @@ from basket_protocol import (
     System,
     TextDelta,
     ThinkingDelta,
+    TodoUpdate,
     ToolCallEnd,
     ToolCallStart,
     Unknown,
@@ -123,3 +124,39 @@ def test_inbound_to_dict_text_delta_roundtrip() -> None:
     d = inbound_to_dict(msg)
     assert d == {"type": "text_delta", "delta": "hi"}
     assert parse_inbound(d) == msg
+
+
+def test_parse_inbound_todo_update() -> None:
+    """parse_inbound({'type': 'todos', 'todos': [...]}) returns TodoUpdate."""
+    msg = parse_inbound({
+        "type": "todos",
+        "todos": [
+            {"id": "1", "content": "Explore context", "status": "completed"},
+            {"id": "2", "content": "Ask questions", "status": "in_progress"},
+            {"id": "3", "content": "Propose approaches", "status": "pending"},
+        ],
+    })
+    assert isinstance(msg, TodoUpdate)
+    assert len(msg.todos) == 3
+    assert msg.todos[0] == {"id": "1", "content": "Explore context", "status": "completed"}
+    assert msg.todos[1]["status"] == "in_progress"
+    assert msg.todos[2]["status"] == "pending"
+
+
+def test_parse_inbound_todo_update_empty() -> None:
+    """parse_inbound({'type': 'todos', 'todos': []}) returns TodoUpdate with empty list."""
+    msg = parse_inbound({"type": "todos", "todos": []})
+    assert isinstance(msg, TodoUpdate)
+    assert msg.todos == ()
+
+
+def test_inbound_to_dict_todo_update_roundtrip() -> None:
+    """inbound_to_dict(TodoUpdate) returns wire dict; parse_inbound roundtrips."""
+    msg = TodoUpdate(todos=(
+        {"id": "1", "content": "Task A", "status": "pending"},
+    ))
+    d = inbound_to_dict(msg)
+    assert d == {"type": "todos", "todos": [{"id": "1", "content": "Task A", "status": "pending"}]}
+    parsed = parse_inbound(d)
+    assert isinstance(parsed, TodoUpdate)
+    assert parsed.todos == msg.todos
