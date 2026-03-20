@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_protocol import AgentComplete, TextDelta
+from basket_protocol import AgentComplete, TextDelta, ToolCallEnd, ToolCallStart
 from basket_tui.native.handle import make_handlers
 from basket_tui.native.pipeline import StreamAssembler
 
@@ -60,3 +60,61 @@ def test_make_handlers_on_agent_complete_invokes_output_put_and_updates_last_out
     assert len(lines_out) >= 1
     assert any("Hello" in line or "assistant" in line for line in lines_out)
     assert last_output_count[0] == 1
+
+
+def test_make_handlers_tool_call_start_flushes_buffer_and_renders() -> None:
+    """on_tool_call_start flushes prior streaming buffer to output_put before recording tool."""
+    assembler = StreamAssembler()
+    assembler.text_delta("Prior text")
+    width = 80
+    lines_out: list[str] = []
+
+    def output_put(line: str) -> None:
+        lines_out.append(line)
+
+    last_output_count = [0]
+    header_state: dict[str, str] = {}
+    ui_state: dict[str, str] = {"phase": "streaming"}
+
+    handlers = make_handlers(
+        assembler, width, output_put, last_output_count, header_state, ui_state
+    )
+
+    handlers["on_tool_call_start"](ToolCallStart(tool_name="bash", arguments={"cmd": "ls"}))
+
+    # Buffer should be flushed
+    assert assembler._buffer == ""
+    # Assistant message committed
+    assert any(m["role"] == "assistant" and m["content"] == "Prior text" for m in assembler.messages)
+    # Tool recorded
+    assert assembler._current_tool is not None
+    # Rendered to output
+    assert len(lines_out) >= 1
+    assert last_output_count[0] >= 1
+
+
+def test_make_handlers_tool_call_end_renders_immediately() -> None:
+    """on_tool_call_end renders tool block via output_put immediately."""
+    assembler = StreamAssembler()
+    width = 80
+    lines_out: list[str] = []
+
+    def output_put(line: str) -> None:
+        lines_out.append(line)
+
+    last_output_count = [0]
+    header_state: dict[str, str] = {}
+    ui_state: dict[str, str] = {}
+
+    handlers = make_handlers(
+        assembler, width, output_put, last_output_count, header_state, ui_state
+    )
+
+    handlers["on_tool_call_start"](ToolCallStart(tool_name="read", arguments={}))
+    handlers["on_tool_call_end"](ToolCallEnd(tool_name="read", result="file data", error=None))
+
+    # Tool message in assembler
+    assert any(m["role"] == "tool" for m in assembler.messages)
+    # Rendered immediately
+    assert len(lines_out) >= 1
+    assert last_output_count[0] >= 1

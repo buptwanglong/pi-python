@@ -46,12 +46,18 @@ def make_handlers(
             event.tool_name,
             arguments=event.arguments,
             ui_state=ui_state,
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
         ),
         "on_tool_call_end": lambda event: handle_tool_call_end(
             assembler,
             event.tool_name,
             result=event.result,
             error=event.error,
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
         ),
         "on_agent_complete": lambda event: handle_agent_complete(
             assembler, width, output_put, last_output_count, ui_state=ui_state
