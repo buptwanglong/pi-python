@@ -2,14 +2,14 @@
 /create-skill command: create a reusable skill from conversation content.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
-
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
 
 from basket_ai.api import complete
 from basket_ai.types import (
@@ -20,6 +20,7 @@ from basket_ai.types import (
     TextContent,
     UserMessage,
 )
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,7 @@ class SkillDraft(BaseModel):
     @classmethod
     def name_must_match_pattern(cls, v: str) -> str:
         if not _NAME_RE.match(v):
-            raise ValueError(
-                f"Skill name must match ^[a-z0-9]+(-[a-z0-9]+)*$, got {v!r}"
-            )
+            raise ValueError(f"Skill name must match ^[a-z0-9]+(-[a-z0-9]+)*$, got {v!r}")
         return v
 
 
@@ -81,15 +80,19 @@ def sanitize_skill_name(raw: str) -> str:
 # System prompt for LLM-based skill generation
 # ---------------------------------------------------------------------------
 
-_GENERATION_SYSTEM_PROMPT = """You are a skill generator. Given a conversation summary, create a reusable skill document.
-
-Respond with a JSON object (no markdown fences) containing exactly these fields:
-- "name": lowercase alphanumeric with hyphens only (e.g. "docker-deploy"), max 64 chars
-- "description": one-line description of what this skill teaches (max 200 chars)
-- "body": Markdown body with sections like ## Overview, ## Steps, ## Examples
-
-Focus on extracting actionable knowledge, patterns, and step-by-step instructions.
-Make the skill self-contained so someone can follow it without the original conversation."""
+_GENERATION_SYSTEM_PROMPT = (
+    "You are a skill generator. "
+    "Given a conversation summary, create a reusable skill document.\n\n"
+    "Respond with a JSON object (no markdown fences) containing exactly these fields:\n"
+    '- "name": lowercase alphanumeric with hyphens only '
+    '(e.g. "docker-deploy"), max 64 chars\n'
+    '- "description": one-line description of what this skill teaches '
+    "(max 200 chars)\n"
+    '- "body": Markdown body with sections like ## Overview, ## Steps, ## Examples\n\n'
+    "Focus on extracting actionable knowledge, patterns, and step-by-step instructions.\n"
+    "Make the skill self-contained so someone can follow it "
+    "without the original conversation."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,10 +101,10 @@ Make the skill self-contained so someone can follow it without the original conv
 
 
 def extract_conversation_text(
-    messages: List[Message],
+    messages: list[Message],
     *,
     max_messages: int = 50,
-    topic_hint: Optional[str] = None,
+    topic_hint: str | None = None,
 ) -> str:
     """
     Extract readable text from a list of Message objects.
@@ -136,17 +139,11 @@ def extract_conversation_text(
                 lines.append(f"User: {msg.content}")
             else:
                 # List of TextContent / ImageContent blocks
-                text_parts = [
-                    block.text for block in msg.content if hasattr(block, "text")
-                ]
+                text_parts = [block.text for block in msg.content if hasattr(block, "text")]
                 if text_parts:
                     lines.append(f"User: {' '.join(text_parts)}")
         elif isinstance(msg, AssistantMessage):
-            text_parts = [
-                block.text
-                for block in msg.content
-                if isinstance(block, TextContent)
-            ]
+            text_parts = [block.text for block in msg.content if isinstance(block, TextContent)]
             if text_parts:
                 lines.append(f"Assistant: {' '.join(text_parts)}")
 
@@ -187,8 +184,8 @@ def save_skill_to_disk(
     draft: SkillDraft,
     scope: SkillScope,
     *,
-    project_skills_dir: Optional[Path] = None,
-    global_skills_dir: Optional[Path] = None,
+    project_skills_dir: Path | None = None,
+    global_skills_dir: Path | None = None,
     overwrite: bool = False,
 ) -> Path:
     """
@@ -221,8 +218,7 @@ def save_skill_to_disk(
 
     if skill_dir.exists() and not overwrite:
         raise FileExistsError(
-            f"Skill directory already exists: {skill_dir}. "
-            f"Use overwrite=True to replace it."
+            f"Skill directory already exists: {skill_dir}. " f"Use overwrite=True to replace it."
         )
 
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -239,7 +235,7 @@ def save_skill_to_disk(
 async def generate_skill_draft(
     model: Model,
     conversation_text: str,
-    topic_hint: Optional[str] = None,
+    topic_hint: str | None = None,
 ) -> SkillDraft:
     """
     Call an LLM to generate a SkillDraft from conversation text.
@@ -336,7 +332,7 @@ def _resolve_project_skills_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 
-async def handle_create_skill(agent, args: str) -> tuple[bool, str]:
+async def handle_create_skill(agent: Any, args: str) -> tuple[bool, str]:
     """Handle /create-skill command.
 
     Generates a skill draft from the current session's conversation history
@@ -367,9 +363,7 @@ async def handle_create_skill(agent, args: str) -> tuple[bool, str]:
 
     # Generate draft via LLM
     try:
-        draft = await generate_skill_draft(
-            agent.model, conversation_text, topic_hint=topic_hint
-        )
+        draft = await generate_skill_draft(agent.model, conversation_text, topic_hint=topic_hint)
     except (ValueError, Exception) as e:
         return False, f"Failed to generate skill draft: {e}"
 
@@ -390,7 +384,7 @@ async def handle_create_skill(agent, args: str) -> tuple[bool, str]:
     return True, preview_display
 
 
-async def handle_save_skill(agent, args: str) -> tuple[bool, str]:
+async def handle_save_skill(agent: Any, args: str) -> tuple[bool, str]:
     """Handle /save-skill command.
 
     Saves the pending skill draft (from /create-skill) to disk at

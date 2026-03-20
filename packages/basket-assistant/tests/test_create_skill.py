@@ -4,8 +4,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
-
 from basket_ai.types import (
     AssistantMessage,
     StopReason,
@@ -24,6 +22,7 @@ from basket_assistant.commands.create_skill import (
     save_skill_to_disk,
 )
 from basket_assistant.core import get_skill_full_content, get_skills_index
+from pydantic import ValidationError
 
 
 class TestSkillDraft:
@@ -83,6 +82,7 @@ class TestSanitizeSkillName:
 # ---------------------------------------------------------------------------
 # Helpers for building test messages
 # ---------------------------------------------------------------------------
+
 
 def _user_msg(text: str, ts: int = 1000) -> UserMessage:
     return UserMessage(role="user", content=text, timestamp=ts)
@@ -173,11 +173,13 @@ class TestGenerateSkillDraft:
 
     @pytest.mark.asyncio
     async def test_generates_valid_draft(self):
-        llm_response_json = json.dumps({
-            "name": "docker-deploy",
-            "description": "Deploy apps with Docker",
-            "body": "## Overview\n\nStep-by-step Docker deployment.",
-        })
+        llm_response_json = json.dumps(
+            {
+                "name": "docker-deploy",
+                "description": "Deploy apps with Docker",
+                "body": "## Overview\n\nStep-by-step Docker deployment.",
+            }
+        )
         mock_message = _assistant_msg(llm_response_json)
 
         with patch(
@@ -197,11 +199,13 @@ class TestGenerateSkillDraft:
 
     @pytest.mark.asyncio
     async def test_sanitizes_invalid_name_from_llm(self):
-        llm_response_json = json.dumps({
-            "name": "Docker Deploy!!",
-            "description": "Deploy apps with Docker",
-            "body": "## Overview\n\nSome body.",
-        })
+        llm_response_json = json.dumps(
+            {
+                "name": "Docker Deploy!!",
+                "description": "Deploy apps with Docker",
+                "body": "## Overview\n\nSome body.",
+            }
+        )
         mock_message = _assistant_msg(llm_response_json)
 
         with patch(
@@ -261,11 +265,13 @@ class TestGenerateSkillDraft:
     @pytest.mark.asyncio
     async def test_raises_on_missing_required_field(self):
         """LLM returns valid JSON but missing the 'body' field."""
-        incomplete_json = json.dumps({
-            "name": "some-skill",
-            "description": "A skill description",
-            # "body" is intentionally missing
-        })
+        incomplete_json = json.dumps(
+            {
+                "name": "some-skill",
+                "description": "A skill description",
+                # "body" is intentionally missing
+            }
+        )
         mock_message = _assistant_msg(incomplete_json)
 
         with patch(
@@ -505,7 +511,8 @@ class TestHandleCreateSkill:
 
         mock_gen.assert_awaited_once()
         call_kwargs = mock_gen.call_args
-        assert call_kwargs[1].get("topic_hint") == "my topic" or call_kwargs.kwargs.get("topic_hint") == "my topic"
+        hint = call_kwargs[1].get("topic_hint") or call_kwargs.kwargs.get("topic_hint")
+        assert hint == "my topic"
 
 
 # ---------------------------------------------------------------------------
@@ -551,9 +558,7 @@ class TestHandleSaveSkill:
     async def test_saves_to_global(self, tmp_path):
         """Saves skill to global skills directory."""
         agent = _build_mock_agent()
-        draft = SkillDraft(
-            name="test-skill", description="A test skill", body="# Test\n\nBody."
-        )
+        draft = SkillDraft(name="test-skill", description="A test skill", body="# Test\n\nBody.")
         agent._pending_skill_draft = draft
 
         global_dir = tmp_path / "global-skills"
@@ -572,9 +577,7 @@ class TestHandleSaveSkill:
     async def test_saves_to_project(self, tmp_path):
         """Saves skill to project skills directory."""
         agent = _build_mock_agent()
-        draft = SkillDraft(
-            name="proj-skill", description="A project skill", body="# Proj"
-        )
+        draft = SkillDraft(name="proj-skill", description="A project skill", body="# Proj")
         agent._pending_skill_draft = draft
 
         project_dir = tmp_path / "project-skills"
@@ -610,9 +613,7 @@ class TestHandleSaveSkill:
     async def test_file_exists_returns_error(self, tmp_path):
         """Returns error when skill directory already exists."""
         agent = _build_mock_agent()
-        draft = SkillDraft(
-            name="existing-skill", description="Already exists", body="# Body"
-        )
+        draft = SkillDraft(name="existing-skill", description="Already exists", body="# Body")
         agent._pending_skill_draft = draft
 
         # Pre-create the directory to trigger FileExistsError
