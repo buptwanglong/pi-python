@@ -242,6 +242,9 @@ def _dispatch_ws_message(
             parsed.tool_name,
             arguments=parsed.arguments,
             ui_state=ui_state,
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
         )
     elif isinstance(parsed, ToolCallEnd):
         handle_tool_call_end(
@@ -249,6 +252,9 @@ def _dispatch_ws_message(
             parsed.tool_name,
             result=parsed.result,
             error=parsed.error,
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
         )
     elif isinstance(parsed, AgentComplete):
         handle_agent_complete(

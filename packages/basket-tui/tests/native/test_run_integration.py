@@ -206,3 +206,108 @@ def test_streaming_overlay_get_body_lines_includes_preview_when_phase_streaming(
     assert any("Streaming" in ln and "content" in ln for ln in lines[1:]) or (
         "Streaming content" in " ".join(lines[1:])
     )
+
+
+def test_dispatch_text_then_tool_then_text_renders_in_order():
+    """Text → tool → text: each segment rendered immediately in correct order, not batched at end."""
+    assembler = StreamAssembler()
+    width = 80
+    printed: list[str] = []
+    output_put = printed.append
+    last_output_count: list[int] = [0]
+    ui_state: dict[str, str] = {"phase": "idle"}
+
+    # Step 1: streaming text
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "I'll read the file."},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    assert assembler._buffer == "I'll read the file."
+    lines_before_tool = len(printed)
+
+    # Step 2: tool starts → should flush buffer and render assistant text
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "read", "arguments": {"path": "/tmp/x"}},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    assert assembler._buffer == ""  # buffer flushed
+    lines_after_tool_start = len(printed)
+    assert lines_after_tool_start > lines_before_tool  # assistant text was rendered
+
+    # Step 3: tool ends → should render tool block immediately
+    _dispatch_ws_message(
+        {"type": "tool_call_end", "tool_name": "read", "result": "file content", "error": None},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    lines_after_tool_end = len(printed)
+    assert lines_after_tool_end > lines_after_tool_start  # tool block rendered
+
+    # Step 4: more streaming text
+    _dispatch_ws_message(
+        {"type": "text_delta", "delta": "Here is the result."},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+
+    # Step 5: agent complete → render remaining buffer
+    _dispatch_ws_message(
+        {"type": "agent_complete"},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+
+    # Verify message order in assembler
+    assert len(assembler.messages) == 3
+    assert assembler.messages[0] == {"role": "assistant", "content": "I'll read the file."}
+    assert assembler.messages[1]["role"] == "tool"
+    assert "read" in assembler.messages[1]["content"]
+    assert assembler.messages[2] == {"role": "assistant", "content": "Here is the result."}
+
+    # Verify rendered output order
+    combined = _strip_ansi(" ".join(printed))
+    pos_pre = combined.find("read the file")
+    pos_tool = combined.find("read")
+    pos_post = combined.find("result")
+    assert pos_pre >= 0 and pos_tool >= 0 and pos_post >= 0
+    assert pos_pre < pos_post
+
+
+def test_dispatch_multiple_tools_immediate_render():
+    """Multiple tools in sequence: each tool block rendered immediately, not batched."""
+    assembler = StreamAssembler()
+    width = 80
+    printed: list[str] = []
+    output_put = printed.append
+    last_output_count: list[int] = [0]
+    ui_state: dict[str, str] = {"phase": "idle"}
+
+    # Tool A
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "bash", "arguments": {}},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    _dispatch_ws_message(
+        {"type": "tool_call_end", "tool_name": "bash", "result": "ok1", "error": None},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    lines_after_tool_a = len(printed)
+    assert lines_after_tool_a >= 1  # tool A rendered immediately
+
+    # Tool B
+    _dispatch_ws_message(
+        {"type": "tool_call_start", "tool_name": "read", "arguments": {"path": "f"}},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    _dispatch_ws_message(
+        {"type": "tool_call_end", "tool_name": "read", "result": "content", "error": None},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+    lines_after_tool_b = len(printed)
+    assert lines_after_tool_b > lines_after_tool_a  # tool B rendered immediately
+
+    # Agent complete (no remaining buffer)
+    _dispatch_ws_message(
+        {"type": "agent_complete"},
+        assembler, width, output_put, last_output_count, ui_state=ui_state,
+    )
+
+    assert len(assembler.messages) == 2
+    assert last_output_count[0] == 2
