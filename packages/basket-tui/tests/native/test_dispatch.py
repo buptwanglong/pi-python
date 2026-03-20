@@ -166,3 +166,54 @@ def test_handle_agent_aborted_clears_assembler_and_prints():
     assert assembler._thinking_buffer == ""
     assert assembler._current_tool is None
     assert any("Aborted" in line for line in out)
+
+
+def test_handle_tool_call_start_flushes_buffer_and_renders():
+    """When buffer has content, tool_call_start flushes it as assistant msg and renders via output_put."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+    # Simulate prior streaming
+    assembler.text_delta("I'll read the file")
+    assert assembler._buffer == "I'll read the file"
+
+    handle_tool_call_start(
+        assembler,
+        "read",
+        arguments={"path": "/etc/hosts"},
+        ui_state={"phase": "streaming"},
+        width=width,
+        output_put=output_put,
+        last_output_count=last_output_count,
+    )
+
+    # Buffer should be flushed: assistant message committed
+    assert assembler._buffer == ""
+    assert any(m["role"] == "assistant" and m["content"] == "I'll read the file" for m in assembler.messages)
+    # Tool should be recorded
+    assert assembler._current_tool is not None
+    assert assembler._current_tool["tool_name"] == "read"
+    # Output should contain rendered assistant text
+    assert len(out) >= 1
+    # last_output_count should track the flushed assistant message
+    assert last_output_count[0] >= 1
+
+
+def test_handle_tool_call_start_empty_buffer_no_flush():
+    """When buffer is empty, tool_call_start does not add assistant message."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+
+    handle_tool_call_start(
+        assembler,
+        "bash",
+        arguments={},
+        ui_state={"phase": "idle"},
+        width=width,
+        output_put=output_put,
+        last_output_count=last_output_count,
+    )
+
+    # No assistant message added
+    assistant_msgs = [m for m in assembler.messages if m["role"] == "assistant"]
+    assert len(assistant_msgs) == 0
+    # Tool recorded
+    assert assembler._current_tool is not None
+    assert assembler._current_tool["tool_name"] == "bash"

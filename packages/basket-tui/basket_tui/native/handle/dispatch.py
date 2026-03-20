@@ -67,8 +67,19 @@ def handle_tool_call_start(
     tool_name: str,
     arguments: Optional[dict] = None,
     ui_state: Optional[dict[str, str]] = None,
+    width: int = 80,
+    output_put: Optional[Callable[[str], None]] = None,
+    last_output_count: Optional[list[int]] = None,
 ) -> None:
-    """Handle tool_call_start: set phase tool_running, record current tool."""
+    """Handle tool_call_start: flush buffer, set phase tool_running, record current tool."""
+    # Flush streaming buffer BEFORE tool starts so text appears before tool block
+    if output_put is not None and last_output_count is not None:
+        if assembler.flush_buffer():
+            msg = assembler.messages[-1]
+            for line in render_messages([msg], width):
+                output_put(line)
+            last_output_count[0] = len(assembler.messages)
+
     if ui_state is not None:
         ui_state["phase"] = "tool_running"
     assembler.tool_call_start(tool_name, arguments)
