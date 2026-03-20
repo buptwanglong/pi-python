@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 # 256-color friendly backgrounds (avoid role-prefix labels; color carries meaning).
 _USER_PANEL_STYLE = "on grey23"
 _USER_TEXT_STYLE = "white on grey23"
-# Dark green (256 color 22) so tool block is distinct from user (grey23).
-_TOOL_BG = "on color(22)"
-_TOOL_HEADER_STYLE = "bold yellow on color(22)"
-_TOOL_BODY_STYLE = "dim white on color(22)"
+# Dark ink-green background (#0a2a0a) — subtle, not eye-catching.
+# Yellow header text keeps tool blocks visually distinct from user blocks (grey23).
+_TOOL_BG = "on #0a2a0a"
+_TOOL_HEADER_STYLE = "bold yellow on #0a2a0a"
+_TOOL_BODY_STYLE = "dim white on #0a2a0a"
 
 
 def stream_preview_lines(text: str, width: int) -> list[str]:
@@ -104,7 +105,7 @@ def render_messages(messages: list[dict[str, Any]], width: int = 80) -> list[str
         file=out,
         width=width,
         force_terminal=True,
-        color_system="256",
+        color_system="truecolor",
     )
 
     for msg in messages:
