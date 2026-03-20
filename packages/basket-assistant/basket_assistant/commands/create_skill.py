@@ -170,7 +170,7 @@ def format_skill_md(draft: SkillDraft) -> str:
         f"---\n"
         f"name: {draft.name}\n"
         f'description: "{escaped_description}"\n'
-        f"---\n"
+        f"---\n\n"
         f"{draft.body}\n"
     )
 
@@ -364,7 +364,7 @@ async def handle_create_skill(agent: Any, args: str) -> tuple[bool, str]:
     # Generate draft via LLM
     try:
         draft = await generate_skill_draft(agent.model, conversation_text, topic_hint=topic_hint)
-    except (ValueError, Exception) as e:
+    except ValueError as e:
         return False, f"Failed to generate skill draft: {e}"
 
     # Format preview for display
@@ -422,7 +422,7 @@ async def handle_save_skill(agent: Any, args: str) -> tuple[bool, str]:
         )
     except FileExistsError:
         return False, f"Skill '{draft.name}' already exists at target location."
-    except Exception as e:
+    except OSError as e:
         return False, f"Failed to save skill: {e}"
 
     agent._pending_skill_draft = None
