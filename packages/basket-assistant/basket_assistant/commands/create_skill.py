@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from enum import Enum
+from pathlib import Path
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -178,6 +179,59 @@ def format_skill_md(draft: SkillDraft) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Save skill to disk
+# ---------------------------------------------------------------------------
+
+
+def save_skill_to_disk(
+    draft: SkillDraft,
+    scope: SkillScope,
+    *,
+    project_skills_dir: Optional[Path] = None,
+    global_skills_dir: Optional[Path] = None,
+    overwrite: bool = False,
+) -> Path:
+    """
+    Write a SkillDraft to disk as a SKILL.md file.
+
+    Args:
+        draft: Validated skill draft to save.
+        scope: Where to save — PROJECT or GLOBAL.
+        project_skills_dir: Override for project-scoped skills directory.
+            Defaults to ``Path.cwd() / ".basket" / "skills"``.
+        global_skills_dir: Override for global-scoped skills directory.
+            Defaults to ``Path.home() / ".basket" / "skills"``.
+        overwrite: If True, overwrite an existing skill directory.
+            If False (default), raise FileExistsError on conflict.
+
+    Returns:
+        Path to the created SKILL.md file.
+
+    Raises:
+        FileExistsError: If the skill directory already exists and
+            *overwrite* is False.
+    """
+    if scope is SkillScope.PROJECT:
+        base_dir = project_skills_dir or (Path.cwd() / ".basket" / "skills")
+    else:
+        base_dir = global_skills_dir or (Path.home() / ".basket" / "skills")
+
+    skill_dir = base_dir / draft.name
+    skill_file = skill_dir / "SKILL.md"
+
+    if skill_dir.exists() and not overwrite:
+        raise FileExistsError(
+            f"Skill directory already exists: {skill_dir}. "
+            f"Use overwrite=True to replace it."
+        )
+
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_file.write_text(format_skill_md(draft), encoding="utf-8")
+
+    return skill_file
+
+
+# ---------------------------------------------------------------------------
 # LLM-based skill generation
 # ---------------------------------------------------------------------------
 
@@ -259,4 +313,126 @@ async def generate_skill_draft(
         name=sanitized_name,
         description=str(data["description"]),
         body=str(data["body"]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Directory resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_global_skills_dir() -> Path:
+    """Return the global skills directory path."""
+    return Path.home() / ".basket" / "skills"
+
+
+def _resolve_project_skills_dir() -> Path:
+    """Return the project-scoped skills directory path."""
+    return Path.cwd() / ".basket" / "skills"
+
+
+# ---------------------------------------------------------------------------
+# Command handlers
+# ---------------------------------------------------------------------------
+
+
+async def handle_create_skill(agent, args: str) -> tuple[bool, str]:
+    """Handle /create-skill command.
+
+    Generates a skill draft from the current session's conversation history
+    and stores it on the agent for subsequent /save-skill usage.
+
+    Args:
+        agent: The agent instance with session_manager, _session_id, and model.
+        args: Optional topic hint string.
+
+    Returns:
+        Tuple of (success, message).
+    """
+    topic_hint = args.strip() or None
+
+    # Check session availability
+    if agent.session_manager is None or agent._session_id is None:
+        return False, "No active session. Cannot create skill."
+
+    # Load messages from session
+    messages = await agent.session_manager.load_messages(agent._session_id)
+    if not messages:
+        return False, "Current session has no conversation history. Cannot generate skill."
+
+    # Extract conversation text
+    conversation_text = extract_conversation_text(messages, topic_hint=topic_hint)
+    if not conversation_text.strip():
+        return False, "No usable conversation text found."
+
+    # Generate draft via LLM
+    try:
+        draft = await generate_skill_draft(
+            agent.model, conversation_text, topic_hint=topic_hint
+        )
+    except (ValueError, Exception) as e:
+        return False, f"Failed to generate skill draft: {e}"
+
+    # Format preview for display
+    preview = format_skill_md(draft)
+    preview_display = (
+        f"📝 Skill draft generated:\n"
+        f"  Name: {draft.name}\n"
+        f"  Description: {draft.description}\n"
+        f"{'─' * 40}\n"
+        f"{preview}\n"
+        f"{'─' * 40}\n"
+        f"Use '/save-skill project' or '/save-skill global' to save."
+    )
+
+    # Store draft on agent for /save-skill
+    agent._pending_skill_draft = draft
+    return True, preview_display
+
+
+async def handle_save_skill(agent, args: str) -> tuple[bool, str]:
+    """Handle /save-skill command.
+
+    Saves the pending skill draft (from /create-skill) to disk at
+    either global or project scope.
+
+    Args:
+        agent: The agent instance with _pending_skill_draft attribute.
+        args: Scope string — "global" or "project".
+
+    Returns:
+        Tuple of (success, message).
+    """
+    draft = getattr(agent, "_pending_skill_draft", None)
+    if draft is None:
+        return False, "No pending skill draft. Run /create-skill first."
+
+    scope_str = args.strip().lower()
+    if scope_str == "global":
+        scope = SkillScope.GLOBAL
+    elif scope_str == "project":
+        scope = SkillScope.PROJECT
+    else:
+        return False, (
+            "Please specify scope: /save-skill global or /save-skill project\n"
+            f"  global  → {_resolve_global_skills_dir()}\n"
+            f"  project → {_resolve_project_skills_dir()}"
+        )
+
+    try:
+        saved_path = save_skill_to_disk(
+            draft,
+            scope,
+            project_skills_dir=_resolve_project_skills_dir(),
+            global_skills_dir=_resolve_global_skills_dir(),
+        )
+    except FileExistsError:
+        return False, f"Skill '{draft.name}' already exists at target location."
+    except Exception as e:
+        return False, f"Failed to save skill: {e}"
+
+    agent._pending_skill_draft = None
+    return True, (
+        f"✅ Skill '{draft.name}' saved to {saved_path.parent}\n"
+        f"It is now available via the skill tool."
     )
