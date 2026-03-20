@@ -13,6 +13,7 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.mouse_events import MouseEventType
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,13 @@ class _ConversationBodyWindow(Window):
         super().__init__(**window_kwargs)
         self._on_scroll_event = on_scroll_event
 
+    _SCROLL_EVENTS = frozenset({MouseEventType.SCROLL_UP, MouseEventType.SCROLL_DOWN})
+
     def _mouse_handler(self, mouse_event: Any) -> Any:
+        # Only handle scroll-wheel events; pass click/drag through to the
+        # terminal so native text selection keeps working.
+        if mouse_event.event_type not in self._SCROLL_EVENTS:
+            return NotImplemented
         prev = self.vertical_scroll
         result = super()._mouse_handler(mouse_event)
         if self.vertical_scroll != prev:
