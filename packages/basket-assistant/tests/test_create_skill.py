@@ -23,6 +23,7 @@ from basket_assistant.commands.create_skill import (
     sanitize_skill_name,
     save_skill_to_disk,
 )
+from basket_assistant.core import get_skill_full_content, get_skills_index
 
 
 class TestSkillDraft:
@@ -643,3 +644,36 @@ class TestHandleSaveSkill:
             success, _ = await handle_save_skill(agent, "GLOBAL")
 
         assert success
+
+
+# ---------------------------------------------------------------------------
+# Tests for skill index refresh after save
+# ---------------------------------------------------------------------------
+
+
+class TestSkillRefreshAfterSave:
+    """Test that saved skills appear in the index immediately."""
+
+    def test_saved_skill_appears_in_index(self, tmp_path):
+        """After saving, get_skills_index picks up the new skill."""
+        draft = SkillDraft(
+            name="new-skill",
+            description="Brand new",
+            body="# New Skill\n\nFresh content.",
+        )
+        save_skill_to_disk(draft, SkillScope.PROJECT, project_skills_dir=tmp_path)
+        index = get_skills_index([tmp_path])
+        names = [n for n, _ in index]
+        assert "new-skill" in names
+
+    def test_saved_skill_content_loadable(self, tmp_path):
+        """After saving, get_skill_full_content returns the body."""
+        draft = SkillDraft(
+            name="loadable-skill",
+            description="Can be loaded",
+            body="# Loadable\n\nStep 1.",
+        )
+        save_skill_to_disk(draft, SkillScope.PROJECT, project_skills_dir=tmp_path)
+        content = get_skill_full_content("loadable-skill", [tmp_path])
+        assert "Loadable" in content
+        assert "Step 1" in content
