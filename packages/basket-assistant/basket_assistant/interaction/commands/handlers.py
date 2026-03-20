@@ -35,6 +35,8 @@ Available commands:
   /plan [on|off]     Toggle or set plan mode
   /sessions          List all available sessions
   /open <session_id> Switch to a different session
+  /create-skill [topic] Create a skill from conversation
+  /save-skill <scope>   Save generated skill (global/project)
   /exit, /quit       Exit the assistant
 
 Type your message to chat with the assistant.
@@ -228,4 +230,30 @@ def register_builtin_commands(registry: "CommandRegistry", agent) -> None:
         description="Switch to a different session",
         usage="/open <session_id>",
         aliases=["open", "/open"],
+    )
+
+    # Register /create-skill command
+    from basket_assistant.commands.create_skill import handle_create_skill, handle_save_skill
+
+    async def _handle_create_skill(args: str) -> tuple[bool, str]:
+        return await handle_create_skill(agent, args)
+
+    registry.register(
+        name="create-skill",
+        handler=_handle_create_skill,
+        description="Create a skill from conversation content",
+        usage="/create-skill [topic hint]",
+        aliases=["create-skill", "/create-skill"],
+    )
+
+    # Register /save-skill command
+    async def _handle_save_skill(args: str) -> tuple[bool, str]:
+        return await handle_save_skill(agent, args)
+
+    registry.register(
+        name="save-skill",
+        handler=_handle_save_skill,
+        description="Save pending skill draft to disk",
+        usage="/save-skill <global|project>",
+        aliases=["save-skill", "/save-skill"],
     )
