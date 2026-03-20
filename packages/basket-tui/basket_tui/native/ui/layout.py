@@ -60,6 +60,8 @@ def build_layout(
     get_vertical_scroll: Callable[[Any], int],
     get_cursor_position: Callable[[], Point],
     on_body_mouse_scroll: Callable[[Any], None],
+    get_todo_lines: Callable[[], str] | None = None,
+    get_todo_height: Callable[[], int] | None = None,
 ) -> Layout:
     """
     Build prompt_toolkit Layout: optional banner, doctor, chrome, body, footer, separator, input row.
@@ -79,6 +81,10 @@ def build_layout(
         get_vertical_scroll: Passed to the body ``Window`` (first visible row).
         get_cursor_position: Passed to ``FormattedTextControl`` for scroll/cursor alignment.
         on_body_mouse_scroll: Called after wheel scroll changes ``vertical_scroll``.
+        get_todo_lines: Optional callable returning ANSI-formatted todo text; when provided
+            (together with ``get_todo_height``), a todo panel is inserted between the body and
+            the footer.
+        get_todo_height: Optional callable returning the height (in rows) for the todo panel.
     """
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
@@ -128,6 +134,17 @@ def build_layout(
         always_hide_cursor=True,
     )
 
+    todo_window = None
+    if get_todo_lines is not None and get_todo_height is not None:
+        todo_control = FormattedTextControl(
+            text=lambda: ANSI(get_todo_lines() or ""),
+            focusable=False,
+        )
+        todo_window = Window(
+            content=todo_control,
+            height=lambda: get_todo_height(),
+        )
+
     rows: list[Any] = []
     b_lines = banner_lines or []
     if b_lines:
@@ -153,23 +170,20 @@ def build_layout(
             )
         )
 
-    rows.extend(
-        [
-            Window(height=2, content=header_control),
-            body_window,
-            Window(height=1, content=footer_control),
-            Window(height=1, content=sep_control),
-            VSplit(
-                [
-                    Window(
-                        width=3,
-                        content=FormattedTextControl("❯ "),
-                        dont_extend_width=True,
-                    ),
-                    Window(content=input_control),
-                ]
-            ),
-        ]
-    )
+    rows_to_add: list[Any] = [
+        Window(height=2, content=header_control),
+        body_window,
+    ]
+    if todo_window is not None:
+        rows_to_add.append(todo_window)
+    rows_to_add.extend([
+        Window(height=1, content=footer_control),
+        Window(height=1, content=sep_control),
+        VSplit([
+            Window(width=3, content=FormattedTextControl("❯ "), dont_extend_width=True),
+            Window(content=input_control),
+        ]),
+    ])
+    rows.extend(rows_to_add)
 
     return Layout(HSplit(rows))

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from prompt_toolkit.mouse_events import MouseEventType
 
-from basket_tui.native.ui.layout import _ConversationBodyWindow
+from basket_tui.native.ui.layout import _ConversationBodyWindow, build_layout
 
 
 def _make_mouse_event(event_type: MouseEventType) -> SimpleNamespace:
@@ -84,3 +84,49 @@ class TestConversationBodyWindowMouse:
             win._mouse_handler(event)
 
         callback.assert_not_called()
+
+
+def test_build_layout_with_todo_panel():
+    """build_layout with get_todo_lines returns layout containing todo panel."""
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.data_structures import Point
+
+    input_buffer = Buffer(name="input", multiline=False)
+
+    layout = build_layout(
+        width=80,
+        base_url="http://localhost:7682",
+        header_state={"agent": "default", "session": "s1"},
+        ui_state={"phase": "idle", "connection": "connected"},
+        get_body_lines=lambda: ["line1"],
+        input_buffer=input_buffer,
+        footer_line=lambda: "footer",
+        get_vertical_scroll=lambda w: 0,
+        get_cursor_position=lambda: Point(0, 0),
+        on_body_mouse_scroll=lambda w: None,
+        get_todo_lines=lambda: "     ◼ Task in progress",
+        get_todo_height=lambda: 2,
+    )
+    assert layout is not None
+
+
+def test_build_layout_without_todo_panel():
+    """build_layout without get_todo_lines still works (backward compatible)."""
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.data_structures import Point
+
+    input_buffer = Buffer(name="input", multiline=False)
+
+    layout = build_layout(
+        width=80,
+        base_url="http://localhost:7682",
+        header_state={"agent": "default", "session": "s1"},
+        ui_state={"phase": "idle", "connection": "connected"},
+        get_body_lines=lambda: ["line1"],
+        input_buffer=input_buffer,
+        footer_line=lambda: "footer",
+        get_vertical_scroll=lambda w: 0,
+        get_cursor_position=lambda: Point(0, 0),
+        on_body_mouse_scroll=lambda w: None,
+    )
+    assert layout is not None
