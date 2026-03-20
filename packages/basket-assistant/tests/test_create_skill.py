@@ -149,7 +149,7 @@ class TestFormatSkillMd:
         # YAML frontmatter
         assert result.startswith("---\n")
         assert "name: docker-deploy" in result
-        assert "description: How to deploy with Docker" in result
+        assert 'description: "How to deploy with Docker"' in result
         # Body after frontmatter closing ---
         parts = result.split("---\n")
         # parts[0] is empty (before first ---), parts[1] is YAML, parts[2:] is body
@@ -212,3 +212,64 @@ class TestGenerateSkillDraft:
         assert isinstance(draft, SkillDraft)
         # The invalid name should have been sanitized
         assert draft.name == "docker-deploy"
+
+    @pytest.mark.asyncio
+    async def test_raises_on_no_text_content(self):
+        """LLM returns an AssistantMessage with no TextContent blocks."""
+        empty_message = AssistantMessage(
+            role="assistant",
+            content=[],  # No TextContent blocks at all
+            api="test-api",
+            provider="test-provider",
+            model="test-model",
+            stopReason=StopReason.STOP,
+            timestamp=1001,
+        )
+
+        with patch(
+            "basket_assistant.commands.create_skill.complete",
+            new_callable=AsyncMock,
+            return_value=empty_message,
+        ):
+            with pytest.raises(ValueError, match="LLM returned no text content"):
+                await generate_skill_draft(
+                    model="fake-model",
+                    conversation_text="User asked something.",
+                )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_invalid_json(self):
+        """LLM returns text that is not valid JSON."""
+        mock_message = _assistant_msg("This is not JSON at all {{{")
+
+        with patch(
+            "basket_assistant.commands.create_skill.complete",
+            new_callable=AsyncMock,
+            return_value=mock_message,
+        ):
+            with pytest.raises(ValueError, match="LLM returned invalid JSON"):
+                await generate_skill_draft(
+                    model="fake-model",
+                    conversation_text="User asked something.",
+                )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_required_field(self):
+        """LLM returns valid JSON but missing the 'body' field."""
+        incomplete_json = json.dumps({
+            "name": "some-skill",
+            "description": "A skill description",
+            # "body" is intentionally missing
+        })
+        mock_message = _assistant_msg(incomplete_json)
+
+        with patch(
+            "basket_assistant.commands.create_skill.complete",
+            new_callable=AsyncMock,
+            return_value=mock_message,
+        ):
+            with pytest.raises(ValueError, match="missing required field.*'body'"):
+                await generate_skill_draft(
+                    model="fake-model",
+                    conversation_text="User asked something.",
+                )

@@ -15,6 +15,7 @@ from basket_ai.types import (
     AssistantMessage,
     Context,
     Message,
+    Model,
     TextContent,
     UserMessage,
 )
@@ -166,10 +167,11 @@ def format_skill_md(draft: SkillDraft) -> str:
     Returns:
         String with YAML frontmatter and Markdown body.
     """
+    escaped_description = draft.description.replace("\\", "\\\\").replace('"', '\\"')
     return (
         f"---\n"
         f"name: {draft.name}\n"
-        f"description: {draft.description}\n"
+        f'description: "{escaped_description}"\n'
         f"---\n"
         f"{draft.body}\n"
     )
@@ -181,7 +183,7 @@ def format_skill_md(draft: SkillDraft) -> str:
 
 
 async def generate_skill_draft(
-    model,
+    model: Model,
     conversation_text: str,
     topic_hint: Optional[str] = None,
 ) -> SkillDraft:
