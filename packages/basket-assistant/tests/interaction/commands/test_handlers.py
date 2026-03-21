@@ -412,6 +412,8 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("plan") is not None
         assert registry.get_command("sessions") is not None
         assert registry.get_command("open") is not None
+        assert registry.get_command("clear") is not None
+        assert registry.get_command("compact") is not None
 
     def test_command_aliases(self):
         """Test that command aliases work."""
@@ -425,6 +427,8 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("/plan") is not None
         assert registry.get_command("/sessions") is not None
         assert registry.get_command("/open") is not None
+        assert registry.get_command("/clear") is not None
+        assert registry.get_command("/compact") is not None
 
     def test_command_execution(self):
         """Test that registered commands can be executed."""

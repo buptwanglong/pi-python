@@ -181,6 +181,93 @@ class TestInputProcessor:
         assert result.message is not None
 
 
+class TestClearCompactRouting:
+    """Test /clear and /compact are routed correctly as handled commands."""
+
+    @pytest.fixture
+    def full_registry(self):
+        """Create a command registry with all builtins registered."""
+        from basket_assistant.interaction.commands.handlers import BuiltinCommandHandlers
+
+        class FullMockContext:
+            def __init__(self):
+                self.messages = []
+                self.system_prompt = ""
+                self.tools = []
+
+            def model_copy(self, update=None):
+                new = FullMockContext()
+                new.messages = list(self.messages)
+                new.system_prompt = self.system_prompt
+                new.tools = list(self.tools)
+                if update:
+                    for k, v in update.items():
+                        setattr(new, k, v)
+                return new
+
+        class FullMockModel:
+            provider = "openai"
+            model_id = "test"
+            context_window = 128000
+
+        class FullMockSettings:
+            def __init__(self):
+                self.model = FullMockModel()
+                self.agent = type("A", (), {"max_turns": 10, "auto_save": True})()
+                self.workspace_dir = "/tmp"
+
+            def to_dict(self):
+                return {"model": {"provider": "openai"}, "agent": {"max_turns": 10}}
+
+        class FullMockSessionManager:
+            async def create_session(self, model_id=""):
+                return "new-session"
+
+            async def list_sessions(self):
+                return []
+
+            async def load_session(self, sid):
+                return []
+
+        class FullMockAgent:
+            def __init__(self):
+                self.settings = FullMockSettings()
+                self.session_manager = FullMockSessionManager()
+                self.context = FullMockContext()
+                self.model = FullMockModel()
+                self._todo_show_full = False
+                self.plan_mode = False
+                self._current_todos = []
+                self._pending_asks = []
+                self._session_id = None
+                self.conversation = []
+
+            def load_history(self, msgs):
+                self.conversation = msgs
+
+            async def try_resume_pending_ask(self, user_input, tool_call_id=None):
+                return False, None
+
+        agent = FullMockAgent()
+        registry = CommandRegistry(agent)
+        processor = InputProcessor(agent, registry)
+        return processor
+
+    @pytest.mark.asyncio
+    async def test_clear_command_is_handled(self, full_registry):
+        """Test /clear is routed as a handled command."""
+        result = await full_registry.process("/clear")
+        assert result.action == "handled"
+        assert result.error is None or result.error == ""
+
+    @pytest.mark.asyncio
+    async def test_compact_command_is_handled(self, full_registry):
+        """Test /compact is routed as a handled command."""
+        result = await full_registry.process("/compact")
+        assert result.action == "handled"
+        assert result.error is None or result.error == ""
+
+
 class TestProcessResult:
     """Test ProcessResult dataclass."""
 
