@@ -14,6 +14,7 @@ from basket_protocol import (
     AgentComplete,
     AgentError,
     AgentSwitched,
+    AskUserQuestion,
     SessionSwitched,
     System,
     TextDelta,
@@ -117,6 +118,10 @@ class GatewayWsConnection:
                     h(parsed)
             elif isinstance(parsed, TodoUpdate):
                 h = self._handlers.get("on_todo_update")
+                if h:
+                    h(parsed)
+            elif isinstance(parsed, AskUserQuestion):
+                h = self._handlers.get("on_ask_user_question")
                 if h:
                     h(parsed)
         except Exception:  # noqa: BLE001

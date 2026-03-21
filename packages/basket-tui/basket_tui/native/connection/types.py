@@ -7,6 +7,7 @@ from basket_protocol import (
     AgentComplete,
     AgentError,
     AgentSwitched,
+    AskUserQuestion,
     SessionSwitched,
     System,
     TextDelta,
@@ -31,6 +32,7 @@ class GatewayHandlers(TypedDict, total=False):
     on_agent_aborted: Callable[[AgentAborted], None]
     on_system: Callable[[System], None]
     on_todo_update: Callable[[TodoUpdate], None]
+    on_ask_user_question: Callable[[AskUserQuestion], None]
 
 
 class GatewayConnectionProtocol(Protocol):

@@ -259,6 +259,24 @@ def handle_todo_update(
     logger.info("Todo state updated", extra={"count": len(todos)})
 
 
+def handle_ask_user_question(
+    question_state: dict[str, Any],
+    tool_call_id: str,
+    question: str,
+    options: list[str],
+) -> None:
+    """Handle ask_user_question: activate question panel with options."""
+    question_state["active"] = True
+    question_state["tool_call_id"] = tool_call_id
+    question_state["question"] = question
+    question_state["options"] = options
+    question_state["selected"] = 0
+    logger.info(
+        "Question panel activated",
+        extra={"tool_call_id": tool_call_id, "option_count": len(options)},
+    )
+
+
 def _dispatch_ws_message(
     msg: dict[str, Any],
     assembler: StreamAssembler,

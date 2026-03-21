@@ -2,7 +2,7 @@
 
 import pytest
 
-from basket_protocol import AgentComplete, TextDelta, TodoUpdate, ToolCallEnd, ToolCallStart
+from basket_protocol import AgentComplete, AskUserQuestion, TextDelta, TodoUpdate, ToolCallEnd, ToolCallStart
 from basket_tui.native.handle import make_handlers
 from basket_tui.native.pipeline import StreamAssembler
 
@@ -141,3 +141,37 @@ def test_make_handlers_on_todo_update_stores_state() -> None:
     )))
     assert len(todo_state) == 1
     assert todo_state[0]["content"] == "Test"
+
+
+def test_make_handlers_on_ask_user_question_updates_state() -> None:
+    """on_ask_user_question handler updates question_state from AskUserQuestion event."""
+    assembler = StreamAssembler()
+    width = 80
+    lines_out: list[str] = []
+    last_output_count = [0]
+    header_state: dict[str, str] = {}
+    ui_state: dict[str, str] = {}
+    question_state: dict = {
+        "active": False,
+        "tool_call_id": "",
+        "question": "",
+        "options": [],
+        "selected": 0,
+    }
+
+    handlers = make_handlers(
+        assembler, width, lines_out.append, last_output_count,
+        header_state, ui_state, question_state=question_state,
+    )
+
+    assert "on_ask_user_question" in handlers
+    handlers["on_ask_user_question"](AskUserQuestion(
+        tool_call_id="tc_001",
+        question="Which approach?",
+        options=("Option A", "Option B"),
+    ))
+    assert question_state["active"] is True
+    assert question_state["tool_call_id"] == "tc_001"
+    assert question_state["question"] == "Which approach?"
+    assert question_state["options"] == ["Option A", "Option B"]
+    assert question_state["selected"] == 0

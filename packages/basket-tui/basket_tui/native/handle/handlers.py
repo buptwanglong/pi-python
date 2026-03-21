@@ -12,6 +12,7 @@ from .dispatch import (
     handle_agent_complete,
     handle_agent_error,
     handle_agent_switched,
+    handle_ask_user_question,
     handle_session_switched,
     handle_system,
     handle_text_delta,
@@ -32,6 +33,7 @@ def make_handlers(
     ui_state: Optional[dict[str, str]] = None,
     on_streaming_update: Optional[Callable[[], None]] = None,
     todo_state: Optional[list[dict]] = None,
+    question_state: Optional[dict] = None,
 ) -> GatewayHandlers:
     """Build GatewayHandlers that delegate to dispatch handle_* with closed-over state."""
     handlers: GatewayHandlers = {
@@ -82,6 +84,11 @@ def make_handlers(
         from .dispatch import handle_todo_update
         handlers["on_todo_update"] = lambda event: handle_todo_update(
             todo_state, list(event.todos)
+        )
+
+    if question_state is not None:
+        handlers["on_ask_user_question"] = lambda event: handle_ask_user_question(
+            question_state, event.tool_call_id, event.question, list(event.options)
         )
 
     if logger.isEnabledFor(logging.DEBUG):
