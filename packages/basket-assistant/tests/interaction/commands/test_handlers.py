@@ -486,6 +486,7 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("open") is not None
         assert registry.get_command("clear") is not None
         assert registry.get_command("compact") is not None
+        assert registry.get_command("model") is not None
 
     def test_command_aliases(self):
         """Test that command aliases work."""
@@ -501,6 +502,7 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("/open") is not None
         assert registry.get_command("/clear") is not None
         assert registry.get_command("/compact") is not None
+        assert registry.get_command("/model") is not None
 
     def test_command_execution(self):
         """Test that registered commands can be executed."""
