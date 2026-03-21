@@ -9,6 +9,7 @@ from basket_assistant.plugins.manifest import (
     load_plugin_manifest,
     validate_plugin_dir,
 )
+from basket_assistant.plugins.loader import PluginLoader
 
 
 class TestPluginManifest:
@@ -143,3 +144,115 @@ class TestValidatePluginDir:
 
         errors = validate_plugin_dir(tmp_path)
         assert errors == []
+
+
+class TestPluginLoader:
+    """Test plugin discovery and content aggregation."""
+
+    def test_discover_plugins_empty(self, tmp_path):
+        """Test discovering plugins from empty directory."""
+        loader = PluginLoader(plugins_dir=tmp_path)
+
+        plugins = loader.discover()
+
+        assert plugins == []
+
+    def test_discover_plugins_finds_valid(self, tmp_path):
+        """Test discovering valid plugins."""
+        # Create a plugin with skills
+        plugin_dir = tmp_path / "my-plugin"
+        skill_dir = plugin_dir / "skills" / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: A test\n---\nBody",
+            encoding="utf-8",
+        )
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        plugins = loader.discover()
+
+        assert len(plugins) == 1
+        assert plugins[0].name == "my-plugin"
+
+    def test_get_all_skill_dirs(self, tmp_path):
+        """Test aggregating skill dirs from all plugins."""
+        # Plugin 1
+        p1 = tmp_path / "plugin-a" / "skills" / "skill-a"
+        p1.mkdir(parents=True)
+        (p1 / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: Skill A\n---\n", encoding="utf-8"
+        )
+
+        # Plugin 2
+        p2 = tmp_path / "plugin-b" / "skills" / "skill-b"
+        p2.mkdir(parents=True)
+        (p2 / "SKILL.md").write_text(
+            "---\nname: skill-b\ndescription: Skill B\n---\n", encoding="utf-8"
+        )
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        skill_dirs = loader.get_all_skill_dirs()
+
+        assert len(skill_dirs) == 2
+
+    def test_get_all_hook_defs(self, tmp_path):
+        """Test aggregating hook definitions from all plugins."""
+        plugin_dir = tmp_path / "hook-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "hooks.json").write_text(
+            json.dumps({
+                "hooks": {
+                    "PreToolUse": [{"command": "echo test"}]
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        hook_defs = loader.get_all_hook_defs()
+
+        assert "PreToolUse" in hook_defs or "tool.execute.before" in hook_defs
+
+    def test_get_all_extension_dirs(self, tmp_path):
+        """Test aggregating extension dirs from all plugins."""
+        ext_dir = tmp_path / "ext-plugin" / "extensions"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "my_ext.py").write_text(
+            "def setup(basket): pass", encoding="utf-8"
+        )
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        ext_dirs = loader.get_all_extension_dirs()
+
+        assert len(ext_dirs) == 1
+
+    def test_get_all_agent_dirs(self, tmp_path):
+        """Test aggregating agent dirs from all plugins."""
+        agent_dir = tmp_path / "agent-plugin" / "agents" / "my-agent"
+        agent_dir.mkdir(parents=True)
+        ws = agent_dir / "workspace"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_text("Agent config.", encoding="utf-8")
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        agent_dirs = loader.get_all_agent_dirs()
+
+        assert len(agent_dirs) == 1
+
+    def test_skip_invalid_plugins(self, tmp_path):
+        """Test that invalid (empty) plugin dirs are skipped."""
+        # Valid plugin
+        valid = tmp_path / "valid-plugin" / "skills" / "s"
+        valid.mkdir(parents=True)
+        (valid / "SKILL.md").write_text(
+            "---\nname: s\ndescription: S\n---\n", encoding="utf-8"
+        )
+
+        # Invalid (empty) plugin
+        (tmp_path / "empty-plugin").mkdir()
+
+        loader = PluginLoader(plugins_dir=tmp_path)
+        plugins = loader.discover()
+
+        assert len(plugins) == 1
+        assert plugins[0].name == "valid-plugin"
