@@ -44,20 +44,32 @@ def get_subagent_configs(agent: Any) -> Dict[str, SubAgentConfig]:
     return out
 
 
-def get_skills_dirs(settings: Any) -> List[Path]:
-    """Resolve skills directories; default includes Basket, OpenCode, Claude, Agents paths."""
+def get_skills_dirs(
+    settings: Any, plugin_skill_dirs: Optional[List[Path]] = None
+) -> List[Path]:
+    """Resolve skills directories; default includes Basket, OpenCode, Claude, Agents paths.
+
+    Args:
+        settings: Application settings object.
+        plugin_skill_dirs: Optional extra skill directories from plugins.
+    """
     if getattr(settings, "skills_dirs", None):
-        return [Path(d).expanduser().resolve() for d in settings.skills_dirs]
-    return [
-        Path.home() / ".basket" / "skills",
-        Path.cwd() / ".basket" / "skills",
-        Path.home() / ".config" / "opencode" / "skills",
-        Path.cwd() / ".opencode" / "skills",
-        Path.home() / ".claude" / "skills",
-        Path.cwd() / ".claude" / "skills",
-        Path.home() / ".agents" / "skills",
-        Path.cwd() / ".agents" / "skills",
-    ]
+        dirs = [Path(d).expanduser().resolve() for d in settings.skills_dirs]
+    else:
+        dirs = [
+            Path.home() / ".basket" / "skills",
+            Path.cwd() / ".basket" / "skills",
+            Path.home() / ".config" / "opencode" / "skills",
+            Path.cwd() / ".opencode" / "skills",
+            Path.home() / ".claude" / "skills",
+            Path.cwd() / ".claude" / "skills",
+            Path.home() / ".agents" / "skills",
+            Path.cwd() / ".agents" / "skills",
+        ]
+    # Append plugin skill dirs
+    if plugin_skill_dirs:
+        dirs.extend(plugin_skill_dirs)
+    return dirs
 
 
 # Tool usage block appended to every base prompt (with or without workspace).
@@ -192,7 +204,12 @@ def get_system_prompt_for_run(
     """System prompt for this run; if invoked_skill_id set, append that skill's full content."""
     prompt = agent._default_system_prompt
     if invoked_skill_id:
-        dirs = get_skills_dirs(agent.settings)
+        plugin_skill_dirs = (
+            agent._plugin_loader.get_all_skill_dirs()
+            if hasattr(agent, "_plugin_loader") and agent._plugin_loader
+            else None
+        )
+        dirs = get_skills_dirs(agent.settings, plugin_skill_dirs=plugin_skill_dirs)
         full = get_skill_full_content(invoked_skill_id, dirs)
         if full:
             prompt = prompt + "\n\n---\n\n## Active skill: " + invoked_skill_id + "\n\n" + full

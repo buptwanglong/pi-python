@@ -14,6 +14,7 @@ from basket_ai.types import Context
 
 from ..core import SettingsManager, SessionManager, AgentConfigResolver
 from ..extensions import ExtensionLoader
+from ..guardrails.defaults import create_default_engine
 
 from . import events
 from . import prompts
@@ -61,6 +62,12 @@ class AssistantAgent:
 
         # Initialize extension loader (needed by tools)
         self.extension_loader = ExtensionLoader(self)
+
+        # Load plugins and merge into search paths
+        from ..plugins.loader import PluginLoader
+
+        self._plugin_loader = PluginLoader()
+        self._plugin_loader.discover()
 
         # Load extensions and register tools
         if load_extensions:
@@ -159,6 +166,16 @@ class AssistantAgent:
         self._pending_asks: List[dict] = []
         self._assistant_event_handlers: Dict[str, List[Callable]] = {}
 
+        # Guardrails engine -- blocks dangerous tool operations
+        workspace_dir = getattr(self.settings, "workspace_dir", None)
+        guardrails_enabled = getattr(
+            self.settings, "guardrails_enabled", True
+        )
+        self._guardrail_engine = create_default_engine(
+            workspace_dir=str(workspace_dir) if workspace_dir else None,
+            enabled=guardrails_enabled,
+        )
+
     def _load_extensions(self) -> None:
         """Load default extensions."""
         num_loaded = self.extension_loader.load_default_extensions()
@@ -179,7 +196,12 @@ class AssistantAgent:
         return tools.get_subagent_display_description(self, name, cfg)
 
     def _get_skills_dirs(self):
-        return prompts.get_skills_dirs(self.settings)
+        plugin_skill_dirs = (
+            self._plugin_loader.get_all_skill_dirs()
+            if hasattr(self, "_plugin_loader") and self._plugin_loader
+            else None
+        )
+        return prompts.get_skills_dirs(self.settings, plugin_skill_dirs=plugin_skill_dirs)
 
     def _get_plan_mode_prompt_suffix(self) -> str:
         return prompts.get_plan_mode_prompt_suffix()

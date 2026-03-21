@@ -11,9 +11,11 @@ from basket_ai.types import Context, UserMessage
 from ..core import SubAgentConfig
 from ..core.workspace_bootstrap import ensure_workspace_default_fill
 from ..extensions.api import _wrap_tool_execute_with_hooks
+from ..guardrails.engine import GuardrailEngine
 from ..tools import (
     BUILT_IN_TOOLS,
     create_ask_user_question_tool,
+    create_parallel_task_tool,
     create_skill_tool,
     create_task_tool,
     create_todo_write_tool,
@@ -39,13 +41,34 @@ def _wrap_execute_fn_for_plan_mode(original_fn, get_plan_mode):
     return wrapped
 
 
+def _wrap_execute_fn_for_guardrails(original_fn, engine: GuardrailEngine, tool_name: str):
+    """Return an async wrapper that checks guardrails before execution."""
+
+    async def wrapped(**kwargs):
+        result = engine.evaluate(tool_name, kwargs)
+        if not result.allowed:
+            return f"⛔ Guardrail blocked: {result.message}"
+        return await original_fn(**kwargs)
+
+    return wrapped
+
+
+def _get_plugin_skill_dirs(agent: Any) -> list:
+    """Return plugin skill dirs from agent's plugin loader, or empty list."""
+    loader = getattr(agent, "_plugin_loader", None)
+    return loader.get_all_skill_dirs() if loader else []
+
+
 def get_registerable_tools(agent: Any) -> List[dict]:
     """Return list of tool dicts (name, description, parameters, execute_fn) as used in register_tools."""
     include = agent.settings.skills_include or None
     if include is not None and len(agent.settings.skills_include) == 0:
         include = None
     skill_tool = create_skill_tool(
-        lambda: prompts.get_skills_dirs(agent.settings), include
+        lambda: prompts.get_skills_dirs(
+            agent.settings, plugin_skill_dirs=_get_plugin_skill_dirs(agent)
+        ),
+        include,
     )
     return list(BUILT_IN_TOOLS) + [skill_tool]
 
@@ -183,12 +206,24 @@ def wrap_tool_with_hooks(agent: Any, name: str, execute_fn):
 
 
 def register_tools(agent: Any) -> None:
-    """Register all built-in tools with the agent. In plan mode, write/edit/bash/todo_write are no-ops."""
+    """Register all built-in tools with the agent.
+
+    Wrapping order (outermost runs first):
+        plan_mode → guardrails → hooks → original_fn
+    """
     get_plan = lambda: agent._plan_mode
+    engine = getattr(agent, "_guardrail_engine", None)
+
+    def _apply_guardrails(fn, name):
+        if engine is not None:
+            return _wrap_execute_fn_for_guardrails(fn, engine, name)
+        return fn
+
     for tool in BUILT_IN_TOOLS:
         name = tool["name"]
         fn = tool["execute_fn"]
         fn = wrap_tool_with_hooks(agent, name, fn)
+        fn = _apply_guardrails(fn, name)
         if name in PLAN_MODE_FORBIDDEN_TOOLS:
             fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
         agent.agent.register_tool(
@@ -201,9 +236,13 @@ def register_tools(agent: Any) -> None:
     if include is not None and len(agent.settings.skills_include) == 0:
         include = None
     skill_tool = create_skill_tool(
-        lambda: prompts.get_skills_dirs(agent.settings), include
+        lambda: prompts.get_skills_dirs(
+            agent.settings, plugin_skill_dirs=_get_plugin_skill_dirs(agent)
+        ),
+        include,
     )
     fn = wrap_tool_with_hooks(agent, skill_tool["name"], skill_tool["execute_fn"])
+    fn = _apply_guardrails(fn, skill_tool["name"])
     agent.agent.register_tool(
         name=skill_tool["name"],
         description=skill_tool["description"],
@@ -214,16 +253,27 @@ def register_tools(agent: Any) -> None:
     if configs:
         task_tool = create_task_tool(agent)
         fn = wrap_tool_with_hooks(agent, task_tool["name"], task_tool["execute_fn"])
+        fn = _apply_guardrails(fn, task_tool["name"])
         agent.agent.register_tool(
             name=task_tool["name"],
             description=task_tool["description"],
             parameters=task_tool["parameters"],
             execute_fn=fn,
         )
+        parallel_tool = create_parallel_task_tool(agent)
+        fn = wrap_tool_with_hooks(agent, parallel_tool["name"], parallel_tool["execute_fn"])
+        fn = _apply_guardrails(fn, parallel_tool["name"])
+        agent.agent.register_tool(
+            name=parallel_tool["name"],
+            description=parallel_tool["description"],
+            parameters=parallel_tool["parameters"],
+            execute_fn=fn,
+        )
     web_search_tool = create_web_search_tool(agent.settings)
     fn = wrap_tool_with_hooks(
         agent, web_search_tool["name"], web_search_tool["execute_fn"]
     )
+    fn = _apply_guardrails(fn, web_search_tool["name"])
     agent.agent.register_tool(
         name=web_search_tool["name"],
         description=web_search_tool["description"],
@@ -233,6 +283,7 @@ def register_tools(agent: Any) -> None:
     todo_tool = create_todo_write_tool(agent)
     todo_fn = todo_tool["execute_fn"]
     todo_fn = wrap_tool_with_hooks(agent, todo_tool["name"], todo_fn)
+    todo_fn = _apply_guardrails(todo_fn, todo_tool["name"])
     if "todo_write" in PLAN_MODE_FORBIDDEN_TOOLS:
         todo_fn = _wrap_execute_fn_for_plan_mode(todo_fn, get_plan)
     agent.agent.register_tool(
@@ -243,6 +294,7 @@ def register_tools(agent: Any) -> None:
     )
     ask_tool = create_ask_user_question_tool(agent)
     fn = wrap_tool_with_hooks(agent, ask_tool["name"], ask_tool["execute_fn"])
+    fn = _apply_guardrails(fn, ask_tool["name"])
     agent.agent.register_tool(
         name=ask_tool["name"],
         description=ask_tool["description"],

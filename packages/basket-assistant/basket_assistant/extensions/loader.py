@@ -148,6 +148,11 @@ class ExtensionLoader:
         if local_ext_dir.exists():
             total += self.load_extensions_from_dir(local_ext_dir)
 
+        # Plugin extensions
+        if hasattr(self._agent, "_plugin_loader") and self._agent._plugin_loader:
+            for ext_dir in self._agent._plugin_loader.get_all_extension_dirs():
+                total += self.load_extensions_from_dir(ext_dir)
+
         return total
 
     def get_loaded_extensions(self) -> List[str]:
