@@ -25,6 +25,9 @@ from ..pipeline.stream import StreamAssembler
 
 logger = logging.getLogger(__name__)
 
+# Tool names whose blocks are suppressed from the conversation stream.
+_SUPPRESSED_TOOLS = frozenset({"ask_user_question", "todo_write"})
+
 
 def _render_and_output(
     msg: dict[str, Any],
@@ -88,14 +91,23 @@ def handle_tool_call_start(
     last_output_count: Optional[list[int]] = None,
 ) -> None:
     """Handle tool_call_start: flush buffer, set phase tool_running, record current tool."""
+    if ui_state is not None:
+        ui_state["phase"] = "tool_running"
+
+    if tool_name in _SUPPRESSED_TOOLS:
+        assembler.tool_call_start(tool_name, arguments)
+        logger.info(
+            "Tool call started (suppressed)",
+            extra={"tool_name": tool_name, "phase": "tool_running"},
+        )
+        return
+
     # Flush streaming buffer BEFORE tool starts so text appears before tool block
     if output_put is not None and last_output_count is not None:
         if assembler.flush_buffer():
             _render_and_output(assembler.messages[-1], width, output_put)
             last_output_count[0] = len(assembler.messages)
 
-    if ui_state is not None:
-        ui_state["phase"] = "tool_running"
     assembler.tool_call_start(tool_name, arguments)
     logger.info(
         "Tool call started",
@@ -118,6 +130,15 @@ def handle_tool_call_end(
 ) -> None:
     """Handle tool_call_end: append tool message and render immediately."""
     assembler.tool_call_end(tool_name, result=result, error=error)
+
+    if tool_name in _SUPPRESSED_TOOLS:
+        if last_output_count is not None:
+            last_output_count[0] = len(assembler.messages)
+        logger.info(
+            "Tool call ended (suppressed)",
+            extra={"tool_name": tool_name, "has_result": result is not None},
+        )
+        return
 
     # Render tool block immediately instead of waiting for agent_complete
     if output_put is not None and last_output_count is not None:

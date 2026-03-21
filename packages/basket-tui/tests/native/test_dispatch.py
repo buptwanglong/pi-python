@@ -319,3 +319,66 @@ def test_handle_todo_update_empty_clears_state():
     todo_state: list[dict] = [{"id": "1", "content": "X", "status": "pending"}]
     handle_todo_update(todo_state, [])
     assert len(todo_state) == 0
+
+
+# --- Tool message suppression ---
+
+_SUPPRESSED_TOOLS = ("ask_user_question", "todo_write")
+
+
+def test_handle_tool_call_start_suppressed_tool_no_render():
+    """ask_user_question tool_call_start records tool but does not render to output."""
+    for tool_name in _SUPPRESSED_TOOLS:
+        assembler, width, out, output_put, last_output_count = _minimal_setup()
+        assembler.text_delta("Some text")
+        handle_tool_call_start(
+            assembler,
+            tool_name,
+            arguments={"q": "test"},
+            ui_state={"phase": "streaming"},
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
+        )
+        # Tool recorded in assembler
+        assert assembler._current_tool is not None
+        assert assembler._current_tool["tool_name"] == tool_name
+        # Buffer NOT flushed to output (no render of prior text for suppressed tool)
+        assert len(out) == 0, f"{tool_name}: suppressed tool should not render"
+
+
+def test_handle_tool_call_end_suppressed_tool_no_render():
+    """ask_user_question/todo_write tool_call_end records message but does not render."""
+    for tool_name in _SUPPRESSED_TOOLS:
+        assembler, width, out, output_put, last_output_count = _minimal_setup()
+        handle_tool_call_start(assembler, tool_name, arguments={})
+        handle_tool_call_end(
+            assembler,
+            tool_name,
+            result="ok",
+            error=None,
+            width=width,
+            output_put=output_put,
+            last_output_count=last_output_count,
+        )
+        # Tool message recorded in assembler
+        tool_msgs = [m for m in assembler.messages if m.get("role") == "tool"]
+        assert len(tool_msgs) == 1
+        # NOT rendered to output
+        assert len(out) == 0, f"{tool_name}: suppressed tool should not render"
+
+
+def test_handle_tool_call_end_normal_tool_still_renders():
+    """Normal tools (e.g. 'bash') still render to output."""
+    assembler, width, out, output_put, last_output_count = _minimal_setup()
+    handle_tool_call_start(assembler, "bash", arguments={"cmd": "ls"})
+    handle_tool_call_end(
+        assembler,
+        "bash",
+        result="file.txt",
+        error=None,
+        width=width,
+        output_put=output_put,
+        last_output_count=last_output_count,
+    )
+    assert len(out) >= 1, "Normal tool should render"
