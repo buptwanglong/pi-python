@@ -329,6 +329,11 @@ class Model(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    @property
+    def model_id(self) -> str:
+        """Alias for ``id`` — used by settings and command handlers."""
+        return self.id
+
 
 # ============================================================================
 # Event Types

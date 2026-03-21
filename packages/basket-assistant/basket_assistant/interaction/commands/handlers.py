@@ -37,6 +37,7 @@ Available commands:
   /open <session_id> Switch to a different session
   /clear             Clear conversation and start new session
   /compact           Compress conversation context to save tokens
+  /model [provider/id]  Show or switch the current LLM model
   /create-skill [topic] Create a skill from conversation
   /save-skill <scope>   Save generated skill (global/project)
   /exit, /quit       Exit the assistant
@@ -207,6 +208,91 @@ Use Ctrl+C to cancel input, Ctrl+D to exit.
         )
         return True, ""
 
+    async def handle_model(self, args: str) -> tuple[bool, str]:
+        """Handle /model command — show current model or switch to a new one.
+
+        Format: /model <provider>/<model_id> [--context-window <int>]
+        Example: /model openai/gpt-4o
+                 /model anthropic/claude-sonnet-4 --context-window 200000
+        """
+        args = args.strip()
+
+        # No args: show current model
+        if not args:
+            model = self.agent.model
+            provider = getattr(model, "provider", "unknown")
+            model_id = getattr(model, "model_id", getattr(model, "id", "unknown"))
+            ctx_window = getattr(model, "context_window", "unknown")
+            print(f"Current model: {provider}/{model_id} (context_window={ctx_window})")
+            return True, ""
+
+        # Parse args: provider/model_id [--context-window N]
+        parts = args.split()
+        model_spec = parts[0]
+
+        if "/" not in model_spec:
+            return False, (
+                "Usage: /model <provider>/<model_id> [--context-window <int>]\n"
+                "Example: /model openai/gpt-4o"
+            )
+
+        provider, model_id = model_spec.split("/", 1)
+        if not provider or not model_id:
+            return False, (
+                "Usage: /model <provider>/<model_id> [--context-window <int>]\n"
+                "Example: /model openai/gpt-4o"
+            )
+
+        # Parse optional flags
+        context_window = getattr(self.agent.model, "context_window", 128_000)
+        max_tokens = getattr(self.agent.model, "max_tokens", 4096)
+        base_url = getattr(self.agent.model, "base_url", None) or getattr(
+            self.agent.model, "baseUrl", None
+        )
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--context-window" and i + 1 < len(parts):
+                try:
+                    context_window = int(parts[i + 1])
+                except ValueError:
+                    return False, f"Invalid context-window value: {parts[i + 1]}"
+                i += 2
+            else:
+                i += 1
+
+        # Create new model
+        try:
+            from basket_ai.api import get_model
+
+            model_kwargs = {
+                "context_window": context_window,
+                "max_tokens": max_tokens,
+            }
+            if base_url:
+                model_kwargs["base_url"] = str(base_url)
+
+            new_model = get_model(provider, model_id, **model_kwargs)
+
+            # Swap model in both AssistantAgent and inner Agent
+            old_provider = getattr(self.agent.model, "provider", "unknown")
+            old_model_id = getattr(
+                self.agent.model, "model_id", getattr(self.agent.model, "id", "unknown")
+            )
+
+            self.agent.model = new_model
+            if hasattr(self.agent, "agent") and hasattr(self.agent.agent, "model"):
+                self.agent.agent.model = new_model
+
+            print(
+                f"Model switched: {old_provider}/{old_model_id} → {provider}/{model_id} "
+                f"(context_window={context_window})"
+            )
+            return True, ""
+
+        except Exception as e:
+            return False, f"Failed to switch model: {e}"
+
     async def handle_sessions(self, args: str) -> tuple[bool, str]:
         """Handle /sessions command.
 
@@ -340,6 +426,15 @@ def register_builtin_commands(registry: "CommandRegistry", agent) -> None:
         description="Compress conversation context to free up space",
         usage="/compact",
         aliases=["compact", "/compact"],
+    )
+
+    # Register /model command
+    registry.register(
+        name="model",
+        handler=handlers.handle_model,
+        description="Show current model or switch to a different one",
+        usage="/model [provider/model_id] [--context-window N]",
+        aliases=["model", "/model"],
     )
 
     # Register /create-skill command
