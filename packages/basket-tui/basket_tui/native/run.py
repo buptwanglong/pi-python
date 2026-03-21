@@ -7,6 +7,7 @@ WebSocket runs via GatewayWsConnection; TUI sends via conn.send_* and receives v
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import time
@@ -24,7 +25,9 @@ from .ui.scroll_state import (
     scroll_page_up,
 )
 from .ui import (
+    SLASH_COMMANDS,
     ExitConfirmState,
+    SlashCommandCompleter,
     build_banner_lines,
     build_layout,
     collect_doctor_notices,
@@ -35,6 +38,7 @@ from .ui import (
     resolve_basket_version,
 )
 from .ui.todo_panel import format_todo_panel, todo_panel_height
+from .ui.question_panel import format_question_panel, new_question_state, question_panel_height
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +122,7 @@ async def run_tui_native_attach(
     assembler = StreamAssembler()
     last_output_count: list[int] = [0]
     todo_state: list[dict] = []
+    question_state: dict = new_question_state()
 
     def output_put(line: str) -> None:
         body_lines.append(line)
@@ -142,7 +147,21 @@ async def run_tui_native_attach(
         ui_state,
         on_streaming_update=_on_streaming_update,
         todo_state=todo_state,
+        question_state=question_state,
     )
+    # Wrap agent_aborted to also clear question state
+    _original_on_aborted = handlers.get("on_agent_aborted")
+
+    def _on_aborted_wrapper(event):
+        if _original_on_aborted:
+            _original_on_aborted(event)
+        question_state["active"] = False
+        question_state["tool_call_id"] = ""
+        question_state["question"] = ""
+        question_state["options"] = []
+        question_state["selected"] = 0
+
+    handlers["on_agent_aborted"] = _on_aborted_wrapper
     conn = GatewayWsConnection(
         ws_url, handlers, ready_event, header_state=header_state, ui_state=ui_state
     )
@@ -287,15 +306,53 @@ async def run_tui_native_attach(
         if t_tick is not None and not t_tick.done():
             t_tick.cancel()
 
-    input_buffer = Buffer(name="input", multiline=False)
+    slash_completer = SlashCommandCompleter(SLASH_COMMANDS)
+    input_buffer = Buffer(
+        name="input",
+        multiline=False,
+        completer=slash_completer,
+        complete_while_typing=True,
+    )
     kb = KeyBindings()
 
-    def _accept_input(event: Any) -> None:
+    async def _accept_input_async(event: Any) -> None:
         from prompt_toolkit.application import get_app
+
+        # Question mode: submit selected answer
+        if question_state.get("active"):
+            options = question_state.get("options") or []
+            selected = question_state.get("selected", 0)
+            if selected < len(options):
+                answer = options[selected]
+            else:
+                # Free text mode: use input buffer text
+                answer = (input_buffer.text or "").strip()
+                if not answer:
+                    return  # ignore empty free text
+                input_buffer.reset()
+
+            payload = json.dumps({
+                "answer": answer,
+                "tool_call_id": question_state.get("tool_call_id", ""),
+            })
+            asyncio.get_running_loop().create_task(conn.send_message(payload))
+
+            # Display user answer as gray block
+            for line in render_messages([{"role": "user", "content": answer}], width):
+                output_put(line)
+
+            # Reset question state
+            question_state["active"] = False
+            question_state["tool_call_id"] = ""
+            question_state["question"] = ""
+            question_state["options"] = []
+            question_state["selected"] = 0
+            get_app().invalidate()
+            return
 
         text = (input_buffer.text or "").strip()
         input_buffer.reset()
-        result = handle_input(text, base_url, conn, output_put)
+        result = await handle_input(text, base_url, conn, output_put)
         logger.info("User input received", extra={"text_len": len(text), "result": result})
         if result == "exit":
             _cancel_aux_tasks()
@@ -306,10 +363,13 @@ async def run_tui_native_attach(
             get_app().invalidate()
             return
         if result == "send":
-            # Display user message as gray block (same as render_messages; no [user] prefix).
+            # Display user message as gray block
             for line in render_messages([{"role": "user", "content": text}], width):
                 output_put(line)
             get_app().invalidate()
+
+    def _accept_input(event: Any) -> None:
+        asyncio.get_running_loop().create_task(_accept_input_async(event))
 
     @kb.add("enter")
     def _on_enter(event: Any) -> None:
@@ -318,24 +378,33 @@ async def run_tui_native_attach(
 
     @kb.add("c-p")
     def _on_ctrl_p(_event: Any) -> None:
-        open_picker("session", base_url, conn, output_put)
-        from prompt_toolkit.application import get_app
+        async def _do() -> None:
+            await open_picker("session", base_url, conn, output_put)
+            from prompt_toolkit.application import get_app
 
-        get_app().invalidate()
+            get_app().invalidate()
+
+        asyncio.get_running_loop().create_task(_do())
 
     @kb.add("c-g")
     def _on_ctrl_g(_event: Any) -> None:
-        open_picker("agent", base_url, conn, output_put)
-        from prompt_toolkit.application import get_app
+        async def _do() -> None:
+            await open_picker("agent", base_url, conn, output_put)
+            from prompt_toolkit.application import get_app
 
-        get_app().invalidate()
+            get_app().invalidate()
+
+        asyncio.get_running_loop().create_task(_do())
 
     @kb.add("c-l")
     def _on_ctrl_l(_event: Any) -> None:
-        open_picker("model", base_url, conn, output_put)
-        from prompt_toolkit.application import get_app
+        async def _do() -> None:
+            await open_picker("model", base_url, conn, output_put)
+            from prompt_toolkit.application import get_app
 
-        get_app().invalidate()
+            get_app().invalidate()
+
+        asyncio.get_running_loop().create_task(_do())
 
     def _do_exit() -> None:
         logger.info("TUI shutting down", extra={})
@@ -357,12 +426,41 @@ async def run_tui_native_attach(
         get_app().invalidate()
 
     @kb.add("escape")
-    def _on_escape(_event: Any) -> None:
-        """Esc: abort current turn (same as /abort)."""
+    def _on_escape(event: Any) -> None:
+        """Esc: dismiss completion menu or question panel, otherwise abort current turn."""
+        buf = event.app.current_buffer
+        if buf is not None and buf.complete_state is not None:
+            buf.cancel_completion()
+            event.app.invalidate()
+            return
+        # Dismiss active question
+        if question_state.get("active"):
+            question_state["active"] = False
+            question_state["tool_call_id"] = ""
+            question_state["question"] = ""
+            question_state["options"] = []
+            question_state["selected"] = 0
+            event.app.invalidate()
+            return
         asyncio.get_running_loop().create_task(conn.send_abort())
         from prompt_toolkit.application import get_app
-
         get_app().invalidate()
+
+    @kb.add("up")
+    def _on_up(event: Any) -> None:
+        if question_state.get("active"):
+            sel = question_state.get("selected", 0)
+            question_state["selected"] = max(0, sel - 1)
+            event.app.invalidate()
+
+    @kb.add("down")
+    def _on_down(event: Any) -> None:
+        if question_state.get("active"):
+            options = question_state.get("options") or []
+            max_idx = len(options)  # options + free text slot
+            sel = question_state.get("selected", 0)
+            question_state["selected"] = min(max_idx, sel + 1)
+            event.app.invalidate()
 
     @kb.add("pageup")
     def _on_pageup(event: Any) -> None:
@@ -396,6 +494,15 @@ async def run_tui_native_attach(
     def get_todo_height() -> int:
         return todo_panel_height(todo_state)
 
+    def get_question_lines() -> str:
+        return format_question_panel(question_state, width)
+
+    def get_question_height() -> int:
+        return question_panel_height(question_state)
+
+    def is_question_active() -> bool:
+        return question_state.get("active", False)
+
     layout = build_layout(
         width,
         base_url,
@@ -411,6 +518,9 @@ async def run_tui_native_attach(
         on_body_mouse_scroll=on_body_mouse_scroll,
         get_todo_lines=get_todo_lines,
         get_todo_height=get_todo_height,
+        get_question_lines=get_question_lines,
+        get_question_height=get_question_height,
+        is_question_active=is_question_active,
     )
     app = Application(
         layout=layout,
