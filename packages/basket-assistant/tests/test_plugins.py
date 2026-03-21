@@ -10,6 +10,11 @@ from basket_assistant.plugins.manifest import (
     validate_plugin_dir,
 )
 from basket_assistant.plugins.loader import PluginLoader
+from basket_assistant.plugins.commands import (
+    plugin_install,
+    plugin_uninstall,
+    plugin_list,
+)
 
 
 class TestPluginManifest:
@@ -256,3 +261,100 @@ class TestPluginLoader:
 
         assert len(plugins) == 1
         assert plugins[0].name == "valid-plugin"
+
+
+class TestPluginCommands:
+    """Test basket plugin install/uninstall/list commands."""
+
+    @pytest.mark.asyncio
+    async def test_plugin_list_empty(self, tmp_path):
+        """Test listing plugins when none installed."""
+        result = await plugin_list(plugins_dir=tmp_path)
+
+        assert result.success is True
+        assert result.plugins == []
+
+    @pytest.mark.asyncio
+    async def test_plugin_install_from_local_dir(self, tmp_path):
+        """Test installing a plugin from a local directory."""
+        # Source plugin
+        source = tmp_path / "source" / "my-plugin"
+        skill_dir = source / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: Test\n---\nBody",
+            encoding="utf-8",
+        )
+        manifest = {"name": "my-plugin", "version": "1.0.0"}
+        (source / "plugin.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+
+        # Target plugins dir
+        target = tmp_path / "plugins"
+        target.mkdir()
+
+        result = await plugin_install(source=str(source), plugins_dir=target)
+
+        assert result.success is True
+        assert (target / "my-plugin").is_dir()
+        assert (target / "my-plugin" / "skills" / "my-skill" / "SKILL.md").is_file()
+
+    @pytest.mark.asyncio
+    async def test_plugin_install_rejects_empty(self, tmp_path):
+        """Test that installing an empty directory fails."""
+        source = tmp_path / "empty"
+        source.mkdir()
+        target = tmp_path / "plugins"
+        target.mkdir()
+
+        result = await plugin_install(source=str(source), plugins_dir=target)
+
+        assert result.success is False
+        assert "no content" in result.error.lower() or "empty" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_plugin_uninstall(self, tmp_path):
+        """Test uninstalling a plugin."""
+        # Install a plugin first
+        plugin_dir = tmp_path / "my-plugin"
+        skills = plugin_dir / "skills" / "s"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(
+            "---\nname: s\ndescription: S\n---\n", encoding="utf-8"
+        )
+
+        result = await plugin_uninstall(name="my-plugin", plugins_dir=tmp_path)
+
+        assert result.success is True
+        assert not plugin_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_plugin_uninstall_not_found(self, tmp_path):
+        """Test uninstalling non-existent plugin."""
+        result = await plugin_uninstall(name="not-found", plugins_dir=tmp_path)
+
+        assert result.success is False
+        assert "not found" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_plugin_list_shows_installed(self, tmp_path):
+        """Test listing shows installed plugins."""
+        # Create installed plugin
+        plugin_dir = tmp_path / "test-plugin"
+        skills = plugin_dir / "skills" / "s"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(
+            "---\nname: s\ndescription: S\n---\n", encoding="utf-8"
+        )
+        manifest = {"name": "test-plugin", "version": "2.0.0", "description": "Test"}
+        (plugin_dir / "plugin.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+
+        result = await plugin_list(plugins_dir=tmp_path)
+
+        assert result.success is True
+        assert len(result.plugins) == 1
+        assert result.plugins[0].name == "test-plugin"
+        assert result.plugins[0].version == "2.0.0"
