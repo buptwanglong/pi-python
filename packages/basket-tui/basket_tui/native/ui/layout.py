@@ -9,10 +9,19 @@ from collections.abc import Callable
 from typing import Any
 
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
+from prompt_toolkit.layout.containers import (
+    ConditionalContainer,
+    Float,
+    FloatContainer,
+    HSplit,
+    VSplit,
+    Window,
+)
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEventType
 
 logger = logging.getLogger(__name__)
@@ -62,6 +71,9 @@ def build_layout(
     on_body_mouse_scroll: Callable[[Any], None],
     get_todo_lines: Callable[[], str] | None = None,
     get_todo_height: Callable[[], int] | None = None,
+    get_question_lines: Callable[[], str] | None = None,
+    get_question_height: Callable[[], int] | None = None,
+    is_question_active: Callable[[], bool] | None = None,
 ) -> Layout:
     """
     Build prompt_toolkit Layout: optional banner, doctor, chrome, body, footer, separator, input row.
@@ -176,14 +188,48 @@ def build_layout(
     ]
     if todo_window is not None:
         rows_to_add.append(todo_window)
-    rows_to_add.extend([
-        Window(height=1, content=footer_control),
-        Window(height=1, content=sep_control),
-        VSplit([
-            Window(width=3, content=FormattedTextControl("❯ "), dont_extend_width=True),
-            Window(content=input_control),
-        ]),
+
+    # Input row (normal mode)
+    input_row = VSplit([
+        Window(width=3, content=FormattedTextControl("❯ "), dont_extend_width=True),
+        Window(content=input_control),
     ])
+
+    # Question panel (question active mode)
+    if get_question_lines is not None and get_question_height is not None and is_question_active is not None:
+        has_question = Condition(lambda: is_question_active())
+
+        question_control = FormattedTextControl(
+            text=lambda: ANSI(get_question_lines() or ""),
+            focusable=False,
+        )
+        question_window = Window(
+            content=question_control,
+            height=lambda: get_question_height(),
+        )
+
+        rows_to_add.extend([
+            Window(height=1, content=footer_control),
+            Window(height=1, content=sep_control),
+            ConditionalContainer(input_row, filter=~has_question),
+            ConditionalContainer(question_window, filter=has_question),
+        ])
+    else:
+        rows_to_add.extend([
+            Window(height=1, content=footer_control),
+            Window(height=1, content=sep_control),
+            input_row,
+        ])
     rows.extend(rows_to_add)
 
-    return Layout(HSplit(rows))
+    root = FloatContainer(
+        content=HSplit(rows),
+        floats=[
+            Float(
+                xcursor=True,
+                ycursor=True,
+                content=CompletionsMenu(max_height=10, scroll_offset=1),
+            ),
+        ],
+    )
+    return Layout(root)
