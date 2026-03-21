@@ -38,6 +38,7 @@ class MockSettings:
         self.model = MockModel()
         self.agent = MockAgentSettings()
         self.workspace_dir = "/home/user/.basket/workspace"
+        self.api_keys = {}
 
     def to_dict(self):
         return {
@@ -98,6 +99,24 @@ class MockModelWithWindow:
         self.model_id = "test-model"
 
 
+class MockModelForSwitch:
+    """Mock model with all attributes needed for /model switch."""
+
+    def __init__(self, provider="anthropic", model_id="claude-sonnet-4", context_window=128000):
+        self.provider = provider
+        self.model_id = model_id
+        self.context_window = context_window
+        self.max_tokens = 4096
+        self.baseUrl = ""
+
+
+class MockAgentInner:
+    """Mock inner Agent (basket_agent.Agent) for model switch tests."""
+
+    def __init__(self, model):
+        self.model = model
+
+
 class MockAgent:
     """Mock agent for testing."""
 
@@ -112,6 +131,7 @@ class MockAgent:
         self._current_todos = []
         self._pending_asks = []
         self._session_id = None
+        self.agent = MockAgentInner(self.model)
 
     def load_history(self, messages):
         self.conversation = messages
@@ -394,6 +414,58 @@ class TestBuiltinCommandHandlers:
 
         assert success is True
         assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_model_switch_success(self):
+        """Test /model switches model successfully."""
+        agent = MockAgent()
+        agent.model = MockModelForSwitch(provider="anthropic", model_id="old-model")
+        agent.agent = MockAgentInner(agent.model)
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_model("openai/gpt-4o")
+
+        assert success is True
+        assert error == ""
+        assert agent.model.model_id == "gpt-4o"
+        assert agent.model.provider == "openai"
+        # Inner agent model should also be updated
+        assert agent.agent.model.model_id == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_handle_model_no_args_shows_current(self):
+        """Test /model with no args shows current model."""
+        agent = MockAgent()
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_model("")
+
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_model_invalid_format(self):
+        """Test /model with invalid format returns error."""
+        agent = MockAgent()
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_model("invalid")
+
+        assert success is False
+        assert "Usage:" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_model_with_context_window(self):
+        """Test /model with context_window override."""
+        agent = MockAgent()
+        agent.model = MockModelForSwitch()
+        agent.agent = MockAgentInner(agent.model)
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_model("openai/gpt-4o --context-window 64000")
+
+        assert success is True
+        assert agent.model.context_window == 64000
 
 
 class TestRegisterBuiltinCommands:
