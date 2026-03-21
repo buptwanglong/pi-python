@@ -204,3 +204,108 @@ async def test_hook_runner_matcher_filters(tmp_path):
         cwd=tmp_path,
     )
     assert log.read_text().strip() == ""
+
+
+# -------------------------------------------------------
+# Hook event alias tests (Claude Code naming alignment)
+# -------------------------------------------------------
+
+def test_hook_def_matches_pretooluse_alias():
+    """PreToolUse alias resolves to tool.execute.before."""
+    d = HookDef("x", matcher="read")
+    assert d.matches("PreToolUse", {"tool_name": "read"}) is True
+    assert d.matches("PreToolUse", {"tool_name": "bash"}) is False
+
+
+def test_hook_def_matches_posttooluse_alias():
+    """PostToolUse alias resolves to tool.execute.after."""
+    d = HookDef("x", matcher="read")
+    assert d.matches("PostToolUse", {"tool_name": "read"}) is True
+    assert d.matches("PostToolUse", {"tool_name": "bash"}) is False
+
+
+@pytest.mark.asyncio
+async def test_hook_runner_pretooluse_alias(tmp_path):
+    """Hooks registered under PreToolUse fire for tool.execute.before events."""
+    marker = tmp_path / "pretooluse_ran.marker"
+    script = tmp_path / "allow.sh"
+    script.write_text(
+        f'#!/bin/sh\ntouch {marker}\necho \'{{"permission":"allow"}}\'\nexit 0\n'
+    )
+    script.chmod(0o755)
+    hooks = {
+        "PreToolUse": [
+            {"command": str(script), "timeout": 5},
+        ],
+    }
+    runner = HookRunner(project_root=tmp_path, settings_hooks=hooks)
+    result = await runner.run(
+        "tool.execute.before",
+        {"tool_name": "read", "arguments": {}},
+        cwd=tmp_path,
+    )
+    assert marker.exists(), "Hook script should have executed (marker file missing)"
+    assert result.get("permission") == "allow"
+
+
+@pytest.mark.asyncio
+async def test_hook_runner_posttooluse_alias(tmp_path):
+    """Hooks registered under PostToolUse fire for tool.execute.after events."""
+    marker = tmp_path / "posttooluse_ran.marker"
+    script = tmp_path / "after.sh"
+    script.write_text(
+        f'#!/bin/sh\ntouch {marker}\necho \'{{"permission":"allow"}}\'\nexit 0\n'
+    )
+    script.chmod(0o755)
+    hooks = {
+        "PostToolUse": [
+            {"command": str(script), "timeout": 5},
+        ],
+    }
+    runner = HookRunner(project_root=tmp_path, settings_hooks=hooks)
+    result = await runner.run(
+        "tool.execute.after",
+        {"tool_name": "read", "arguments": {}},
+        cwd=tmp_path,
+    )
+    assert marker.exists(), "Hook script should have executed (marker file missing)"
+    assert result.get("permission") == "allow"
+
+
+@pytest.mark.asyncio
+async def test_hook_runner_stop_alias(tmp_path):
+    """Hooks registered under Stop fire for session.ended events."""
+    marker = tmp_path / "stop_ran.marker"
+    script = tmp_path / "stop.sh"
+    script.write_text(
+        f'#!/bin/sh\ntouch {marker}\necho \'{{"permission":"allow"}}\'\nexit 0\n'
+    )
+    script.chmod(0o755)
+    hooks = {
+        "Stop": [
+            {"command": str(script), "timeout": 5},
+        ],
+    }
+    runner = HookRunner(project_root=tmp_path, settings_hooks=hooks)
+    result = await runner.run(
+        "session.ended",
+        {},
+        cwd=tmp_path,
+    )
+    assert marker.exists(), "Hook script should have executed (marker file missing)"
+    assert result.get("permission") == "allow"
+
+
+def test_merge_hook_defs_normalizes_aliases():
+    """Merged hooks normalize Claude Code aliases to canonical names."""
+    project = {"PreToolUse": [{"command": "pre.sh"}]}
+    user = {"PostToolUse": [{"command": "post.sh"}]}
+    settings = {"tool.execute.before": [{"command": "canonical.sh"}]}
+
+    merged = _merge_hook_defs(project, user, settings)
+
+    # Both PreToolUse and tool.execute.before should be under same canonical key
+    assert "tool.execute.before" in merged
+    assert len(merged["tool.execute.before"]) == 2
+    assert "tool.execute.after" in merged
+    assert len(merged["tool.execute.after"]) == 1
