@@ -82,6 +82,15 @@ class TodoUpdate:
 
 
 @dataclass(frozen=True)
+class AskUserQuestion:
+    """Ask user a question with optional choices."""
+
+    tool_call_id: str = ""
+    question: str = ""
+    options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Unknown:
     """Unknown message type (parse but do not handle)."""
 
@@ -101,6 +110,7 @@ InboundMessage = Union[
     AgentAborted,
     System,
     TodoUpdate,
+    AskUserQuestion,
     Unknown,
 ]
 
@@ -145,6 +155,14 @@ def parse_inbound(data: dict[str, Any]) -> InboundMessage:
         raw_todos = data.get("todos") or []
         return TodoUpdate(todos=tuple(raw_todos))
 
+    if typ == "ask_user_question":
+        raw_options = data.get("options") or []
+        return AskUserQuestion(
+            tool_call_id=data.get("tool_call_id", "") or "",
+            question=data.get("question", "") or "",
+            options=tuple(raw_options),
+        )
+
     return Unknown(type=typ, payload=data)
 
 
@@ -180,6 +198,13 @@ def inbound_to_dict(msg: InboundMessage) -> dict[str, Any]:
         return {"type": msg.event, **(msg.payload or {})}
     if isinstance(msg, TodoUpdate):
         return {"type": "todos", "todos": list(msg.todos)}
+    if isinstance(msg, AskUserQuestion):
+        return {
+            "type": "ask_user_question",
+            "tool_call_id": msg.tool_call_id,
+            "question": msg.question,
+            "options": list(msg.options),
+        }
     if isinstance(msg, Unknown):
         return dict(msg.payload) if msg.payload else {"type": msg.type}
     raise TypeError(f"Unknown inbound message type: {type(msg)}")

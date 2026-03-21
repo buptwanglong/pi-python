@@ -5,6 +5,7 @@ from basket_protocol import (
     AgentComplete,
     AgentError,
     AgentSwitched,
+    AskUserQuestion,
     SessionSwitched,
     System,
     TextDelta,
@@ -160,3 +161,49 @@ def test_inbound_to_dict_todo_update_roundtrip() -> None:
     parsed = parse_inbound(d)
     assert isinstance(parsed, TodoUpdate)
     assert parsed.todos == msg.todos
+
+
+def test_parse_inbound_ask_user_question() -> None:
+    """parse_inbound({'type': 'ask_user_question', ...}) returns AskUserQuestion."""
+    msg = parse_inbound({
+        "type": "ask_user_question",
+        "tool_call_id": "tc_123",
+        "question": "Which approach?",
+        "options": ["Option A", "Option B"],
+    })
+    assert isinstance(msg, AskUserQuestion)
+    assert msg.tool_call_id == "tc_123"
+    assert msg.question == "Which approach?"
+    assert msg.options == ("Option A", "Option B")
+
+
+def test_parse_inbound_ask_user_question_empty_options() -> None:
+    """parse_inbound ask_user_question with empty options returns empty tuple."""
+    msg = parse_inbound({
+        "type": "ask_user_question",
+        "tool_call_id": "tc_456",
+        "question": "Free text?",
+    })
+    assert isinstance(msg, AskUserQuestion)
+    assert msg.options == ()
+
+
+def test_inbound_to_dict_ask_user_question_roundtrip() -> None:
+    """inbound_to_dict(AskUserQuestion) returns wire dict; parse_inbound roundtrips."""
+    msg = AskUserQuestion(
+        tool_call_id="tc_789",
+        question="Pick one",
+        options=("A", "B", "C"),
+    )
+    d = inbound_to_dict(msg)
+    assert d == {
+        "type": "ask_user_question",
+        "tool_call_id": "tc_789",
+        "question": "Pick one",
+        "options": ["A", "B", "C"],
+    }
+    parsed = parse_inbound(d)
+    assert isinstance(parsed, AskUserQuestion)
+    assert parsed.tool_call_id == msg.tool_call_id
+    assert parsed.question == msg.question
+    assert parsed.options == msg.options
