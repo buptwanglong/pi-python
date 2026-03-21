@@ -18,6 +18,25 @@ logger = logging.getLogger(__name__)
 # Exit code that means "deny" (do not run tool / block action)
 HOOK_EXIT_DENY = 2
 
+# Claude Code → Basket canonical event name mapping
+# Allows users to use either naming convention in hooks.json
+HOOK_ALIAS_MAP: dict[str, str] = {
+    "PreToolUse": "tool.execute.before",
+    "PostToolUse": "tool.execute.after",
+    "Stop": "session.ended",
+    "Notification": "message.turn_done",
+}
+
+
+def normalize_hook_event(event_name: str) -> str:
+    """Normalize a hook event name to its canonical form.
+
+    Maps Claude Code-style names (PreToolUse, PostToolUse, Stop, Notification)
+    to Basket canonical names (tool.execute.before, tool.execute.after, etc.).
+    Returns the input unchanged if it is already canonical.
+    """
+    return HOOK_ALIAS_MAP.get(event_name, event_name)
+
 
 class HookDef:
     """Single hook definition from config."""
@@ -36,9 +55,11 @@ class HookDef:
 
     def matches(self, hook_name: str, input_data: Dict[str, Any]) -> bool:
         """Return True if this hook should run for the given event and input."""
+        # Normalize hook_name so aliases map to canonical names
+        canonical = normalize_hook_event(hook_name)
         if not self.matcher:
             return True
-        if hook_name in ("tool.execute.before", "tool.execute.after"):
+        if canonical in ("tool.execute.before", "tool.execute.after"):
             tool_name = input_data.get("tool_name") or ""
             if re.search(self.matcher, tool_name, re.IGNORECASE):
                 return True
@@ -109,18 +130,23 @@ def _merge_hook_defs(
     user: Dict[str, List[Dict[str, Any]]],
     settings: Dict[str, List[Dict[str, Any]]],
 ) -> Dict[str, List[HookDef]]:
-    """Merge hook definitions: project first, then user, then settings (append)."""
+    """Merge hook definitions: project first, then user, then settings (append).
+
+    Event names are normalized so Claude Code aliases (PreToolUse, PostToolUse, etc.)
+    are merged into their canonical Basket names.
+    """
     all_events: Dict[str, List[HookDef]] = {}
     for source in (project, user, settings):
         for event_name, defs in source.items():
-            if event_name not in all_events:
-                all_events[event_name] = []
+            canonical = normalize_hook_event(event_name)
+            if canonical not in all_events:
+                all_events[canonical] = []
             for d in defs:
                 cmd = d.get("command")
                 if not cmd:
                     continue
                 cmd = _expand_command(cmd)
-                all_events[event_name].append(
+                all_events[canonical].append(
                     HookDef(
                         command=cmd,
                         timeout=d.get("timeout"),
@@ -198,39 +224,43 @@ class HookRunner:
         if output is not None and "modified_arguments" not in output:
             output["modified_arguments"] = None
 
-        defs = self._hooks.get(hook_name, [])
+        # Normalize event name so aliases resolve to canonical keys
+        canonical = normalize_hook_event(hook_name)
+
+        defs = self._hooks.get(canonical, [])
         run_cwd = Path(cwd) if cwd else self._project_root
-        matched = [d for d in defs if d.matches(hook_name, input_data)]
+        matched = [d for d in defs if d.matches(canonical, input_data)]
         if defs:
             logger.info(
-                "hook run event=%s defs=%d matched=%d",
+                "hook run event=%s canonical=%s defs=%d matched=%d",
                 hook_name,
+                canonical,
                 len(defs),
                 len(matched),
             )
 
         # Ensure input is JSON-serializable (Path -> str, Pydantic -> dict, etc.)
         input_copy = _to_json_safe(input_data)
-        input_copy["hook_event_name"] = hook_name
+        input_copy["hook_event_name"] = canonical
         if "cwd" not in input_copy:
             input_copy["cwd"] = str(run_cwd)
         input_json = json.dumps(input_copy, ensure_ascii=False)
 
         for hook_def in defs:
-            if not hook_def.matches(hook_name, input_data):
+            if not hook_def.matches(canonical, input_data):
                 continue
-            logger.info("hook exec event=%s command=%s", hook_name, hook_def.command)
+            logger.info("hook exec event=%s command=%s", canonical, hook_def.command)
             try:
                 out_json, exit_code = await self._run_one(
                     hook_def, input_json, run_cwd
                 )
             except asyncio.TimeoutError:
-                logger.warning("Hook timed out: %s %s", hook_name, hook_def.command)
+                logger.warning("Hook timed out: %s %s", canonical, hook_def.command)
                 result["permission"] = "deny"
                 result["reason"] = "Hook script timed out."
                 return result
             except Exception as e:
-                logger.warning("Hook failed: %s %s: %s", hook_name, hook_def.command, e)
+                logger.warning("Hook failed: %s %s: %s", canonical, hook_def.command, e)
                 result["permission"] = "deny"
                 result["reason"] = str(e)
                 return result
@@ -240,7 +270,7 @@ class HookRunner:
                 result["reason"] = (out_json or {}).get("reason") or "Hook returned deny (exit 2)."
                 logger.info(
                     "hook result event=%s permission=deny reason=%s",
-                    hook_name,
+                    canonical,
                     result["reason"],
                 )
                 return result
@@ -252,7 +282,7 @@ class HookRunner:
                     result["reason"] = out_json.get("reason") or "Hook returned permission deny."
                     logger.info(
                         "hook result event=%s permission=deny reason=%s",
-                        hook_name,
+                        canonical,
                         result["reason"],
                     )
                     return result
@@ -262,7 +292,7 @@ class HookRunner:
                         output["modified_arguments"] = out_json["modified_arguments"]
 
         if defs:
-            logger.info("hook result event=%s permission=allow", hook_name)
+            logger.info("hook result event=%s permission=allow", canonical)
         return result
 
     async def _run_one(
@@ -309,4 +339,4 @@ class HookRunner:
         """Return list of hook definitions for the event (read-only)."""
         return list(self._hooks.get(hook_name, []))
 
-__all__ = ["HookRunner", "HookDef", "HOOK_EXIT_DENY"]
+__all__ = ["HookRunner", "HookDef", "HOOK_EXIT_DENY", "HOOK_ALIAS_MAP", "normalize_hook_event"]
