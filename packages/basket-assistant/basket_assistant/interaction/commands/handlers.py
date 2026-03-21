@@ -36,6 +36,7 @@ Available commands:
   /sessions          List all available sessions
   /open <session_id> Switch to a different session
   /clear             Clear conversation and start new session
+  /compact           Compress conversation context to save tokens
   /create-skill [topic] Create a skill from conversation
   /save-skill <scope>   Save generated skill (global/project)
   /exit, /quit       Exit the assistant
@@ -157,6 +158,53 @@ Use Ctrl+C to cancel input, Ctrl+D to exit.
             self.agent._session_id = None
             print(f"Context cleared ({old_msg_count} messages removed).")
 
+        return True, ""
+
+    async def handle_compact(self, args: str) -> tuple[bool, str]:
+        """Handle /compact command — compress conversation context.
+
+        Triggers the three-stage compaction pipeline (truncate tool results,
+        summarise older turns, evict oldest messages) and reports metrics.
+
+        Args:
+            args: Command arguments (unused)
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        from basket_agent.context_manager import compact_context, estimate_context_tokens
+
+        context_window = getattr(self.agent.model, "context_window", 128_000)
+
+        before_msgs = len(self.agent.context.messages)
+        before_tokens = estimate_context_tokens(self.agent.context)
+
+        new_context, was_compacted = compact_context(
+            self.agent.context, context_window
+        )
+
+        if not was_compacted:
+            usage_pct = (before_tokens / context_window * 100) if context_window else 0
+            print(
+                f"No compaction needed. Context: {before_msgs} messages, "
+                f"~{before_tokens:,} tokens ({usage_pct:.0f}% of {context_window:,} window)."
+            )
+            return True, ""
+
+        # Apply compacted context
+        self.agent.context = new_context
+
+        after_msgs = len(new_context.messages)
+        after_tokens = estimate_context_tokens(new_context)
+        saved_msgs = before_msgs - after_msgs
+        saved_tokens = before_tokens - after_tokens
+        usage_pct = (after_tokens / context_window * 100) if context_window else 0
+
+        print(
+            f"Context compacted: {before_msgs} → {after_msgs} messages "
+            f"(-{saved_msgs}), ~{before_tokens:,} → ~{after_tokens:,} tokens "
+            f"(-{saved_tokens:,}). Now at {usage_pct:.0f}% of {context_window:,} window."
+        )
         return True, ""
 
     async def handle_sessions(self, args: str) -> tuple[bool, str]:
@@ -283,6 +331,15 @@ def register_builtin_commands(registry: "CommandRegistry", agent) -> None:
         description="Clear conversation context and start fresh",
         usage="/clear",
         aliases=["clear", "/clear"],
+    )
+
+    # Register /compact command
+    registry.register(
+        name="compact",
+        handler=handlers.handle_compact,
+        description="Compress conversation context to free up space",
+        usage="/compact",
+        aliases=["compact", "/compact"],
     )
 
     # Register /create-skill command
