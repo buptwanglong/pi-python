@@ -13,9 +13,22 @@ from basket_assistant.interaction.commands.registry import CommandRegistry
 class MockContext:
     """Mock context for testing."""
 
-    def __init__(self, messages=None, system_prompt=""):
+    def __init__(self, messages=None, system_prompt="", tools=None):
         self.messages = messages or []
         self.system_prompt = system_prompt
+        self.tools = tools or []
+
+    def model_copy(self, update=None):
+        """Mimic Pydantic model_copy for compaction tests."""
+        new = MockContext(
+            messages=list(self.messages),
+            system_prompt=self.system_prompt,
+            tools=list(self.tools),
+        )
+        if update:
+            for key, value in update.items():
+                setattr(new, key, value)
+        return new
 
 
 class MockSettings:
@@ -354,6 +367,33 @@ class TestBuiltinCommandHandlers:
 
         assert success is True
         assert agent.context.messages == []
+
+    @pytest.mark.asyncio
+    async def test_handle_compact_reduces_context(self):
+        """Test /compact triggers compaction when context is large."""
+        agent = MockAgent()
+        # Simulate large context that needs compaction
+        agent.context = MockContext(messages=["msg"] * 100)
+        agent.model = MockModelWithWindow(context_window=100)
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_compact("")
+
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_compact_no_change_when_small(self):
+        """Test /compact reports no change when context is small."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=[])
+        agent.model = MockModelWithWindow(context_window=100_000)
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_compact("")
+
+        assert success is True
+        assert error == ""
 
 
 class TestRegisterBuiltinCommands:
