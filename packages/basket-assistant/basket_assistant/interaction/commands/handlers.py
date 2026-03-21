@@ -35,6 +35,7 @@ Available commands:
   /plan [on|off]     Toggle or set plan mode
   /sessions          List all available sessions
   /open <session_id> Switch to a different session
+  /clear             Clear conversation and start new session
   /create-skill [topic] Create a skill from conversation
   /save-skill <scope>   Save generated skill (global/project)
   /exit, /quit       Exit the assistant
@@ -114,6 +115,49 @@ Use Ctrl+C to cancel input, Ctrl+D to exit.
             return True, ""
         else:
             return False, "Usage: /plan [on|off]"
+
+    async def handle_clear(self, args: str) -> tuple[bool, str]:
+        """Handle /clear command — reset conversation context.
+
+        Clears messages, todos, and pending asks while preserving the
+        system prompt. Creates a new session if session_manager is available.
+
+        Args:
+            args: Command arguments (unused)
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        old_msg_count = len(self.agent.context.messages)
+
+        # Clear in-memory state
+        self.agent.context.messages = []
+        self.agent._current_todos = []
+        self.agent._pending_asks = []
+
+        # Create new session if session management is available
+        if self.agent.session_manager is not None:
+            try:
+                model_id = getattr(self.agent.model, "model_id", "")
+                new_session_id = await self.agent.session_manager.create_session(
+                    model_id=model_id,
+                )
+                self.agent._session_id = new_session_id
+                print(
+                    f"Context cleared ({old_msg_count} messages removed). "
+                    f"New session: {new_session_id}"
+                )
+            except Exception as e:
+                self.agent._session_id = None
+                print(
+                    f"Context cleared ({old_msg_count} messages removed). "
+                    f"Warning: failed to create new session: {e}"
+                )
+        else:
+            self.agent._session_id = None
+            print(f"Context cleared ({old_msg_count} messages removed).")
+
+        return True, ""
 
     async def handle_sessions(self, args: str) -> tuple[bool, str]:
         """Handle /sessions command.
@@ -230,6 +274,15 @@ def register_builtin_commands(registry: "CommandRegistry", agent) -> None:
         description="Switch to a different session",
         usage="/open <session_id>",
         aliases=["open", "/open"],
+    )
+
+    # Register /clear command
+    registry.register(
+        name="clear",
+        handler=handlers.handle_clear,
+        description="Clear conversation context and start fresh",
+        usage="/clear",
+        aliases=["clear", "/clear"],
     )
 
     # Register /create-skill command
