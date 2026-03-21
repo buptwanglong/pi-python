@@ -40,6 +40,7 @@ Available commands:
   /model [provider/id]  Show or switch the current LLM model
   /create-skill [topic] Create a skill from conversation
   /save-skill <scope>   Save generated skill (global/project)
+  /plugin <subcmd>   Manage plugins (list/install/uninstall)
   /exit, /quit       Exit the assistant
 
 Type your message to chat with the assistant.
@@ -293,6 +294,67 @@ Use Ctrl+C to cancel input, Ctrl+D to exit.
         except Exception as e:
             return False, f"Failed to switch model: {e}"
 
+    async def handle_plugin(self, args: str) -> tuple[bool, str]:
+        """Handle /plugin command — manage installed plugins.
+
+        Subcommands:
+          /plugin list                    List installed plugins
+          /plugin install <path>          Install plugin from local directory
+          /plugin uninstall <name>        Uninstall a plugin by name
+        """
+        parts = args.strip().split(maxsplit=1)
+        if not parts:
+            return False, (
+                "Usage: /plugin <list|install|uninstall>\n"
+                "  /plugin list                  List installed plugins\n"
+                "  /plugin install <path>        Install from local directory\n"
+                "  /plugin uninstall <name>      Uninstall by name"
+            )
+
+        subcmd = parts[0].lower()
+        subcmd_args = parts[1] if len(parts) > 1 else ""
+
+        from basket_assistant.plugins.commands import (
+            plugin_install,
+            plugin_list,
+            plugin_uninstall,
+        )
+
+        if subcmd == "list":
+            result = await plugin_list()
+            if not result.plugins:
+                print("No plugins installed.")
+            else:
+                print(f"{len(result.plugins)} plugin(s) installed:")
+                for p in result.plugins:
+                    desc = f" — {p.description}" if p.description else ""
+                    print(f"  {p.name} v{p.version}{desc}")
+            return True, ""
+
+        elif subcmd == "install":
+            if not subcmd_args.strip():
+                return False, "Usage: /plugin install <path>"
+            result = await plugin_install(source=subcmd_args.strip())
+            if result.success:
+                print(result.message)
+                return True, ""
+            return False, result.error
+
+        elif subcmd == "uninstall":
+            if not subcmd_args.strip():
+                return False, "Usage: /plugin uninstall <name>"
+            result = await plugin_uninstall(name=subcmd_args.strip())
+            if result.success:
+                print(result.message)
+                return True, ""
+            return False, result.error
+
+        else:
+            return False, (
+                f"Unknown subcommand: {subcmd}\n"
+                "Usage: /plugin <list|install|uninstall>"
+            )
+
     async def handle_sessions(self, args: str) -> tuple[bool, str]:
         """Handle /sessions command.
 
@@ -461,4 +523,13 @@ def register_builtin_commands(registry: "CommandRegistry", agent) -> None:
         description="Save pending skill draft to disk",
         usage="/save-skill <global|project>",
         aliases=["save-skill", "/save-skill"],
+    )
+
+    # Register /plugin command
+    registry.register(
+        name="plugin",
+        handler=handlers.handle_plugin,
+        description="Manage installed plugins",
+        usage="/plugin <list|install|uninstall>",
+        aliases=["plugin", "/plugin"],
     )

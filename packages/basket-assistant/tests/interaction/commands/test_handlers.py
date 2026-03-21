@@ -467,6 +467,28 @@ class TestBuiltinCommandHandlers:
         assert success is True
         assert agent.model.context_window == 64000
 
+    @pytest.mark.asyncio
+    async def test_handle_plugin_list(self):
+        """Test /plugin list shows plugins."""
+        agent = MockAgent()
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_plugin("list")
+
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_plugin_no_args(self):
+        """Test /plugin with no args shows usage."""
+        agent = MockAgent()
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_plugin("")
+
+        assert success is False
+        assert "Usage:" in error
+
 
 class TestRegisterBuiltinCommands:
     """Test builtin command registration."""
@@ -487,6 +509,7 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("clear") is not None
         assert registry.get_command("compact") is not None
         assert registry.get_command("model") is not None
+        assert registry.get_command("plugin") is not None
 
     def test_command_aliases(self):
         """Test that command aliases work."""
@@ -503,6 +526,7 @@ class TestRegisterBuiltinCommands:
         assert registry.get_command("/clear") is not None
         assert registry.get_command("/compact") is not None
         assert registry.get_command("/model") is not None
+        assert registry.get_command("/plugin") is not None
 
     def test_command_execution(self):
         """Test that registered commands can be executed."""
