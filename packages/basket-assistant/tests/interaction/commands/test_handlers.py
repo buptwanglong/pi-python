@@ -10,6 +10,14 @@ from basket_assistant.interaction.commands.registry import CommandRegistry
 
 
 # Mock classes for testing
+class MockContext:
+    """Mock context for testing."""
+
+    def __init__(self, messages=None, system_prompt=""):
+        self.messages = messages or []
+        self.system_prompt = system_prompt
+
+
 class MockSettings:
     """Mock settings object."""
 
@@ -59,11 +67,22 @@ class MockSessionManager:
     async def list_sessions(self):
         return self.sessions
 
+    async def create_session(self, model_id: str = "") -> str:
+        return "new-session-id"
+
     async def load_session(self, session_id: str):
         if session_id not in [s["id"] for s in self.sessions]:
             raise ValueError(f"Session not found: {session_id}")
         self.current_session_id = session_id
         return [{"role": "user", "content": "test"}]
+
+
+class MockModelWithWindow:
+    """Mock model with context_window attribute."""
+
+    def __init__(self, context_window: int = 128000):
+        self.context_window = context_window
+        self.model_id = "test-model"
 
 
 class MockAgent:
@@ -72,9 +91,14 @@ class MockAgent:
     def __init__(self):
         self.settings = MockSettings()
         self.session_manager = MockSessionManager()
+        self.model = MockModel()
         self._todo_show_full = False
         self.plan_mode = False
         self.conversation = []
+        self.context = MockContext()
+        self._current_todos = []
+        self._pending_asks = []
+        self._session_id = None
 
     def load_history(self, messages):
         self.conversation = messages
@@ -271,6 +295,65 @@ class TestBuiltinCommandHandlers:
 
         assert success is False
         assert "Session management not available" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_resets_context(self):
+        """Test /clear clears messages, todos, and pending asks."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1", "msg2"])
+        agent._current_todos = [{"id": 1}]
+        agent._pending_asks = [{"tool_call_id": "tc1"}]
+        agent._session_id = "old-session"
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_clear("")
+
+        assert success is True
+        assert error == ""
+        assert agent.context.messages == []
+        assert agent._current_todos == []
+        assert agent._pending_asks == []
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_preserves_system_prompt(self):
+        """Test /clear keeps system prompt intact."""
+        agent = MockAgent()
+        agent.context = MockContext(
+            system_prompt="You are a helpful assistant.",
+            messages=["msg1"],
+        )
+        handlers = BuiltinCommandHandlers(agent)
+
+        await handlers.handle_clear("")
+
+        assert agent.context.system_prompt == "You are a helpful assistant."
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_creates_new_session(self):
+        """Test /clear creates a new session when session_manager is available."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1"])
+        agent._session_id = "old-session"
+        handlers = BuiltinCommandHandlers(agent)
+
+        await handlers.handle_clear("")
+
+        assert agent._session_id != "old-session"
+        assert agent._session_id == "new-session-id"
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_works_without_session_manager(self):
+        """Test /clear works even when session_manager is None."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1"])
+        agent.session_manager = None
+        agent._session_id = None
+        handlers = BuiltinCommandHandlers(agent)
+
+        success, error = await handlers.handle_clear("")
+
+        assert success is True
+        assert agent.context.messages == []
 
 
 class TestRegisterBuiltinCommands:
