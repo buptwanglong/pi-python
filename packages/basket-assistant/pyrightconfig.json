@@ -1,0 +1,14 @@
+{
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "../basket-agent",
+    "../basket-ai",
+    "../basket-gateway",
+    "../basket-trajectory",
+    "../basket-tui",
+    "../basket-remote",
+    "../basket-memory"
+  ]
+}

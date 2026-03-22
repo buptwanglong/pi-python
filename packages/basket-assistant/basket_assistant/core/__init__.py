@@ -20,7 +20,7 @@ from .settings import (
 def load_agents_from_dirs(dirs):
     """Deprecated: Use AgentLoader.load_from_dirs() instead"""
     return AgentLoader.load_from_dirs(dirs)
-from .skills_loader import (
+from .loader.skills_loader import (
     get_skill_base_dir,
     get_skill_full_content,
     get_skill_references_index,

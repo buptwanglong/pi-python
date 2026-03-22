@@ -1,6 +1,7 @@
 """Tests for Plugin packaging format — manifest parsing and directory structure."""
 
 import json
+import zipfile
 import pytest
 from pathlib import Path
 
@@ -11,10 +12,12 @@ from basket_assistant.plugins.manifest import (
 )
 from basket_assistant.plugins.loader import PluginLoader
 from basket_assistant.plugins.commands import (
+    RESTART_HINT,
     plugin_install,
-    plugin_uninstall,
     plugin_list,
+    plugin_uninstall,
 )
+from basket_assistant.plugins.source_fetch import parse_install_source
 
 
 class TestPluginManifest:
@@ -122,8 +125,19 @@ class TestValidatePluginDir:
         errors = validate_plugin_dir(tmp_path)
         assert errors == []
 
-    def test_valid_plugin_with_extensions(self, tmp_path):
-        """Test valid plugin with extensions/ directory."""
+    def test_valid_plugin_with_commands(self, tmp_path):
+        """Test valid plugin with commands/ directory (declarative slash *.md)."""
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+        (cmd_dir / "hello.md").write_text(
+            "---\ndescription: Hello\n---\nSay hi {{args}}", encoding="utf-8"
+        )
+
+        errors = validate_plugin_dir(tmp_path)
+        assert errors == []
+
+    def test_plugin_with_only_extensions_dir_is_invalid(self, tmp_path):
+        """extensions/ alone is not valid plugin content (extension system removed)."""
         ext_dir = tmp_path / "extensions"
         ext_dir.mkdir()
         (ext_dir / "my_ext.py").write_text(
@@ -131,7 +145,7 @@ class TestValidatePluginDir:
         )
 
         errors = validate_plugin_dir(tmp_path)
-        assert errors == []
+        assert len(errors) > 0
 
     def test_empty_plugin_returns_error(self, tmp_path):
         """Test empty directory returns validation error."""
@@ -218,18 +232,19 @@ class TestPluginLoader:
 
         assert "PreToolUse" in hook_defs or "tool.execute.before" in hook_defs
 
-    def test_get_all_extension_dirs(self, tmp_path):
-        """Test aggregating extension dirs from all plugins."""
-        ext_dir = tmp_path / "ext-plugin" / "extensions"
-        ext_dir.mkdir(parents=True)
-        (ext_dir / "my_ext.py").write_text(
-            "def setup(basket): pass", encoding="utf-8"
+    def test_get_all_commands_dirs(self, tmp_path):
+        """Test aggregating commands dirs from all plugins."""
+        p = tmp_path / "cmd-plugin" / "commands"
+        p.mkdir(parents=True)
+        (p / "foo.md").write_text(
+            "---\ndescription: Foo\n---\nbody", encoding="utf-8"
         )
 
         loader = PluginLoader(plugins_dir=tmp_path)
-        ext_dirs = loader.get_all_extension_dirs()
+        cmd_dirs = loader.get_all_commands_dirs()
 
-        assert len(ext_dirs) == 1
+        assert len(cmd_dirs) == 1
+        assert cmd_dirs[0].name == "commands"
 
     def test_get_all_agent_dirs(self, tmp_path):
         """Test aggregating agent dirs from all plugins."""
@@ -261,6 +276,44 @@ class TestPluginLoader:
 
         assert len(plugins) == 1
         assert plugins[0].name == "valid-plugin"
+
+
+class TestParseInstallSource:
+    """Tests for install source string parsing."""
+
+    def test_local_directory(self, tmp_path):
+        d = tmp_path / "my-plug"
+        d.mkdir()
+        parsed, err = parse_install_source(str(d))
+        assert err is None and parsed is not None
+        assert parsed.kind == "local_dir"
+
+    def test_https_git_default(self):
+        parsed, err = parse_install_source("https://github.com/o/r.git")
+        assert err is None and parsed is not None
+        assert parsed.kind == "git"
+        assert parsed.ref is None
+
+    def test_git_at(self):
+        parsed, err = parse_install_source("git@github.com:o/r.git")
+        assert err is None and parsed is not None
+        assert parsed.kind == "git"
+
+    def test_url_fragment_ref(self):
+        parsed, err = parse_install_source("https://github.com/o/r.git#v1.2.0")
+        assert err is None and parsed is not None
+        assert parsed.kind == "git"
+        assert parsed.ref == "v1.2.0"
+
+    def test_space_separated_ref(self):
+        parsed, err = parse_install_source("https://github.com/o/r.git release")
+        assert err is None and parsed is not None
+        assert parsed.ref == "release"
+
+    def test_https_zip_url(self):
+        parsed, err = parse_install_source("https://example.com/a.zip")
+        assert err is None and parsed is not None
+        assert parsed.kind == "url_archive"
 
 
 class TestPluginCommands:
@@ -297,8 +350,36 @@ class TestPluginCommands:
         result = await plugin_install(source=str(source), plugins_dir=target)
 
         assert result.success is True
+        assert RESTART_HINT in result.message
         assert (target / "my-plugin").is_dir()
         assert (target / "my-plugin" / "skills" / "my-skill" / "SKILL.md").is_file()
+
+    @pytest.mark.asyncio
+    async def test_plugin_install_from_local_zip(self, tmp_path):
+        """Install from a local .zip containing a valid plugin tree."""
+        root = tmp_path / "src-plugin"
+        skills = root / "skills" / "s1"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(
+            "---\nname: s1\ndescription: S\n---\n", encoding="utf-8"
+        )
+        (root / "plugin.json").write_text(
+            json.dumps({"name": "zip-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        zpath = tmp_path / "bundle.zip"
+        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in root.rglob("*"):
+                if f.is_file():
+                    zf.write(f, f.relative_to(root).as_posix())
+
+        target = tmp_path / "plugins"
+        target.mkdir()
+        result = await plugin_install(source=str(zpath), plugins_dir=target)
+
+        assert result.success is True
+        assert (target / "zip-plugin").is_dir()
+        assert (target / "zip-plugin" / "skills" / "s1" / "SKILL.md").is_file()
 
     @pytest.mark.asyncio
     async def test_plugin_install_rejects_empty(self, tmp_path):

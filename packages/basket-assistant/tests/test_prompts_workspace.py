@@ -10,7 +10,7 @@ from basket_assistant.core import Settings
 def test_get_system_prompt_base_default_settings_uses_default_workspace(monkeypatch, tmp_path):
     """get_system_prompt_base(Settings()) with no workspace_dir uses default path and default fill."""
     monkeypatch.setattr(
-        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        "basket_assistant.core.loader.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
         str(tmp_path / "default_workspace"),
     )
     prompt = prompts.get_system_prompt_base(Settings())
@@ -30,7 +30,7 @@ def test_get_system_prompt_base_skip_bootstrap_returns_builtin():
 def test_get_system_prompt_base_workspace_dir_none_uses_default_fill(monkeypatch, tmp_path):
     """get_system_prompt_base(settings) with workspace_dir=None uses default path and fill."""
     monkeypatch.setattr(
-        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        "basket_assistant.core.loader.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
         str(tmp_path / "default_workspace"),
     )
     settings = Settings(workspace_dir=None)
@@ -91,7 +91,7 @@ def test_coding_agent_with_workspace_uses_composed_prompt(tmp_path, monkeypatch)
     settings.workspace_dir = str(tmp_path)
     settings.sessions_dir = str(sessions_dir)
     settings_manager.save(settings)
-    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager)
     assert "WorkspaceBot" in agent._default_system_prompt
     assert "Follow the rules." in agent._default_system_prompt
     assert "read" in agent._default_system_prompt and "write" in agent._default_system_prompt
@@ -111,7 +111,7 @@ def test_assistant_agent_sessions_dir_per_agent(tmp_path):
     settings.agents = dict(settings.agents) if getattr(settings, "agents", None) else {}
     settings.agents["main"] = SubAgentConfig()
     settings_manager.save(settings)
-    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager)
     expected = agents_base / "main" / "sessions"
     assert agent.session_manager.sessions_dir.resolve() == expected.resolve()
     assert expected.is_dir()

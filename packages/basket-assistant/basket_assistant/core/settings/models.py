@@ -110,7 +110,7 @@ class Settings(BaseModel):
     agents: Dict[str, SubAgentConfig] = Field(default_factory=dict)
     agents_dirs: List[str] = Field(default_factory=list)
     default_agent: Optional[str] = Field(
-        None,
+        default=None,
         description="Main agent name. When set and present in agents with model, main agent uses that model; otherwise uses top-level model.",
     )
     workspace_dir: Optional[str] = None

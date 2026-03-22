@@ -94,7 +94,7 @@ class TextContent(BaseModel):
     """Text content in a message."""
     type: Literal["text"] = "text"
     text: str
-    text_signature: Optional[str] = Field(None, alias="textSignature")
+    text_signature: Optional[str] = Field(default=None, validation_alias="textSignature", serialization_alias="textSignature")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -103,7 +103,7 @@ class ThinkingContent(BaseModel):
     """Thinking/reasoning content in a message."""
     type: Literal["thinking"] = "thinking"
     thinking: str
-    thinking_signature: Optional[str] = Field(None, alias="thinkingSignature")
+    thinking_signature: Optional[str] = Field(default=None, validation_alias="thinkingSignature", serialization_alias="thinkingSignature")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -112,7 +112,7 @@ class ImageContent(BaseModel):
     """Image content in a message."""
     type: Literal["image"] = "image"
     data: str  # Base64 encoded image data
-    mime_type: str = Field(..., alias="mimeType")
+    mime_type: str = Field(..., validation_alias="mimeType", serialization_alias="mimeType")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -123,7 +123,7 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: Dict[str, Any]
-    thought_signature: Optional[str] = Field(None, alias="thoughtSignature")
+    thought_signature: Optional[str] = Field(default=None, validation_alias="thoughtSignature", serialization_alias="thoughtSignature")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -134,11 +134,11 @@ class ToolCall(BaseModel):
 
 class CostBreakdown(BaseModel):
     """Detailed cost breakdown for token usage."""
-    input: float = 0.0
-    output: float = 0.0
-    cache_read: float = Field(0.0, alias="cacheRead")
-    cache_write: float = Field(0.0, alias="cacheWrite")
-    total: float = 0.0
+    input: float = Field(default=0.0, validation_alias="input", serialization_alias="input")
+    output: float = Field(default=0.0, validation_alias="output", serialization_alias="output")
+    cache_read: float = Field(default=0.0, validation_alias="cacheRead", serialization_alias="cacheRead")
+    cache_write: float = Field(default=0.0, validation_alias="cacheWrite", serialization_alias="cacheWrite")
+    total: float = Field(default=0.0, validation_alias="total", serialization_alias="total")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -147,10 +147,10 @@ class Usage(BaseModel):
     """Token usage and cost information."""
     input: int = 0
     output: int = 0
-    cache_read: int = Field(0, alias="cacheRead")
-    cache_write: int = Field(0, alias="cacheWrite")
-    total_tokens: int = Field(0, alias="totalTokens")
-    cost: CostBreakdown = Field(default_factory=CostBreakdown)
+    cache_read: int = Field(default=0, validation_alias="cacheRead", serialization_alias="cacheRead")
+    cache_write: int = Field(default=0, validation_alias="cacheWrite", serialization_alias="cacheWrite")
+    total_tokens: int = Field(default=0, validation_alias="totalTokens", serialization_alias="totalTokens")
+    cost: CostBreakdown = Field(default_factory=lambda: CostBreakdown())
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -178,9 +178,13 @@ class AssistantMessage(BaseModel):
     api: str
     provider: str
     model: str
-    usage: Usage = Field(default_factory=Usage)
-    stop_reason: StopReason = Field(..., alias="stopReason")
-    error_message: Optional[str] = Field(None, alias="errorMessage")
+    usage: Usage = Field(default_factory=lambda: Usage())
+    stop_reason: StopReason = Field(
+        ...,
+        validation_alias="stopReason",
+        serialization_alias="stopReason",
+    )
+    error_message: Optional[str] = Field(default=None, validation_alias="errorMessage", serialization_alias="errorMessage")
     timestamp: int  # Unix timestamp in milliseconds
 
     model_config = ConfigDict(populate_by_name=True)
@@ -189,11 +193,11 @@ class AssistantMessage(BaseModel):
 class ToolResultMessage(BaseModel):
     """Tool execution result message."""
     role: Literal["toolResult"] = "toolResult"
-    tool_call_id: str = Field(..., alias="toolCallId")
-    tool_name: str = Field(..., alias="toolName")
+    tool_call_id: str = Field(..., validation_alias="toolCallId", serialization_alias="toolCallId")
+    tool_name: str = Field(..., validation_alias="toolName", serialization_alias="toolName")
     content: List[Union[TextContent, ImageContent]] = Field(default_factory=list)
     details: Optional[Any] = None
-    is_error: bool = Field(False, alias="isError")
+    is_error: bool = Field(default=False, validation_alias="isError", serialization_alias="isError")
     timestamp: int  # Unix timestamp in milliseconds
 
     model_config = ConfigDict(populate_by_name=True)
@@ -222,7 +226,7 @@ class Tool(BaseModel):
 
 class Context(BaseModel):
     """Context for an LLM conversation."""
-    system_prompt: Optional[str] = Field(None, alias="systemPrompt")
+    system_prompt: Optional[str] = Field(default=None, validation_alias="systemPrompt", serialization_alias="systemPrompt")
     messages: List[Message] = Field(default_factory=list)
     tools: List[Tool] = Field(default_factory=list)
 
@@ -244,10 +248,10 @@ class ThinkingBudgets(BaseModel):
 class StreamOptions(BaseModel):
     """Base options for streaming API calls."""
     temperature: Optional[float] = None
-    max_tokens: Optional[int] = Field(None, alias="maxTokens")
+    max_tokens: Optional[int] = Field(default=None, validation_alias="maxTokens", serialization_alias="maxTokens")
     # signal: AbortSignal  # Not directly portable to Python
-    api_key: Optional[str] = Field(None, alias="apiKey")
-    session_id: Optional[str] = Field(None, alias="sessionId")
+    api_key: Optional[str] = Field(default=None, validation_alias="apiKey", serialization_alias="apiKey")
+    session_id: Optional[str] = Field(default=None, validation_alias="sessionId", serialization_alias="sessionId")
     headers: Optional[Dict[str, str]] = None
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")  # Allow provider-specific options
@@ -256,7 +260,7 @@ class StreamOptions(BaseModel):
 class SimpleStreamOptions(StreamOptions):
     """Stream options with reasoning support."""
     reasoning: Optional[ThinkingLevel] = None
-    thinking_budgets: Optional[ThinkingBudgets] = Field(None, alias="thinkingBudgets")
+    thinking_budgets: Optional[ThinkingBudgets] = Field(default=None, validation_alias="thinkingBudgets", serialization_alias="thinkingBudgets")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -273,21 +277,21 @@ class OpenRouterRouting(BaseModel):
 
 class OpenAICompletionsCompat(BaseModel):
     """Compatibility settings for OpenAI-compatible completions APIs."""
-    supports_store: Optional[bool] = Field(None, alias="supportsStore")
-    supports_developer_role: Optional[bool] = Field(None, alias="supportsDeveloperRole")
-    supports_reasoning_effort: Optional[bool] = Field(None, alias="supportsReasoningEffort")
-    supports_usage_in_streaming: Optional[bool] = Field(None, alias="supportsUsageInStreaming")
+    supports_store: Optional[bool] = Field(default=None, validation_alias="supportsStore", serialization_alias="supportsStore")
+    supports_developer_role: Optional[bool] = Field(default=None, validation_alias="supportsDeveloperRole", serialization_alias="supportsDeveloperRole")
+    supports_reasoning_effort: Optional[bool] = Field(default=None, validation_alias="supportsReasoningEffort", serialization_alias="supportsReasoningEffort")
+    supports_usage_in_streaming: Optional[bool] = Field(default=None, validation_alias="supportsUsageInStreaming", serialization_alias="supportsUsageInStreaming")
     max_tokens_field: Optional[Literal["max_completion_tokens", "max_tokens"]] = Field(
-        None, alias="maxTokensField"
+        None, validation_alias="maxTokensField", serialization_alias="maxTokensField"
     )
-    requires_tool_result_name: Optional[bool] = Field(None, alias="requiresToolResultName")
+    requires_tool_result_name: Optional[bool] = Field(default=None, validation_alias="requiresToolResultName", serialization_alias="requiresToolResultName")
     requires_assistant_after_tool_result: Optional[bool] = Field(
-        None, alias="requiresAssistantAfterToolResult"
+        None, validation_alias="requiresAssistantAfterToolResult", serialization_alias="requiresAssistantAfterToolResult"
     )
-    requires_thinking_as_text: Optional[bool] = Field(None, alias="requiresThinkingAsText")
-    requires_mistral_tool_ids: Optional[bool] = Field(None, alias="requiresMistralToolIds")
-    thinking_format: Optional[Literal["openai", "zai"]] = Field(None, alias="thinkingFormat")
-    open_router_routing: Optional[OpenRouterRouting] = Field(None, alias="openRouterRouting")
+    requires_thinking_as_text: Optional[bool] = Field(default=None, validation_alias="requiresThinkingAsText", serialization_alias="requiresThinkingAsText")
+    requires_mistral_tool_ids: Optional[bool] = Field(default=None, validation_alias="requiresMistralToolIds", serialization_alias="requiresMistralToolIds")
+    thinking_format: Optional[Literal["openai", "zai"]] = Field(default=None, validation_alias="thinkingFormat", serialization_alias="thinkingFormat")
+    open_router_routing: Optional[OpenRouterRouting] = Field(default=None, validation_alias="openRouterRouting", serialization_alias="openRouterRouting")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -306,8 +310,8 @@ class ModelCost(BaseModel):
     """Cost structure for a model."""
     input: float  # $/million tokens
     output: float  # $/million tokens
-    cache_read: float = Field(0.0, alias="cacheRead")  # $/million tokens
-    cache_write: float = Field(0.0, alias="cacheWrite")  # $/million tokens
+    cache_read: float = Field(default=0.0, validation_alias="cacheRead", serialization_alias="cacheRead")  # $/million tokens
+    cache_write: float = Field(default=0.0, validation_alias="cacheWrite", serialization_alias="cacheWrite")  # $/million tokens
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -318,12 +322,12 @@ class Model(BaseModel):
     name: str
     api: str
     provider: str
-    base_url: str = Field(..., alias="baseUrl")
+    base_url: str = Field(..., validation_alias="baseUrl", serialization_alias="baseUrl")
     reasoning: bool = False
     input: List[Literal["text", "image"]] = Field(default_factory=lambda: ["text"])
     cost: ModelCost = Field(default_factory=lambda: ModelCost(input=0, output=0))
-    context_window: int = Field(..., alias="contextWindow")
-    max_tokens: int = Field(..., alias="maxTokens")
+    context_window: int = Field(..., validation_alias="contextWindow", serialization_alias="contextWindow")
+    max_tokens: int = Field(..., validation_alias="maxTokens", serialization_alias="maxTokens")
     headers: Optional[Dict[str, str]] = None
     compat: Optional[Union[OpenAICompletionsCompat, OpenAIResponsesCompat]] = None
 
@@ -348,7 +352,7 @@ class EventStart(BaseModel):
 class EventTextStart(BaseModel):
     """Start of text content block."""
     type: Literal["text_start"] = "text_start"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     partial: AssistantMessage
 
     model_config = ConfigDict(populate_by_name=True)
@@ -357,7 +361,7 @@ class EventTextStart(BaseModel):
 class EventTextDelta(BaseModel):
     """Text delta during streaming."""
     type: Literal["text_delta"] = "text_delta"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     delta: str
     partial: AssistantMessage
 
@@ -367,7 +371,7 @@ class EventTextDelta(BaseModel):
 class EventTextEnd(BaseModel):
     """End of text content block."""
     type: Literal["text_end"] = "text_end"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     content: str
     partial: AssistantMessage
 
@@ -377,7 +381,7 @@ class EventTextEnd(BaseModel):
 class EventThinkingStart(BaseModel):
     """Start of thinking content block."""
     type: Literal["thinking_start"] = "thinking_start"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     partial: AssistantMessage
 
     model_config = ConfigDict(populate_by_name=True)
@@ -386,7 +390,7 @@ class EventThinkingStart(BaseModel):
 class EventThinkingDelta(BaseModel):
     """Thinking delta during streaming."""
     type: Literal["thinking_delta"] = "thinking_delta"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     delta: str
     partial: AssistantMessage
 
@@ -396,7 +400,7 @@ class EventThinkingDelta(BaseModel):
 class EventThinkingEnd(BaseModel):
     """End of thinking content block."""
     type: Literal["thinking_end"] = "thinking_end"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     content: str
     partial: AssistantMessage
 
@@ -406,7 +410,7 @@ class EventThinkingEnd(BaseModel):
 class EventToolCallStart(BaseModel):
     """Start of tool call."""
     type: Literal["toolcall_start"] = "toolcall_start"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     partial: AssistantMessage
 
     model_config = ConfigDict(populate_by_name=True)
@@ -415,7 +419,7 @@ class EventToolCallStart(BaseModel):
 class EventToolCallDelta(BaseModel):
     """Tool call delta during streaming."""
     type: Literal["toolcall_delta"] = "toolcall_delta"
-    content_index: int = Field(..., alias="contentIndex")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
     delta: str
     partial: AssistantMessage
 
@@ -425,8 +429,8 @@ class EventToolCallDelta(BaseModel):
 class EventToolCallEnd(BaseModel):
     """End of tool call."""
     type: Literal["toolcall_end"] = "toolcall_end"
-    content_index: int = Field(..., alias="contentIndex")
-    tool_call: ToolCall = Field(..., alias="toolCall")
+    content_index: int = Field(..., validation_alias="contentIndex", serialization_alias="contentIndex")
+    tool_call: ToolCall = Field(..., validation_alias="toolCall", serialization_alias="toolCall")
     partial: AssistantMessage
 
     model_config = ConfigDict(populate_by_name=True)

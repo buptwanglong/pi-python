@@ -7,6 +7,7 @@ import pytest
 from basket_tui.native.ui.pickers import (
     _fetch_agents,
     _fetch_models,
+    _fetch_plugins,
     _fetch_sessions,
 )
 
@@ -57,3 +58,15 @@ def test_fetch_models_returns_list():
     assert len(result) == 1
     assert result[0]["agent_name"] == "default"
     assert result[0]["model_id"] == "gpt-4"
+
+
+def test_fetch_plugins_returns_list():
+    import json as _json
+    payload = [{"name": "demo", "version": "1.0.0", "description": "test"}]
+    with patch("urllib.request.urlopen") as mock_open:
+        resp = mock_open.return_value.__enter__.return_value
+        resp.read.return_value = _json.dumps(payload).encode()
+        result = _fetch_plugins("http://127.0.0.1:7682")
+    assert len(result) == 1
+    assert result[0]["name"] == "demo"
+    assert result[0]["version"] == "1.0.0"

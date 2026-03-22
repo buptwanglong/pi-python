@@ -11,7 +11,7 @@ import json
 import logging
 import shutil
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .connection import GatewayWsConnection
 from .handle import make_handlers
@@ -124,6 +124,27 @@ async def run_tui_native_attach(
     todo_state: list[dict] = []
     question_state: dict = new_question_state()
 
+    phase_mark: list[float | None] = [None]
+    last_seen_phase: list[str] = [""]
+    spinner_idx: list[int] = [0]
+
+    def _sync_phase_clock() -> None:
+        p = ui_state.get("phase", "idle")
+        if p != last_seen_phase[0]:
+            last_seen_phase[0] = p
+            if p in ("tool_running", "streaming", "plugin_install"):
+                phase_mark[0] = time.monotonic()
+            else:
+                phase_mark[0] = None
+
+    def _elapsed_s() -> int:
+        m = phase_mark[0]
+        if m is None:
+            return 0
+        return int(time.monotonic() - m)
+
+    slash_exit_hook: list[Callable[[], None]] = [lambda: None]
+
     def output_put(line: str) -> None:
         body_lines.append(line)
         if logger.isEnabledFor(logging.DEBUG):
@@ -162,6 +183,39 @@ async def run_tui_native_attach(
         question_state["selected"] = 0
 
     handlers["on_agent_aborted"] = _on_aborted_wrapper
+
+    def on_plugin_install_progress(msg: dict) -> None:
+        phase = msg.get("phase")
+        if phase == "started":
+            ui_state["phase"] = "plugin_install"
+            _sync_phase_clock()
+        elif phase == "done":
+            ui_state["phase"] = "idle"
+            _sync_phase_clock()
+            el = msg.get("elapsed_seconds", 0)
+            ok = msg.get("success")
+            m = msg.get("message", "")
+            if ok:
+                output_put(f"[system] Plugin install finished in {el}s — {m}")
+            else:
+                output_put(f"[system] Plugin install failed in {el}s — {m}")
+        if app_ref:
+            app_ref[0].invalidate()
+
+    def on_slash_result(msg: dict) -> None:
+        text = (msg.get("text") or "").strip()
+        if text:
+            output_put(text if text.startswith("[") else f"[system] {text}")
+        if app_ref:
+            app_ref[0].invalidate()
+
+    def on_slash_exit() -> None:
+        slash_exit_hook[0]()
+
+    handlers["on_plugin_install_progress"] = on_plugin_install_progress
+    handlers["on_slash_result"] = on_slash_result
+    handlers["on_slash_exit"] = on_slash_exit
+
     conn = GatewayWsConnection(
         ws_url, handlers, ready_event, header_state=header_state, ui_state=ui_state
     )
@@ -239,25 +293,6 @@ async def run_tui_native_attach(
 
     banner_lines = build_banner_lines(resolve_basket_version())
     doctor_lines: list[str] = []
-
-    phase_mark: list[float | None] = [None]
-    last_seen_phase: list[str] = [""]
-    spinner_idx: list[int] = [0]
-
-    def _sync_phase_clock() -> None:
-        p = ui_state.get("phase", "idle")
-        if p != last_seen_phase[0]:
-            last_seen_phase[0] = p
-            if p in ("tool_running", "streaming"):
-                phase_mark[0] = time.monotonic()
-            else:
-                phase_mark[0] = None
-
-    def _elapsed_s() -> int:
-        m = phase_mark[0]
-        if m is None:
-            return 0
-        return int(time.monotonic() - m)
 
     exit_confirm = ExitConfirmState()
     exit_arm_task: list[asyncio.Task[None] | None] = [None]
@@ -413,6 +448,8 @@ async def run_tui_native_attach(
         from prompt_toolkit.application import get_app
 
         get_app().exit()
+
+    slash_exit_hook[0] = _do_exit
 
     @kb.add("c-c")
     @kb.add("c-d")

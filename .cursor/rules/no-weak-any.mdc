@@ -1,0 +1,44 @@
+---
+description: Python 中禁止滥用 typing.Any 等弱类型，优先具体类型与 Protocol/TypedDict/TypeVar
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# 强类型：禁止弱类型逃逸
+
+在 **Python** 源码中遵守以下约定（与 CLAUDE.md 中类型安全方向一致）。
+
+## 禁止
+
+- 在类型注解、泛型实参、回调签名中使用 **`typing.Any`**（以及 **`from typing import Any` 仅为填 Any** 的写法）。
+- 用 **`dict` / `list` / `set` 且无类型参数** 表示「任意结构」代替应使用的 `TypedDict`、`Sequence[T]`、`Mapping[str, T]` 等。
+
+## 应使用
+
+- **具体类型**、**联合类型**（`|`）、**`Optional`/`X | None`**。
+- **结构化数据**：`TypedDict`、`dataclass`、`Pydantic BaseModel`。
+- **多形态可调用/对象**：**`Protocol`**、**`TypeVar`**（含 bound）、**`TypeAlias`**。
+- 仅「任意对象」且需收窄时，优先 **`object`**，并在使用前用 **`isinstance`** / **`TypeGuard`** 收窄。
+
+## 极少数例外
+
+- 与 **第三方 API 强制要求** 且无法用 stub/Protocol 表达时，将 `Any` **限制在单函数或薄适配层**，并加 **一行注释** 说明原因；新代码默认仍应避免扩散 `Any`。
+
+## 示例
+
+```python
+# ❌ 避免
+def handle(data: Any) -> Any:
+    ...
+
+# ✅ 更好
+def handle(data: Mapping[str, JSONScalar]) -> ToolResult:
+    ...
+
+# ✅ 动态但可 bound
+T = TypeVar("T", bound=BaseModel)
+def parse(model: type[T], raw: Mapping[str, object]) -> T:
+    ...
+```
+
+编写或修改 `**/*.py` 时：**不得新增** 无理由的 `Any`；能改则改为更窄类型。

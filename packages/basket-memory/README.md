@@ -1,6 +1,6 @@
 # basket-memory
 
-Pluggable memory backends for AI assistants. Use with basket-assistant via the memory extension (see `packages/basket-assistant/examples/extensions/memory_extension.py`).
+Pluggable memory backends for AI assistants. Integrate with basket-assistant via settings and optional `basket-memory` dependencies (see this package’s Usage section).
 
 ## Installation
 

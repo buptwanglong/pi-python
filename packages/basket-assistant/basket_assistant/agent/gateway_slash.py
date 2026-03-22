@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Tuple
 
 from basket_assistant.commands.registry import CommandRegistry
-from basket_assistant.core.slash_commands_loader import collect_slash_commands
+from basket_assistant.core.loader.slash_commands_loader import collect_slash_commands
 from basket_assistant.interaction.processors.input_processor import InputProcessor
 from .prompts import get_slash_commands_dirs
 

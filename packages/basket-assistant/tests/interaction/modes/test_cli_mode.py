@@ -20,9 +20,9 @@ def mock_agent():
     agent._pending_asks = []
     agent.agent = MagicMock()
     agent.agent.run = AsyncMock()
+    agent.agent.on = MagicMock()
     agent.model = MagicMock()
     agent.model.model_id = "test-model"
-    agent.on = MagicMock()
     return agent
 
 

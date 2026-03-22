@@ -59,6 +59,32 @@ class GatewayWsConnection:
 
     def _dispatch(self, msg: dict[str, Any]) -> None:
         """Parse inbound message and call the matching handler. Swallow handler errors."""
+        typ = msg.get("type")
+        if typ == "plugin_install_progress":
+            h = self._handlers.get("on_plugin_install_progress")
+            if h:
+                try:
+                    h(msg)
+                except Exception:  # noqa: BLE001
+                    logger.exception("on_plugin_install_progress failed")
+            return
+        if typ == "slash_result":
+            h = self._handlers.get("on_slash_result")
+            if h:
+                try:
+                    h(msg)
+                except Exception:  # noqa: BLE001
+                    logger.exception("on_slash_result failed")
+            return
+        if typ == "slash_exit":
+            h = self._handlers.get("on_slash_exit")
+            if h:
+                try:
+                    h()
+                except Exception:  # noqa: BLE001
+                    logger.exception("on_slash_exit failed")
+            return
+
         parsed = parse_inbound(msg)
         if isinstance(parsed, Unknown):
             logger.debug("Unknown message type: %s", parsed.type)
@@ -231,6 +257,13 @@ class GatewayWsConnection:
             logger.info("Switching agent", extra={"agent_name": agent_name})
             await self._ws.send(
                 json.dumps({"type": "switch_agent", "agent_name": agent_name})
+            )
+
+    async def send_plugin_install(self, source: str) -> None:
+        if self._ws:
+            logger.info("Sending plugin_install", extra={"source_len": len(source)})
+            await self._ws.send(
+                json.dumps({"type": "plugin_install", "source": source})
             )
 
     async def close(self) -> None:

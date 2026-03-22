@@ -1,4 +1,4 @@
-"""Tests for _ConversationBodyWindow mouse event filtering."""
+"""Tests for _ConversationBodyWindow mouse event filtering and layout structure."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from prompt_toolkit.layout.containers import FloatContainer
 from prompt_toolkit.mouse_events import MouseEventType
 
 from basket_tui.native.ui.layout import _ConversationBodyWindow, build_layout
@@ -130,3 +131,45 @@ def test_build_layout_without_todo_panel():
         on_body_mouse_scroll=lambda w: None,
     )
     assert layout is not None
+
+
+def _build_test_layout(**overrides):
+    """Helper to build a layout with sensible defaults."""
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.data_structures import Point
+
+    defaults = dict(
+        width=80,
+        base_url="http://localhost:7682",
+        header_state={"agent": "default", "session": "s1"},
+        ui_state={"phase": "idle", "connection": "connected"},
+        get_body_lines=lambda: ["line1"],
+        input_buffer=Buffer(name="input", multiline=False),
+        footer_line=lambda: "footer",
+        get_vertical_scroll=lambda w: 0,
+        get_cursor_position=lambda: Point(0, 0),
+        on_body_mouse_scroll=lambda w: None,
+    )
+    defaults.update(overrides)
+    return build_layout(**defaults)
+
+
+class TestLayoutFloatContainer:
+    """Verify layout root is FloatContainer for CompletionsMenu support."""
+
+    def test_root_is_float_container(self) -> None:
+        layout = _build_test_layout()
+        assert isinstance(layout.container, FloatContainer)
+
+    def test_root_has_floats(self) -> None:
+        layout = _build_test_layout()
+        container = layout.container
+        assert hasattr(container, "floats")
+        assert len(container.floats) >= 1
+
+    def test_float_container_with_todo_panel(self) -> None:
+        layout = _build_test_layout(
+            get_todo_lines=lambda: "  task",
+            get_todo_height=lambda: 2,
+        )
+        assert isinstance(layout.container, FloatContainer)

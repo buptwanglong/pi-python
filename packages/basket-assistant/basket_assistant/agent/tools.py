@@ -11,7 +11,7 @@ from basket_ai.api import get_model
 from basket_ai.types import Context, UserMessage
 
 from ..core import SubAgentConfig
-from ..core.workspace_bootstrap import ensure_workspace_default_fill
+from ..core.loader.workspace_bootstrap import ensure_workspace_default_fill
 from ..hooks.tool_hooks import wrap_tool_execute_with_hooks
 from ..guardrails.engine import GuardrailEngine
 
@@ -53,6 +53,10 @@ def get_registerable_tools(agent: AssistantAgentProtocol) -> List[dict]:
     """Return list of tool dicts (name, description, parameters, execute_fn) from the registry."""
     # Trigger self-registration by importing all tool modules
     import basket_assistant.tools  # noqa: F401
+
+    from ..skills.registry import load_builtin_skill_tool_modules
+
+    load_builtin_skill_tool_modules()
 
     from ..tools._registry import get_all
 
@@ -168,7 +172,7 @@ async def run_subagent(agent: AssistantAgentProtocol, subagent_name: str, user_p
         model = agent.model
 
     context = Context(
-        systemPrompt=system_prompt,
+        system_prompt=system_prompt,
         messages=[
             UserMessage(
                 role="user",
@@ -222,6 +226,10 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
     """
     # Trigger self-registration by importing all tool modules
     import basket_assistant.tools  # noqa: F401
+
+    from ..skills.registry import load_builtin_skill_tool_modules
+
+    load_builtin_skill_tool_modules()
 
     from ..tools._registry import get_all
 

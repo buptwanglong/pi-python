@@ -13,6 +13,7 @@ python = "^3.12"
 pytest = "^8.0.0"
 pytest-asyncio = "^0.23.0"
 mypy = "^1.8.0"
+basedpyright = "^1.38.0"
 black = "^24.0.0"
 ruff = "^0.1.0"
 
@@ -40,4 +41,20 @@ target-version = ["py312"]
 line-length = 100
 target-version = "py312"
 select = ["E", "F", "I", "N", "W", "UP"]
+
+# Pydantic-friendly type checker (CLI: poetry run basedpyright).
+# pyrightconfig.json in this repo is honored; use the BasedPyright VS Code / Cursor
+# extension so the language server matches CLI behavior.
+[tool.basedpyright]
+pythonVersion = "3.12"
+failOnWarnings = false
+extraPaths = [
+    "packages/basket-agent",
+    "packages/basket-ai",
+    "packages/basket-gateway",
+    "packages/basket-trajectory",
+    "packages/basket-tui",
+    "packages/basket-remote",
+    "packages/basket-memory",
+]
 

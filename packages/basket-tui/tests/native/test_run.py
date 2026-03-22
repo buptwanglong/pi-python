@@ -8,7 +8,7 @@ import pytest
 from basket_tui.native.handle.dispatch import _dispatch_ws_message
 from basket_tui.native.pipeline import StreamAssembler
 from basket_tui.native.run import _get_width
-from basket_tui.native.ui import HELP_LINES, handle_slash_command
+from basket_tui.native.ui import HELP_LINES
 
 
 def _dispatch_setup():
@@ -44,25 +44,8 @@ def test_help_lines_non_empty():
     assert len(lines) >= 1
     assert any("/help" in line for line in lines)
     assert any("/exit" in line for line in lines)
-
-
-def test_handle_slash_command_help_returns_handled():
-    assert handle_slash_command("/help") == "handled"
-
-
-def test_handle_slash_command_exit_returns_exit():
-    assert handle_slash_command("/exit") == "exit"
-
-
-def test_handle_slash_command_stub_returns_handled():
-    assert handle_slash_command("/session") == "handled"
-    assert handle_slash_command("/agent") == "handled"
-    assert handle_slash_command("/new") == "handled"
-
-
-def test_handle_slash_command_non_slash_returns_none():
-    assert handle_slash_command("hello") is None
-    assert handle_slash_command("") is None
+    assert any("/quit" in line for line in lines)
+    assert any("/plugin" in line for line in lines)
 
 
 def test_dispatch_text_delta_and_agent_complete_updates_assembler():

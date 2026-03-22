@@ -41,7 +41,7 @@ def real_agent():
     if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
         pytest.skip("TUI E2E tests require OPENAI_API_KEY or ANTHROPIC_API_KEY")
 
-    coding_agent = AssistantAgent(load_extensions=False)
+    coding_agent = AssistantAgent()
     return coding_agent.agent
 
 

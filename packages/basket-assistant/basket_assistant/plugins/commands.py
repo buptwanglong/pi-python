@@ -7,16 +7,26 @@ List shows all installed plugins with their metadata.
 
 import logging
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from .loader import DiscoveredPlugin, PluginLoader
 from .manifest import load_plugin_manifest, validate_plugin_dir
+from .source_fetch import (
+    MaterializedPluginRoot,
+    materialize_plugin_source,
+    parse_install_source,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PLUGINS_DIR = "~/.basket/plugins"
+
+RESTART_HINT = (
+    "请重启 basket 以加载新插件的技能列表与斜杠命令。"
+)
 
 
 @dataclass(frozen=True)
@@ -38,41 +48,113 @@ def _resolve_plugins_dir(plugins_dir: Optional[Path] = None) -> Path:
 async def plugin_install(
     source: str,
     plugins_dir: Optional[Path] = None,
+    *,
+    progress_sink: Optional[Callable[[dict], Awaitable[None]]] = None,
 ) -> PluginCommandResult:
-    """Install a plugin from a local directory path.
+    """Install a plugin from a local directory, zip/tar file, https archive URL, or git URL.
 
-    Copies the source directory into plugins_dir/<plugin-name>/.
-    Validates the source before copying.
+    Copies the plugin tree into plugins_dir/<plugin-name>/.
+    On success, message includes a restart hint for TUI/CLI.
     """
     target_root = _resolve_plugins_dir(plugins_dir)
     target_root.mkdir(parents=True, exist_ok=True)
 
-    source_path = Path(source).expanduser().resolve()
-    if not source_path.is_dir():
-        return PluginCommandResult(
-            success=False,
-            error=f"Source is not a directory: {source}",
-        )
+    t0 = time.monotonic()
+    preview = source.strip()[:120] + ("…" if len(source.strip()) > 120 else "")
 
-    errors = validate_plugin_dir(source_path)
-    if errors:
-        return PluginCommandResult(
-            success=False,
-            error="; ".join(errors),
-        )
+    async def _emit(payload: dict) -> None:
+        if progress_sink is not None:
+            await progress_sink(payload)
 
-    manifest = load_plugin_manifest(source_path)
-    target_dir = target_root / manifest.name
-
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-
-    shutil.copytree(source_path, target_dir)
-
-    return PluginCommandResult(
-        success=True,
-        message=f"Installed plugin '{manifest.name}' v{manifest.version} to {target_dir}",
+    await _emit(
+        {
+            "type": "plugin_install_progress",
+            "phase": "started",
+            "source_preview": preview,
+        }
     )
+
+    parsed, perr = parse_install_source(source)
+    if parsed is None:
+        elapsed = round(time.monotonic() - t0, 1)
+        await _emit(
+            {
+                "type": "plugin_install_progress",
+                "phase": "done",
+                "success": False,
+                "elapsed_seconds": elapsed,
+                "message": perr or "Invalid source",
+            }
+        )
+        return PluginCommandResult(success=False, error=perr or "Invalid source")
+
+    materialized: Optional[MaterializedPluginRoot] = None
+    try:
+        if parsed.kind == "local_dir":
+            source_path = Path(parsed.primary).resolve()
+        else:
+            mat, merr = await materialize_plugin_source(
+                parsed, progress_sink=progress_sink
+            )
+            if merr or mat is None:
+                elapsed = round(time.monotonic() - t0, 1)
+                await _emit(
+                    {
+                        "type": "plugin_install_progress",
+                        "phase": "done",
+                        "success": False,
+                        "elapsed_seconds": elapsed,
+                        "message": merr or "Materialize failed",
+                    }
+                )
+                return PluginCommandResult(
+                    success=False,
+                    error=merr or "Materialize failed",
+                )
+            materialized = mat
+            source_path = mat.path
+
+        errors = validate_plugin_dir(source_path)
+        if errors:
+            elapsed = round(time.monotonic() - t0, 1)
+            err_text = "; ".join(errors)
+            await _emit(
+                {
+                    "type": "plugin_install_progress",
+                    "phase": "done",
+                    "success": False,
+                    "elapsed_seconds": elapsed,
+                    "message": err_text,
+                }
+            )
+            return PluginCommandResult(success=False, error=err_text)
+
+        manifest = load_plugin_manifest(source_path)
+        target_dir = target_root / manifest.name
+
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+
+        shutil.copytree(source_path, target_dir)
+
+        elapsed = round(time.monotonic() - t0, 1)
+        msg = (
+            f"Installed plugin '{manifest.name}' v{manifest.version} to {target_dir} "
+            f"(took {elapsed}s). {RESTART_HINT}"
+        )
+        await _emit(
+            {
+                "type": "plugin_install_progress",
+                "phase": "done",
+                "success": True,
+                "elapsed_seconds": elapsed,
+                "message": msg,
+            }
+        )
+        return PluginCommandResult(success=True, message=msg)
+    finally:
+        if materialized is not None:
+            materialized.cleanup_tmp()
 
 
 async def plugin_uninstall(

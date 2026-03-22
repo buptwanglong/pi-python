@@ -1,6 +1,6 @@
 """Type definitions for the WebSocket–TUI boundary (gateway connection and handlers)."""
 
-from typing import Callable, Protocol, TypedDict
+from typing import Any, Callable, Protocol, TypedDict
 
 from basket_protocol import (
     AgentAborted,
@@ -33,6 +33,9 @@ class GatewayHandlers(TypedDict, total=False):
     on_system: Callable[[System], None]
     on_todo_update: Callable[[TodoUpdate], None]
     on_ask_user_question: Callable[[AskUserQuestion], None]
+    on_plugin_install_progress: Callable[[dict[str, Any]], None]
+    on_slash_result: Callable[[dict[str, Any]], None]
+    on_slash_exit: Callable[[], None]
 
 
 class GatewayConnectionProtocol(Protocol):
@@ -43,4 +46,5 @@ class GatewayConnectionProtocol(Protocol):
     async def send_new_session(self) -> None: ...
     async def send_switch_session(self, session_id: str) -> None: ...
     async def send_switch_agent(self, agent_name: str) -> None: ...
+    async def send_plugin_install(self, source: str) -> None: ...
     async def close(self) -> None: ...

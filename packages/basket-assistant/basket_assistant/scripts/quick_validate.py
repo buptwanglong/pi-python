@@ -7,7 +7,7 @@ Exit code 0 if valid, non-zero otherwise.
 import sys
 from pathlib import Path
 
-from basket_assistant.core.skills_loader import (
+from basket_assistant.core.loader.skills_loader import (
     _DESCRIPTION_MAX_LEN,
     _NAME_MAX_LEN,
     _NAME_RE,

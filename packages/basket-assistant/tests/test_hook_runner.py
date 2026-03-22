@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from basket_assistant.extensions.hook_runner import (
+from basket_assistant.hooks.hook_runner import (
     HookRunner,
     HookDef,
     HOOK_EXIT_DENY,

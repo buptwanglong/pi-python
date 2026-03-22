@@ -2,9 +2,6 @@
   "plugins": {
     "superpowers": {
       "enabled": true
-    },
-    "figma": {
-      "enabled": true
     }
   }
 }

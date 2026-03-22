@@ -119,6 +119,31 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if typ == "abort":
                 await event_sink({"type": "agent_aborted"})
                 continue
+            if typ == "plugin_install":
+                source = (data.get("source") or "").strip()
+                if not source:
+                    await event_sink({"type": "agent_error", "error": "Missing plugin source"})
+                    continue
+                agent = gateway._get_agent(current_session_id, current_agent_name)
+                installer = getattr(agent, "gateway_plugin_install", None)
+                if installer is None or not callable(installer):
+                    await event_sink(
+                        {"type": "agent_error", "error": "Plugin install not available"}
+                    )
+                    continue
+                try:
+                    success, msg = await installer(source, event_sink=event_sink)
+                    if success:
+                        if msg:
+                            await event_sink({"type": "slash_result", "text": msg})
+                    else:
+                        await event_sink(
+                            {"type": "agent_error", "error": msg or "Plugin install failed"}
+                        )
+                except Exception as e:
+                    logger.exception("plugin_install failed")
+                    await event_sink({"type": "agent_error", "error": str(e)})
+                continue
             if typ != "message":
                 continue
             content = (data.get("content") or "").strip()

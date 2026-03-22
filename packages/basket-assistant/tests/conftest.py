@@ -163,7 +163,7 @@ async def mock_coding_agent(tmp_path, mock_settings_manager, monkeypatch):
     settings = mock_settings_manager.load()
     settings.sessions_dir = str(tmp_path / "sessions")
     mock_settings_manager.save(settings)
-    agent = AssistantAgent(settings_manager=mock_settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=mock_settings_manager)
 
     return agent
 

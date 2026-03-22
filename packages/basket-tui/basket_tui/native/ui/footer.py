@@ -29,6 +29,8 @@ def _phase_footer_parts(phase: str) -> tuple[str, bool]:
         return ("running", True)
     if p == "streaming":
         return ("streaming", True)
+    if p == "plugin_install":
+        return ("installing plugin", True)
     if p == "idle":
         return ("idle", False)
     if p == "error":

@@ -248,7 +248,7 @@ class AssistantAgent:
                 self._recent_tasks[index].update(updates)
 
         async def _draft_skill_from_session(topic_hint: Optional[str]) -> str:
-            from basket_assistant.core.skill_authoring import (
+            from basket_assistant.skills.authoring import (
                 extract_conversation_text,
                 format_skill_md,
                 generate_skill_draft,
@@ -282,7 +282,7 @@ class AssistantAgent:
             return preview_display
 
         async def _save_pending_skill_draft(scope: str) -> str:
-            from basket_assistant.core.skill_authoring import (
+            from basket_assistant.skills.authoring import (
                 SkillScope,
                 resolve_global_skills_dir,
                 resolve_project_skills_dir,

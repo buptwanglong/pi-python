@@ -7,7 +7,6 @@ from .input_handler import (
     InputResult,
     OutputPut,
     handle_input,
-    handle_slash_command,
     open_picker,
 )
 from .banner import build_banner_lines, resolve_basket_version
@@ -45,7 +44,6 @@ __all__ = [
     "resolve_basket_version",
     "spinner_frame",
     "handle_input",
-    "handle_slash_command",
     "open_picker",
     "todo_panel_height",
 ]

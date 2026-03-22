@@ -274,6 +274,30 @@ class AgentGateway:
                     agent._gateway_event_sink_ref[0] = None
                 return f"Error: {e}"
 
+        stripped_slash = user_content.strip()
+        if stripped_slash.startswith("/"):
+            try_gw = getattr(agent, "try_process_gateway_slash", None)
+            if callable(try_gw):
+                try:
+                    outcome = await try_gw(user_content, event_sink=event_sink)
+                except Exception as e:
+                    logger.exception("Gateway slash command failed")
+                    if event_sink is not None:
+                        await event_sink({"type": "agent_error", "error": str(e)})
+                    if event_sink is not None and getattr(agent, "_gateway_event_sink_ref", None) is not None:
+                        agent._gateway_event_sink_ref[0] = None
+                    return f"Error: {e}"
+                if outcome is not None:
+                    reply, want_exit = outcome
+                    if event_sink is not None:
+                        if reply:
+                            await event_sink({"type": "slash_result", "text": reply})
+                        if want_exit:
+                            await event_sink({"type": "slash_exit"})
+                    if event_sink is not None and getattr(agent, "_gateway_event_sink_ref", None) is not None:
+                        agent._gateway_event_sink_ref[0] = None
+                    return reply or ""
+
         n_before = len(agent.context.messages)
         agent.context.messages.append(
             UserMessage(role="user", content=user_content, timestamp=int(time.time() * 1000))
@@ -291,7 +315,7 @@ class AgentGateway:
                             "turn_done",
                             {"session_id": session_id, "new_messages": new_messages},
                         )
-                    hook_runner = getattr(getattr(agent, "extension_loader", None), "hook_runner", None)
+                    hook_runner = getattr(agent, "hook_runner", None)
                     if hook_runner is not None and hasattr(agent, "_messages_for_hook_payload"):
                         await hook_runner.run(
                             "message.turn_done",
@@ -373,6 +397,26 @@ async def list_models_endpoint(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def list_plugins_endpoint(request: Request) -> JSONResponse:
+    """GET /api/plugins: installed plugins for native TUI picker (name, version, description)."""
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"error": "gateway not available"}, status_code=503)
+    try:
+        agent = gateway._get_agent("default", None)
+        fn = getattr(agent, "list_plugins_for_picker", None)
+        if fn is None or not callable(fn):
+            return JSONResponse([])
+        if asyncio.iscoroutinefunction(fn):
+            items = await fn()
+        else:
+            items = fn()
+        return JSONResponse(items if isinstance(items, list) else [])
+    except Exception as e:
+        logger.exception("List plugins failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def create_app(
     pid: Optional[int] = None,
     agent_factory: Optional[Union[Callable[[], Any], Callable[[Optional[str]], Any]]] = None,
@@ -397,6 +441,7 @@ def create_app(
         Route("/api/sessions", list_sessions_endpoint, methods=["GET"]),
         Route("/api/agents", list_agents_endpoint, methods=["GET"]),
         Route("/api/models", list_models_endpoint, methods=["GET"]),
+        Route("/api/plugins", list_plugins_endpoint, methods=["GET"]),
     ]
     routes.extend(get_routes(gateway, config))
 

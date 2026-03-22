@@ -10,6 +10,8 @@ from basket_agent.types import (
     AgentEventError,
 )
 
+from basket_assistant.core.events import EventPublisher
+
 from .base import EventAdapter
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class TUIAdapter(EventAdapter):
         event_bus: The TUI EventBus instance to publish to
     """
 
-    def __init__(self, publisher: Any, event_bus: Any):
+    def __init__(self, publisher: "EventPublisher", event_bus: Any):
         """Initialize the TUI adapter.
 
         Args:

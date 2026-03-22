@@ -22,7 +22,7 @@ from basket_ai.types import UserMessage
 
 from basket_assistant.agent.prompts import get_slash_commands_dirs
 from basket_assistant.commands.registry import CommandRegistry
-from basket_assistant.core.slash_commands_loader import collect_slash_commands
+from basket_assistant.core.loader.slash_commands_loader import collect_slash_commands
 from ..processors.input_processor import InputProcessor
 from ..errors import ModeInitializationError
 

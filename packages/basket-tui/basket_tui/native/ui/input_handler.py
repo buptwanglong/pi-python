@@ -1,15 +1,12 @@
-"""
-Input and slash-command handling for terminal-native TUI.
-Merges former commands.py: HELP_LINES and handle_slash_command.
-"""
+"""Input and slash-command handling for terminal-native TUI."""
 
 import asyncio
 import logging
 from collections.abc import Callable
-from typing import Literal, Optional
+from typing import Literal
 
 from ..connection.types import GatewayConnectionProtocol
-from .pickers import run_agent_picker, run_session_picker
+from .pickers import handle_plugin_slash_line, run_agent_picker, run_session_picker
 
 logger = logging.getLogger(__name__)
 
@@ -17,51 +14,56 @@ InputResult = Literal["send", "exit", "handled"]
 
 OutputPut = Callable[[str], None]
 
-# From former commands.py; used for /help and routing.
-HELP_LINES = [
-    "[system] Commands:",
-    "  /help     - show this help",
-    "  /exit     - exit",
-    "  /session  - switch session (Ctrl+P)",
-    "  /agent    - switch agent (Ctrl+G)",
-    "  /model    - switch agent; model is per-agent (Ctrl+L)",
-    "  /new      - new session",
-    "  /abort    - abort current turn (Esc)",
-    "  /settings - open settings",
-    "  Scroll    - mouse wheel or PgUp/PgDn; Ctrl+End follow latest output",
-    "",
-]
+# Canonical command registry (single source of truth).
+SLASH_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("/help", "show this help"),
+    ("/exit", "exit"),
+    ("/quit", "exit (alias)"),
+    ("/session", "switch session (Ctrl+P)"),
+    ("/agent", "switch agent (Ctrl+G)"),
+    ("/model", "switch agent; model is per-agent (Ctrl+L)"),
+    ("/new", "new session"),
+    ("/abort", "abort current turn (Esc)"),
+    ("/settings", "open settings"),
+    ("/plugin", "manage plugins (list, install, uninstall)"),
+    ("/plugins", "plugin list (API + picker)"),
+)
 
-SlashResult = Optional[Literal["exit", "handled"]]
-
-
-def handle_slash_command(text: str) -> SlashResult:
-    """
-    If input is a slash command, return status. No side effects (caller adds to body_lines).
-    Return "exit" for /exit, "handled" for other slash commands, None if not a slash command.
-    """
-    t = (text or "").strip()
-    if not t.startswith("/"):
-        return None
-    parts = t.split(maxsplit=1)
-    cmd = (parts[0] or "").lower()
-    if not cmd:
-        return None
-    if cmd == "/exit":
-        return "exit"
-    # /help or unknown: caller will output_put HELP_LINES or unknown message
-    return "handled"
+# Derived from SLASH_COMMANDS; used for /help output.
+HELP_LINES: list[str] = (
+    ["[system] Commands:"]
+    + [f"  {cmd:<10} - {desc}" for cmd, desc in SLASH_COMMANDS]
+    + ["  Scroll    - mouse wheel or PgUp/PgDn; Ctrl+End follow latest output", ""]
+)
 
 
-def _run_picker(
-    kind: Literal["session", "agent", "model"],
+async def _run_picker(
+    kind: Literal["session", "agent", "model", "plugin"],
     base_url: str,
     connection: GatewayConnectionProtocol,
     output_put: OutputPut,
-) -> None:
+    *,
+    plugin_line: str | None = None,
+) -> InputResult | None:
+    """Run a picker, plugin shortcuts, or gateway switch scheduling.
+
+    ``session`` / ``agent`` / ``model``: HTTP-backed prompt_toolkit pickers; on success schedule
+    ``send_switch_*``. Always returns ``"handled"`` (failures and cancel are no-ops on the wire).
+
+    ``plugin``: delegates to ``pickers.handle_plugin_slash_line`` (GET /api/plugins picker,
+    WebSocket ``plugin_install``, or ``None`` to forward e.g. ``/plugin uninstall``).
+    """
+    if kind == "plugin":
+        if plugin_line is None:
+            logger.warning("plugin kind without plugin_line", extra={})
+            return None
+        return await handle_plugin_slash_line(
+            plugin_line, base_url, connection, output_put
+        )
+
     if kind == "session":
         logger.info("Opening picker", extra={"kind": kind})
-        session_id = run_session_picker(base_url)
+        session_id = await run_session_picker(base_url)
         if session_id:
             try:
                 asyncio.get_running_loop().create_task(
@@ -76,7 +78,7 @@ def _run_picker(
     else:
         # agent and model both use agent picker (model is per-agent)
         logger.info("Opening picker", extra={"kind": kind})
-        name = run_agent_picker(base_url)
+        name = await run_agent_picker(base_url)
         if name:
             try:
                 asyncio.get_running_loop().create_task(
@@ -88,9 +90,10 @@ def _run_picker(
                     extra={"kind": kind, "error": str(e)},
                 )
                 output_put(f"[system] Failed to switch: {e}")
+    return "handled"
 
 
-def handle_input(
+async def handle_input(
     text: str,
     base_url: str,
     connection: GatewayConnectionProtocol,
@@ -112,14 +115,11 @@ def handle_input(
 
     low = text.strip().lower()
     if low in ("/session", "/sessions"):
-        _run_picker("session", base_url, connection, output_put)
-        return "handled"
+        return (await _run_picker("session", base_url, connection, output_put)) or "handled"
     if low in ("/agent", "/agents"):
-        _run_picker("agent", base_url, connection, output_put)
-        return "handled"
+        return (await _run_picker("agent", base_url, connection, output_put)) or "handled"
     if low in ("/model", "/models"):
-        _run_picker("model", base_url, connection, output_put)
-        return "handled"
+        return (await _run_picker("model", base_url, connection, output_put)) or "handled"
     if low == "/new":
         logger.info("New session requested", extra={})
         try:
@@ -143,14 +143,21 @@ def handle_input(
         for line in HELP_LINES:
             output_put(line)
         return "handled"
-
-    result = handle_slash_command(text)
-    if result == "exit":
+    if low in ("/exit", "/quit"):
         return "exit"
-    if result == "handled":
-        if text.strip().startswith("/"):
-            output_put("[system] Unknown command. Type /help for commands.")
-        return "handled"
+
+    parts = text.strip().split(maxsplit=1)
+    cmd0 = (parts[0] or "").lower()
+    if cmd0 in ("/plugin", "/plugins"):
+        plugin_result = await _run_picker(
+            "plugin",
+            base_url,
+            connection,
+            output_put,
+            plugin_line=text,
+        )
+        if plugin_result is not None:
+            return plugin_result
 
     logger.info("Message queued", extra={"text_len": len(text)})
     try:
@@ -160,11 +167,11 @@ def handle_input(
     return "send"
 
 
-def open_picker(
+async def open_picker(
     kind: Literal["session", "agent", "model"],
     base_url: str,
     connection: GatewayConnectionProtocol,
     output_put: OutputPut,
 ) -> None:
     """Open session/agent/model picker and schedule send via connection."""
-    _run_picker(kind, base_url, connection, output_put)
+    await _run_picker(kind, base_url, connection, output_put)

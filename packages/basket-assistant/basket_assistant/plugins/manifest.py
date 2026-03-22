@@ -1,7 +1,7 @@
 """Plugin manifest parsing and directory validation.
 
 A Plugin is a directory containing an optional plugin.json manifest plus
-any combination of skills/, hooks.json, extensions/, and agents/ sub-dirs.
+any combination of skills/, hooks.json, commands/, and agents/ sub-dirs.
 """
 
 import json
@@ -72,7 +72,7 @@ def validate_plugin_dir(plugin_dir: Path) -> List[str]:
 
     Returns a list of error messages (empty = valid).
     A valid plugin must contain at least one of:
-    skills/, hooks.json, extensions/, agents/
+    skills/, hooks.json, commands/, agents/
     """
     errors: List[str] = []
 
@@ -86,8 +86,8 @@ def validate_plugin_dir(plugin_dir: Path) -> List[str]:
     if hooks_file.is_file():
         has_content = True
 
-    extensions_dir = plugin_dir / "extensions"
-    if extensions_dir.is_dir() and any(extensions_dir.iterdir()):
+    commands_dir = plugin_dir / "commands"
+    if commands_dir.is_dir() and any(commands_dir.iterdir()):
         has_content = True
 
     agents_dir = plugin_dir / "agents"
@@ -97,7 +97,7 @@ def validate_plugin_dir(plugin_dir: Path) -> List[str]:
     if not has_content:
         errors.append(
             "Plugin has no content: expected at least one of "
-            "skills/, hooks.json, extensions/, agents/"
+            "skills/, hooks.json, commands/, agents/"
         )
 
     return errors

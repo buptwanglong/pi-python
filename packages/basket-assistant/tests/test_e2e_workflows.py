@@ -42,7 +42,7 @@ def real_agent():
     if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
         pytest.skip("E2E tests require ANTHROPIC_API_KEY or OPENAI_API_KEY")
 
-    agent = AssistantAgent(load_extensions=False)
+    agent = AssistantAgent()
     return agent
 
 
@@ -401,7 +401,7 @@ async def test_e2e_custom_settings(tmp_path):
     settings_manager.save(settings)
 
     # When: Create agent with custom settings
-    agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+    agent = AssistantAgent(settings_manager=settings_manager)
 
     # Then: Settings should be applied
     assert agent.agent.max_turns == 3

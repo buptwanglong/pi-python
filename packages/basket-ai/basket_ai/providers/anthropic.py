@@ -13,6 +13,7 @@ import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from anthropic import AsyncAnthropic
+from anthropic.types import stop_reason
 
 logger = logging.getLogger(__name__)
 

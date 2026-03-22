@@ -15,7 +15,7 @@ Tests for individual components in isolation:
 - `test_session_manager.py` - JSONL session persistence
 - `test_messages.py` - Message tree navigation
 - `test_theme.py` - Theme system
-- `test_extensions.py` - Extension loading and API
+- `test_hook_runner.py` - Subprocess hooks (hooks.json / settings.hooks)
 
 ### Integration Tests
 Tests for component interactions:
@@ -140,9 +140,8 @@ Current test coverage (as of Phase 1):
 | **Integration** | ~40% | ⚠️ Needs Work |
 | `main.py` | ~30% | ⚠️ Needs Work |
 | `modes/tui.py` | ~25% | ⚠️ Needs Work |
-| **Extensions** | ~85% | ✅ Good |
-| `extensions/api.py` | ~90% | ✅ Excellent |
-| `extensions/loader.py` | ~80% | ✅ Good |
+| **Hooks** | ~85% | ✅ Good |
+| `hooks/hook_runner.py` | ~85% | ✅ Good |
 
 **Target Coverage: >80% for all components**
 

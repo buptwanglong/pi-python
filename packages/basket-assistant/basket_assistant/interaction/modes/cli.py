@@ -1,7 +1,7 @@
 """CLI interaction mode."""
 
 import logging
-from typing import Any, List, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from basket_assistant.core.events.publisher import EventPublisher
 from basket_assistant.adapters.cli import CLIAdapter
@@ -124,7 +124,9 @@ async def run_interactive(agent: Any) -> None:
     await mode.run()
 
 
-async def run_once(agent: Any, message: str, invoked_skill_id: str = None) -> str:
+async def run_once(
+    agent: Any, message: str, invoked_skill_id: Optional[str] = None
+) -> str:
     """Run agent once with a message (for tests/scripts).
 
     Args:

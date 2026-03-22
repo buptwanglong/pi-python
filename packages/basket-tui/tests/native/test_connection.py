@@ -242,3 +242,42 @@ async def test_send_switch_agent_sends_type_switch_agent_and_agent_name():
                 await task
             except asyncio.CancelledError:
                 pass
+
+
+@pytest.mark.asyncio
+async def test_send_plugin_install_sends_type_and_source():
+    """send_plugin_install(source) sends {"type":"plugin_install","source":...}."""
+    async def never_end():
+        await asyncio.Event().wait()
+
+    mock_ws = MagicMock()
+    mock_ws.__aiter__ = lambda self: never_end()
+    mock_ws.send = AsyncMock()
+    mock_ws.close = AsyncMock()
+
+    class AsyncCtx:
+        async def __aenter__(self):
+            return mock_ws
+
+        async def __aexit__(self, *args):
+            return None
+
+    ready_event = asyncio.Event()
+    conn = GatewayWsConnection("ws://test/ws", {}, ready_event)
+
+    with patch("basket_tui.native.connection.client.websockets") as mock_websockets:
+        mock_websockets.connect.return_value = AsyncCtx()
+        task = asyncio.create_task(conn.run())
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=5.0)
+            await conn.send_plugin_install("https://example.com/p.zip")
+            mock_ws.send.assert_called_once_with(
+                json.dumps({"type": "plugin_install", "source": "https://example.com/p.zip"})
+            )
+        finally:
+            await conn.close()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass

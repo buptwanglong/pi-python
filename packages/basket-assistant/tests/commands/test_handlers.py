@@ -1,0 +1,479 @@
+"""Tests for builtin command handlers."""
+
+import pytest
+from basket_assistant.commands.builtin.clear import handle_clear
+from basket_assistant.commands.builtin.compact import handle_compact
+from basket_assistant.commands.builtin.exit_quit import handle_exit
+from basket_assistant.commands.builtin.help import handle_help
+from basket_assistant.commands.builtin.model import handle_model
+from basket_assistant.commands.builtin.plan import handle_plan
+from basket_assistant.commands.builtin.plugin import handle_plugin
+from basket_assistant.commands.builtin.session_open import handle_open
+from basket_assistant.commands.builtin.sessions import handle_sessions
+from basket_assistant.commands.builtin.settings import handle_settings
+from basket_assistant.commands.builtin.todos import handle_todos
+from basket_assistant.commands.builtin import register_builtin_commands
+from basket_assistant.commands.registry import CommandRegistry
+
+
+# Mock classes for testing
+class MockContext:
+    """Mock context for testing."""
+
+    def __init__(self, messages=None, system_prompt="", tools=None):
+        self.messages = messages or []
+        self.system_prompt = system_prompt
+        self.tools = tools or []
+
+    def model_copy(self, update=None):
+        """Mimic Pydantic model_copy for compaction tests."""
+        new = MockContext(
+            messages=list(self.messages),
+            system_prompt=self.system_prompt,
+            tools=list(self.tools),
+        )
+        if update:
+            for key, value in update.items():
+                setattr(new, key, value)
+        return new
+
+
+class MockSettings:
+    """Mock settings object."""
+
+    def __init__(self):
+        self.model = MockModel()
+        self.agent = MockAgentSettings()
+        self.workspace_dir = "/home/user/.basket/workspace"
+        self.api_keys = {}
+
+    def to_dict(self):
+        return {
+            "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4",
+            },
+            "agent": {
+                "max_turns": 25,
+                "auto_save": True,
+            },
+            "workspace_dir": self.workspace_dir,
+        }
+
+
+class MockModel:
+    """Mock model settings."""
+
+    provider = "anthropic"
+    model_id = "claude-sonnet-4"
+
+
+class MockAgentSettings:
+    """Mock agent settings."""
+
+    max_turns = 25
+    auto_save = True
+
+
+class MockSessionManager:
+    """Mock session manager."""
+
+    def __init__(self):
+        self.sessions = [
+            {"id": "session-1", "created_at": "2026-03-14T10:00:00"},
+            {"id": "session-2", "created_at": "2026-03-14T11:00:00"},
+        ]
+        self.current_session_id = "session-1"
+
+    async def list_sessions(self):
+        return self.sessions
+
+    async def create_session(self, model_id: str = "") -> str:
+        return "new-session-id"
+
+    async def load_session(self, session_id: str):
+        if session_id not in [s["id"] for s in self.sessions]:
+            raise ValueError(f"Session not found: {session_id}")
+        self.current_session_id = session_id
+        return [{"role": "user", "content": "test"}]
+
+
+class MockModelWithWindow:
+    """Mock model with context_window attribute."""
+
+    def __init__(self, context_window: int = 128000):
+        self.context_window = context_window
+        self.model_id = "test-model"
+
+
+class MockModelForSwitch:
+    """Mock model with all attributes needed for /model switch."""
+
+    def __init__(self, provider="anthropic", model_id="claude-sonnet-4", context_window=128000):
+        self.provider = provider
+        self.model_id = model_id
+        self.context_window = context_window
+        self.max_tokens = 4096
+        self.baseUrl = ""
+
+
+class MockAgentInner:
+    """Mock inner Agent (basket_agent.Agent) for model switch tests."""
+
+    def __init__(self, model):
+        self.model = model
+
+
+class MockAgent:
+    """Mock agent for testing."""
+
+    def __init__(self):
+        self.settings = MockSettings()
+        self.session_manager = MockSessionManager()
+        self.model = MockModel()
+        self._todo_show_full = False
+        self.plan_mode = False
+        self.conversation = []
+        self.context = MockContext()
+        self._current_todos = []
+        self._pending_asks = []
+        self._session_id = None
+        self.agent = MockAgentInner(self.model)
+
+    def load_history(self, messages):
+        self.conversation = messages
+
+
+# Tests for builtin command handler functions
+class TestBuiltinCommandHandlers:
+    """Test builtin command handlers."""
+
+    def test_handle_help(self):
+        """Test /help command."""
+        agent = MockAgent()
+        success, error = handle_help(agent, "")
+        assert success is True
+        assert error == ""
+
+    def test_handle_settings(self):
+        """Test /settings command."""
+        agent = MockAgent()
+        success, error = handle_settings(agent, "")
+        assert success is True
+        assert error == ""
+
+    def test_handle_todos_no_args(self):
+        """Test /todos with no arguments (toggle)."""
+        agent = MockAgent()
+        assert agent._todo_show_full is False
+
+        success, error = handle_todos(agent, "")
+        assert success is True
+        assert error == ""
+        assert agent._todo_show_full is True
+
+        success, error = handle_todos(agent, "")
+        assert success is True
+        assert error == ""
+        assert agent._todo_show_full is False
+
+    def test_handle_todos_on(self):
+        """Test /todos on."""
+        agent = MockAgent()
+        success, error = handle_todos(agent, "on")
+        assert success is True
+        assert error == ""
+        assert agent._todo_show_full is True
+
+    def test_handle_todos_off(self):
+        """Test /todos off."""
+        agent = MockAgent()
+        agent._todo_show_full = True
+        success, error = handle_todos(agent, "off")
+        assert success is True
+        assert error == ""
+        assert agent._todo_show_full is False
+
+    def test_handle_todos_invalid_arg(self):
+        """Test /todos with invalid argument."""
+        agent = MockAgent()
+        success, error = handle_todos(agent, "invalid")
+        assert success is False
+        assert "Usage:" in error
+
+    def test_handle_plan_no_args(self):
+        """Test /plan with no arguments (toggle)."""
+        agent = MockAgent()
+        assert agent.plan_mode is False
+
+        success, error = handle_plan(agent, "")
+        assert success is True
+        assert error == ""
+        assert agent.plan_mode is True
+
+        success, error = handle_plan(agent, "")
+        assert success is True
+        assert error == ""
+        assert agent.plan_mode is False
+
+    def test_handle_plan_on(self):
+        """Test /plan on."""
+        agent = MockAgent()
+        success, error = handle_plan(agent, "on")
+        assert success is True
+        assert error == ""
+        assert agent.plan_mode is True
+
+    def test_handle_plan_off(self):
+        """Test /plan off."""
+        agent = MockAgent()
+        agent.plan_mode = True
+        success, error = handle_plan(agent, "off")
+        assert success is True
+        assert error == ""
+        assert agent.plan_mode is False
+
+    def test_handle_plan_invalid_arg(self):
+        """Test /plan with invalid argument."""
+        agent = MockAgent()
+        success, error = handle_plan(agent, "invalid")
+        assert success is False
+        assert "Usage:" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_sessions(self):
+        """Test /sessions command."""
+        agent = MockAgent()
+        success, error = await handle_sessions(agent, "")
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_sessions_no_manager(self):
+        """Test /sessions when session_manager is None."""
+        agent = MockAgent()
+        agent.session_manager = None
+        success, error = await handle_sessions(agent, "")
+        assert success is False
+        assert "Session management not available" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_open_success(self):
+        """Test /open command with valid session."""
+        agent = MockAgent()
+        success, error = await handle_open(agent, "session-2")
+        assert success is True
+        assert error == ""
+        assert agent.session_manager.current_session_id == "session-2"
+        assert len(agent.conversation) > 0
+
+    @pytest.mark.asyncio
+    async def test_handle_open_no_args(self):
+        """Test /open without session ID."""
+        agent = MockAgent()
+        success, error = await handle_open(agent, "")
+        assert success is False
+        assert "Usage:" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_open_not_found(self):
+        """Test /open with non-existent session."""
+        agent = MockAgent()
+        success, error = await handle_open(agent, "invalid-session")
+        assert success is False
+        assert "not found" in error.lower()
+
+    @pytest.mark.asyncio
+    async def test_handle_open_no_manager(self):
+        """Test /open when session_manager is None."""
+        agent = MockAgent()
+        agent.session_manager = None
+        success, error = await handle_open(agent, "session-2")
+        assert success is False
+        assert "Session management not available" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_resets_context(self):
+        """Test /clear clears messages, todos, and pending asks."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1", "msg2"])
+        agent._current_todos = [{"id": 1}]
+        agent._pending_asks = [{"tool_call_id": "tc1"}]
+        agent._session_id = "old-session"
+        success, error = await handle_clear(agent, "")
+        assert success is True
+        assert error == ""
+        assert agent.context.messages == []
+        assert agent._current_todos == []
+        assert agent._pending_asks == []
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_preserves_system_prompt(self):
+        """Test /clear keeps system prompt intact."""
+        agent = MockAgent()
+        agent.context = MockContext(
+            system_prompt="You are a helpful assistant.",
+            messages=["msg1"],
+        )
+        await handle_clear(agent, "")
+        assert agent.context.system_prompt == "You are a helpful assistant."
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_creates_new_session(self):
+        """Test /clear creates a new session when session_manager is available."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1"])
+        agent._session_id = "old-session"
+        await handle_clear(agent, "")
+        assert agent._session_id != "old-session"
+        assert agent._session_id == "new-session-id"
+
+    @pytest.mark.asyncio
+    async def test_handle_clear_works_without_session_manager(self):
+        """Test /clear works even when session_manager is None."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg1"])
+        agent.session_manager = None
+        agent._session_id = None
+        success, error = await handle_clear(agent, "")
+        assert success is True
+        assert agent.context.messages == []
+
+    @pytest.mark.asyncio
+    async def test_handle_compact_reduces_context(self):
+        """Test /compact triggers compaction when context is large."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=["msg"] * 100)
+        agent.model = MockModelWithWindow(context_window=100)
+        success, error = await handle_compact(agent, "")
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_compact_no_change_when_small(self):
+        """Test /compact reports no change when context is small."""
+        agent = MockAgent()
+        agent.context = MockContext(messages=[])
+        agent.model = MockModelWithWindow(context_window=100_000)
+        success, error = await handle_compact(agent, "")
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_model_switch_success(self):
+        """Test /model switches model successfully."""
+        agent = MockAgent()
+        agent.model = MockModelForSwitch(provider="anthropic", model_id="old-model")
+        agent.agent = MockAgentInner(agent.model)
+        success, error = await handle_model(agent, "openai/gpt-4o")
+        assert success is True
+        assert error == ""
+        assert agent.model.model_id == "gpt-4o"
+        assert agent.model.provider == "openai"
+        assert agent.agent.model.model_id == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_handle_model_no_args_shows_current(self):
+        """Test /model with no args shows current model."""
+        agent = MockAgent()
+        success, error = await handle_model(agent, "")
+        assert success is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_handle_model_invalid_format(self):
+        """Test /model with invalid format returns error."""
+        agent = MockAgent()
+        success, error = await handle_model(agent, "invalid")
+        assert success is False
+        assert "Usage:" in error
+
+    @pytest.mark.asyncio
+    async def test_handle_model_with_context_window(self):
+        """Test /model with context_window override."""
+        agent = MockAgent()
+        agent.model = MockModelForSwitch()
+        agent.agent = MockAgentInner(agent.model)
+        success, error = await handle_model(agent, "openai/gpt-4o --context-window 64000")
+        assert success is True
+        assert agent.model.context_window == 64000
+
+    @pytest.mark.asyncio
+    async def test_handle_plugin_list(self):
+        """Test /plugin list shows plugins."""
+        agent = MockAgent()
+        success, msg = await handle_plugin(agent, "list")
+        assert success is True
+        assert "No plugins installed" in msg
+
+    @pytest.mark.asyncio
+    async def test_handle_plugin_no_args(self):
+        """Test /plugin with no args shows usage."""
+        agent = MockAgent()
+        success, error = await handle_plugin(agent, "")
+        assert success is False
+        assert "Usage:" in error
+
+    def test_handle_exit(self):
+        """Test /exit handler returns success."""
+        agent = MockAgent()
+        success, error = handle_exit(agent, "")
+        assert success is True
+        assert error == ""
+
+
+class TestRegisterBuiltinCommands:
+    """Test builtin command registration."""
+
+    def test_register_builtin_commands(self):
+        """Test that all builtin commands are registered."""
+        agent = MockAgent()
+        registry = CommandRegistry(agent)
+
+        # Commands should be auto-registered in __init__
+        # Check that all expected commands exist
+        assert registry.get_command("help") is not None
+        assert registry.get_command("settings") is not None
+        assert registry.get_command("todos") is not None
+        assert registry.get_command("plan") is not None
+        assert registry.get_command("sessions") is not None
+        assert registry.get_command("open") is not None
+        assert registry.get_command("clear") is not None
+        assert registry.get_command("compact") is not None
+        assert registry.get_command("model") is not None
+        assert registry.get_command("plugin") is not None
+        assert registry.get_command("exit") is not None
+        assert registry.get_command("quit") is not None
+
+    def test_command_aliases(self):
+        """Test that command aliases work."""
+        agent = MockAgent()
+        registry = CommandRegistry(agent)
+
+        # Test alias resolution
+        assert registry.get_command("/help") is not None
+        assert registry.get_command("/settings") is not None
+        assert registry.get_command("/todos") is not None
+        assert registry.get_command("/plan") is not None
+        assert registry.get_command("/sessions") is not None
+        assert registry.get_command("/open") is not None
+        assert registry.get_command("/clear") is not None
+        assert registry.get_command("/compact") is not None
+        assert registry.get_command("/model") is not None
+        assert registry.get_command("/plugin") is not None
+        assert registry.get_command("/exit") is not None
+        assert registry.get_command("/quit") is not None
+
+    def test_command_execution(self):
+        """Test that registered commands can be executed."""
+        agent = MockAgent()
+        registry = CommandRegistry(agent)
+
+        # Test sync command
+        success, error = registry.execute_command("help", "")
+        assert success is True
+
+        # Test async command requires await
+        cmd = registry.get_command("sessions")
+        assert cmd is not None
+        assert cmd.is_async is True

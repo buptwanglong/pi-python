@@ -76,7 +76,7 @@ poetry install
 - 200+ tests
 - 11 LLM providers
 - 5 core tools
-- 4 example extensions
+- Plugins (skills, hooks, agents under `~/.basket/plugins/`)
 - 2 built-in themes
 
 See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for detailed breakdown.
@@ -122,31 +122,6 @@ async for event in stream(model, context):
         print(event["delta"], end="", flush=True)
 ```
 
-### Creating Extensions
-
-```python
-"""my_extension.py"""
-from pydantic import BaseModel, Field
-
-class MyToolParams(BaseModel):
-    text: str = Field(..., description="Input text")
-
-def setup(basket):
-    @basket.register_tool(
-        name="my_tool",
-        description="Process text",
-        parameters=MyToolParams,
-    )
-    async def my_tool(text: str) -> str:
-        return f"Processed: {text}"
-
-    @basket.register_command("/mycmd")
-    def my_command(args: str):
-        print(f"Command: {args}")
-```
-
-Install to `~/.basket/extensions/` and the agent will load it automatically.
-
 ## Testing
 
 ```bash
@@ -156,7 +131,7 @@ poetry run pytest -v
 
 # Run specific test categories
 poetry run pytest tests/test_tools/ -v          # Tool tests
-poetry run pytest tests/test_extensions.py -v   # Extension tests
+poetry run pytest tests/test_hook_runner.py -v  # Subprocess hooks
 poetry run pytest tests/test_theme.py -v        # Theme tests
 
 # Run with coverage
@@ -165,7 +140,7 @@ poetry run pytest --cov=basket_assistant --cov-report=html tests/
 
 **Test Coverage:**
 - Tools: 32 tests (read, write, edit, bash, grep)
-- Extensions: 18 tests (API, loader, integration)
+- Hooks: subprocess hook runner tests
 - Themes: 11 tests (colors, manager, loading)
 - Sessions: 9 tests (JSONL, metadata, trees)
 - Settings: 13 tests (load, save, defaults)
@@ -193,12 +168,6 @@ poetry run pytest --cov=basket_assistant --cov-report=html tests/
 - **Edit**: Precise string replacement with diff support
 - **Bash**: Execute shell commands with timeout
 - **Grep**: Search code with regex and glob patterns
-
-### Extension System
-- Dynamic module loading
-- Decorator-based API (`@basket.register_tool`, `@basket.register_command`, `@basket.on`)
-- Event-driven architecture
-- Auto-discovery from `~/.basket/extensions/` and `./extensions/`
 
 ### Theme System
 - JSON-based theme files

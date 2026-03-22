@@ -201,7 +201,7 @@ class TestContext:
         ctx = Context()
         assert ctx.system_prompt is None
         assert ctx.messages == []
-        assert ctx.tools is None
+        assert ctx.tools == []
 
     def test_context_with_messages(self):
         """Test context with messages."""

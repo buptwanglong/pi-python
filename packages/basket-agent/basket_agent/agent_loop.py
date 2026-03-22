@@ -7,13 +7,16 @@ detects tool calls, executes tools in parallel, and manages the conversation flo
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Dict, List, Optional
+import time
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from basket_ai.api import stream
 
 logger = logging.getLogger(__name__)
 from basket_ai.types import (
     AssistantMessage,
+    AssistantMessageEvent,
+    ImageContent,
     StopReason,
     TextContent,
     ToolCall,
@@ -167,7 +170,7 @@ async def _execute_single_tool_call(
 
 async def run_agent_turn(
     state: AgentState, stream_llm_events: bool = True
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[AgentEvent | AssistantMessageEvent]:
     """
     Run a single agent turn.
 
@@ -273,8 +276,20 @@ async def run_agent_turn(
 
     tool_results = []
     for i, result_or_exc in enumerate(completed):
-        if isinstance(result_or_exc, Exception):
-            # Handle unexpected exception from gather
+        if isinstance(result_or_exc, dict):
+            # Success: buffered events + result (see _execute_single_tool_call)
+            for event in result_or_exc["events"]:
+                yield event
+            tool_results.append(
+                {
+                    "tool_call_id": result_or_exc["tool_call_id"],
+                    "tool_name": result_or_exc["tool_name"],
+                    "result": result_or_exc["result"],
+                    "error": result_or_exc["error"],
+                }
+            )
+        else:
+            # gather with return_exceptions=True: BaseException (incl. Exception)
             tc = tool_calls[i]
             yield AgentEventToolCallStart(
                 tool_name=tc.name,
@@ -295,21 +310,10 @@ async def run_agent_turn(
                     "error": str(result_or_exc),
                 }
             )
-        else:
-            # Yield collected events in order (start, retries, then end)
-            for event in result_or_exc["events"]:
-                yield event
-            tool_results.append(
-                {
-                    "tool_call_id": result_or_exc["tool_call_id"],
-                    "tool_name": result_or_exc["tool_name"],
-                    "result": result_or_exc["result"],
-                    "error": result_or_exc["error"],
-                }
-            )
 
     # One ToolResultMessage per tool call (Anthropic requires each tool_use to have a matching tool_result)
     for tr in tool_results:
+        result_content: List[Union[TextContent, ImageContent]]
         if tr["error"]:
             result_content = [TextContent(type="text", text=f"Error: {tr['error']}")]
         else:
@@ -318,10 +322,10 @@ async def run_agent_turn(
 
         tool_result_msg = ToolResultMessage(
             role="toolResult",
-            tool_call_id=tr["tool_call_id"],
-            tool_name=tr["tool_name"],
+            toolCallId=tr["tool_call_id"] or "unknown",
+            toolName=tr["tool_name"] or "unknown",
             content=result_content,
-            timestamp=0,
+            timestamp=int(time.time() * 1000),
         )
         state.add_message(tool_result_msg)
 
@@ -333,7 +337,7 @@ async def run_agent_turn(
 
 async def run_agent_loop(
     state: AgentState, stream_llm_events: bool = True
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[AgentEvent | AssistantMessageEvent]:
     """
     Run the complete agent loop.
 

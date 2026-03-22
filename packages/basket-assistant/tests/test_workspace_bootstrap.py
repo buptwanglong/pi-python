@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from basket_assistant.core.settings import Settings
-from basket_assistant.core.workspace_bootstrap import (
+from basket_assistant.core.loader.workspace_bootstrap import (
     ensure_workspace_default_fill,
     load_daily_memory,
     load_workspace_sections,
@@ -15,7 +15,7 @@ from basket_assistant.core.workspace_bootstrap import (
 def test_resolve_workspace_dir_returns_default_when_unset(monkeypatch, tmp_path):
     """resolve_workspace_dir returns default path when workspace_dir is not set; creates and fills it."""
     monkeypatch.setattr(
-        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        "basket_assistant.core.loader.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
         str(tmp_path / "default_workspace"),
     )
     settings = Settings()
@@ -31,7 +31,7 @@ def test_resolve_workspace_dir_returns_default_when_unset(monkeypatch, tmp_path)
 def test_resolve_workspace_dir_returns_default_when_empty(monkeypatch, tmp_path):
     """resolve_workspace_dir returns default path when workspace_dir is empty string."""
     monkeypatch.setattr(
-        "basket_assistant.core.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
+        "basket_assistant.core.loader.workspace_bootstrap.DEFAULT_WORKSPACE_DIR",
         str(tmp_path / "default_workspace"),
     )
     settings = Settings(workspace_dir="")

@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from basket_assistant.core.skills_loader import _NAME_MAX_LEN, _NAME_RE
+from basket_assistant.core.loader.skills_loader import _NAME_MAX_LEN, _NAME_RE
 
 ALLOWED_RESOURCES = {"scripts", "references", "assets"}
 

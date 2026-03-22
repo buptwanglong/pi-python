@@ -1,4 +1,4 @@
-"""Tests for /create-skill command."""
+"""Tests for skill authoring (core + AgentContext callbacks + tools)."""
 
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,18 +10,16 @@ from basket_ai.types import (
     TextContent,
     UserMessage,
 )
-from basket_assistant.commands.create_skill import (
+from basket_assistant.core import get_skill_full_content, get_skills_index
+from basket_assistant.skills.authoring import (
     SkillDraft,
     SkillScope,
     extract_conversation_text,
     format_skill_md,
     generate_skill_draft,
-    handle_create_skill,
-    handle_save_skill,
     sanitize_skill_name,
     save_skill_to_disk,
 )
-from basket_assistant.core import get_skill_full_content, get_skills_index
 from pydantic import ValidationError
 
 
@@ -183,7 +181,7 @@ class TestGenerateSkillDraft:
         mock_message = _assistant_msg(llm_response_json)
 
         with patch(
-            "basket_assistant.commands.create_skill.complete",
+            "basket_assistant.skills.authoring.complete",
             new_callable=AsyncMock,
             return_value=mock_message,
         ):
@@ -209,7 +207,7 @@ class TestGenerateSkillDraft:
         mock_message = _assistant_msg(llm_response_json)
 
         with patch(
-            "basket_assistant.commands.create_skill.complete",
+            "basket_assistant.skills.authoring.complete",
             new_callable=AsyncMock,
             return_value=mock_message,
         ):
@@ -236,7 +234,7 @@ class TestGenerateSkillDraft:
         )
 
         with patch(
-            "basket_assistant.commands.create_skill.complete",
+            "basket_assistant.skills.authoring.complete",
             new_callable=AsyncMock,
             return_value=empty_message,
         ):
@@ -252,7 +250,7 @@ class TestGenerateSkillDraft:
         mock_message = _assistant_msg("This is not JSON at all {{{")
 
         with patch(
-            "basket_assistant.commands.create_skill.complete",
+            "basket_assistant.skills.authoring.complete",
             new_callable=AsyncMock,
             return_value=mock_message,
         ):
@@ -275,7 +273,7 @@ class TestGenerateSkillDraft:
         mock_message = _assistant_msg(incomplete_json)
 
         with patch(
-            "basket_assistant.commands.create_skill.complete",
+            "basket_assistant.skills.authoring.complete",
             new_callable=AsyncMock,
             return_value=mock_message,
         ):
@@ -387,73 +385,58 @@ class TestSaveSkillToDisk:
 
 
 # ---------------------------------------------------------------------------
-# Helper for building mock agents
+# Tests for AgentContext draft / save callbacks (used by tools)
 # ---------------------------------------------------------------------------
 
 
-def _build_mock_agent(messages=None):
-    """Build a mock agent with session_manager and model for handler tests."""
-    agent = MagicMock()
-    agent.session_manager = MagicMock()
-    agent._session_id = "test-session-id"
-    agent.session_manager.load_messages = AsyncMock(return_value=messages or [])
-    agent.model = MagicMock()
-    agent._pending_skill_draft = None
-    return agent
-
-
-# ---------------------------------------------------------------------------
-# Tests for handle_create_skill
-# ---------------------------------------------------------------------------
-
-
-class TestHandleCreateSkill:
-    """Tests for handle_create_skill command handler."""
+class TestDraftSkillFromSessionCallback:
+    """Tests for ctx.draft_skill_from_session."""
 
     @pytest.mark.asyncio
-    async def test_no_session_manager_returns_error(self):
-        """Returns error when session_manager is None."""
-        agent = _build_mock_agent()
+    async def test_no_session_manager_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
         agent.session_manager = None
-        success, msg = await handle_create_skill(agent, "")
-        assert not success
+        agent._session_id = "sid"
+        ctx = agent.build_tool_context()
+        msg = await ctx.draft_skill_from_session(None)
+        assert msg.startswith("Error:")
         assert "No active session" in msg
 
     @pytest.mark.asyncio
-    async def test_no_session_id_returns_error(self):
-        """Returns error when _session_id is None."""
-        agent = _build_mock_agent()
+    async def test_no_session_id_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
         agent._session_id = None
-        success, msg = await handle_create_skill(agent, "")
-        assert not success
+        ctx = agent.build_tool_context()
+        msg = await ctx.draft_skill_from_session(None)
         assert "No active session" in msg
 
     @pytest.mark.asyncio
-    async def test_empty_messages_returns_error(self):
-        """Returns error when session has no messages."""
-        agent = _build_mock_agent(messages=[])
-        success, msg = await handle_create_skill(agent, "")
-        assert not success
+    async def test_empty_messages_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
+        agent._session_id = "sid"
+        agent.session_manager.load_messages = AsyncMock(return_value=[])
+        ctx = agent.build_tool_context()
+        msg = await ctx.draft_skill_from_session(None)
         assert "no conversation history" in msg.lower()
 
     @pytest.mark.asyncio
-    async def test_no_usable_text_returns_error(self):
-        """Returns error when messages yield no usable text."""
-        # SystemMessage or other non-user/assistant messages produce empty text
-        agent = _build_mock_agent(messages=[MagicMock()])
-        # extract_conversation_text skips unknown types → empty string
-        success, msg = await handle_create_skill(agent, "")
-        assert not success
+    async def test_no_usable_text_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
+        agent._session_id = "sid"
+        agent.session_manager.load_messages = AsyncMock(return_value=[MagicMock()])
+        ctx = agent.build_tool_context()
+        msg = await ctx.draft_skill_from_session(None)
         assert "No usable conversation text" in msg
 
     @pytest.mark.asyncio
-    async def test_generates_and_returns_preview(self):
-        """Successfully generates a skill draft and returns preview."""
+    async def test_generates_and_returns_preview(self, mock_coding_agent):
+        agent = mock_coding_agent
+        agent._session_id = "sid"
         messages = [
             _user_msg("How do I deploy Docker?"),
             _assistant_msg("Here are the steps to deploy with Docker."),
         ]
-        agent = _build_mock_agent(messages=messages)
+        agent.session_manager.load_messages = AsyncMock(return_value=messages)
 
         mock_draft = SkillDraft(
             name="docker-deploy",
@@ -462,39 +445,38 @@ class TestHandleCreateSkill:
         )
 
         with patch(
-            "basket_assistant.commands.create_skill.generate_skill_draft",
+            "basket_assistant.skills.authoring.generate_skill_draft",
             new_callable=AsyncMock,
             return_value=mock_draft,
         ):
-            success, msg = await handle_create_skill(agent, "docker")
+            ctx = agent.build_tool_context()
+            msg = await ctx.draft_skill_from_session("docker")
 
-        assert success
         assert "docker-deploy" in msg
         assert "Deploy apps with Docker" in msg
-        assert "/save-skill" in msg
+        assert "save_pending_skill_draft" in msg
         assert agent._pending_skill_draft == mock_draft
 
     @pytest.mark.asyncio
-    async def test_generation_failure_returns_error(self):
-        """Returns error when generate_skill_draft raises."""
-        messages = [_user_msg("something")]
-        agent = _build_mock_agent(messages=messages)
-
+    async def test_generation_failure_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
+        agent._session_id = "sid"
+        agent.session_manager.load_messages = AsyncMock(return_value=[_user_msg("something")])
         with patch(
-            "basket_assistant.commands.create_skill.generate_skill_draft",
+            "basket_assistant.skills.authoring.generate_skill_draft",
             new_callable=AsyncMock,
             side_effect=ValueError("LLM returned invalid JSON"),
         ):
-            success, msg = await handle_create_skill(agent, "")
-
-        assert not success
+            ctx = agent.build_tool_context()
+            msg = await ctx.draft_skill_from_session(None)
+        assert msg.startswith("Error:")
         assert "Failed to generate skill draft" in msg
 
     @pytest.mark.asyncio
-    async def test_topic_hint_passed_through(self):
-        """Topic hint from args is forwarded to generate_skill_draft."""
-        messages = [_user_msg("hello")]
-        agent = _build_mock_agent(messages=messages)
+    async def test_topic_hint_passed_through(self, mock_coding_agent):
+        agent = mock_coding_agent
+        agent._session_id = "sid"
+        agent.session_manager.load_messages = AsyncMock(return_value=[_user_msg("hello")])
 
         mock_draft = SkillDraft(
             name="test-skill",
@@ -503,148 +485,139 @@ class TestHandleCreateSkill:
         )
 
         with patch(
-            "basket_assistant.commands.create_skill.generate_skill_draft",
+            "basket_assistant.skills.authoring.generate_skill_draft",
             new_callable=AsyncMock,
             return_value=mock_draft,
         ) as mock_gen:
-            await handle_create_skill(agent, "  my topic  ")
+            ctx = agent.build_tool_context()
+            await ctx.draft_skill_from_session("  my topic  ")
 
         mock_gen.assert_awaited_once()
-        call_kwargs = mock_gen.call_args
-        hint = call_kwargs[1].get("topic_hint") or call_kwargs.kwargs.get("topic_hint")
+        hint = mock_gen.call_args.kwargs.get("topic_hint")
         assert hint == "my topic"
 
 
-# ---------------------------------------------------------------------------
-# Tests for handle_save_skill
-# ---------------------------------------------------------------------------
-
-
-class TestHandleSaveSkill:
-    """Tests for handle_save_skill command handler."""
+class TestSavePendingSkillDraftCallback:
+    """Tests for ctx.save_pending_skill_draft."""
 
     @pytest.mark.asyncio
-    async def test_no_pending_draft_returns_error(self):
-        """Returns error when no pending skill draft exists."""
-        agent = _build_mock_agent()
+    async def test_no_pending_draft_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
         agent._pending_skill_draft = None
-        success, msg = await handle_save_skill(agent, "global")
-        assert not success
+        ctx = agent.build_tool_context()
+        msg = await ctx.save_pending_skill_draft("global")
+        assert msg.startswith("Error:")
         assert "No pending skill draft" in msg
 
     @pytest.mark.asyncio
-    async def test_invalid_scope_returns_error(self):
-        """Returns error for invalid scope argument."""
-        agent = _build_mock_agent()
+    async def test_invalid_scope_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
         agent._pending_skill_draft = SkillDraft(
             name="test-skill", description="A test", body="# Test"
         )
-        success, msg = await handle_save_skill(agent, "invalid")
-        assert not success
-        assert "Please specify scope" in msg
+        ctx = agent.build_tool_context()
+        msg = await ctx.save_pending_skill_draft("invalid")
+        assert msg.startswith("Error:")
+        assert "scope must be" in msg
 
     @pytest.mark.asyncio
-    async def test_empty_scope_returns_error(self):
-        """Returns error when scope argument is empty."""
-        agent = _build_mock_agent()
+    async def test_empty_scope_returns_error(self, mock_coding_agent):
+        agent = mock_coding_agent
         agent._pending_skill_draft = SkillDraft(
             name="test-skill", description="A test", body="# Test"
         )
-        success, msg = await handle_save_skill(agent, "")
-        assert not success
-        assert "Please specify scope" in msg
+        ctx = agent.build_tool_context()
+        msg = await ctx.save_pending_skill_draft("")
+        assert msg.startswith("Error:")
+        assert "scope must be" in msg
 
     @pytest.mark.asyncio
-    async def test_saves_to_global(self, tmp_path):
-        """Saves skill to global skills directory."""
-        agent = _build_mock_agent()
+    async def test_saves_to_global(self, mock_coding_agent, tmp_path):
+        agent = mock_coding_agent
         draft = SkillDraft(name="test-skill", description="A test skill", body="# Test\n\nBody.")
         agent._pending_skill_draft = draft
 
         global_dir = tmp_path / "global-skills"
 
         with patch(
-            "basket_assistant.commands.create_skill._resolve_global_skills_dir",
+            "basket_assistant.skills.authoring.resolve_global_skills_dir",
             return_value=global_dir,
         ):
-            success, msg = await handle_save_skill(agent, "global")
+            ctx = agent.build_tool_context()
+            msg = await ctx.save_pending_skill_draft("global")
 
-        assert success
         assert "test-skill" in msg
         assert (global_dir / "test-skill" / "SKILL.md").exists()
 
     @pytest.mark.asyncio
-    async def test_saves_to_project(self, tmp_path):
-        """Saves skill to project skills directory."""
-        agent = _build_mock_agent()
+    async def test_saves_to_project(self, mock_coding_agent, tmp_path):
+        agent = mock_coding_agent
         draft = SkillDraft(name="proj-skill", description="A project skill", body="# Proj")
         agent._pending_skill_draft = draft
 
         project_dir = tmp_path / "project-skills"
 
         with patch(
-            "basket_assistant.commands.create_skill._resolve_project_skills_dir",
+            "basket_assistant.skills.authoring.resolve_project_skills_dir",
             return_value=project_dir,
         ):
-            success, msg = await handle_save_skill(agent, "project")
+            ctx = agent.build_tool_context()
+            msg = await ctx.save_pending_skill_draft("project")
 
-        assert success
         assert "proj-skill" in msg
         assert (project_dir / "proj-skill" / "SKILL.md").exists()
 
     @pytest.mark.asyncio
-    async def test_clears_pending_after_save(self, tmp_path):
-        """Clears _pending_skill_draft after successful save."""
-        agent = _build_mock_agent()
+    async def test_clears_pending_after_save(self, mock_coding_agent, tmp_path):
+        agent = mock_coding_agent
         agent._pending_skill_draft = SkillDraft(
             name="clear-test", description="Test clearing", body="# Body"
         )
 
         with patch(
-            "basket_assistant.commands.create_skill._resolve_global_skills_dir",
+            "basket_assistant.skills.authoring.resolve_global_skills_dir",
             return_value=tmp_path,
         ):
-            success, _ = await handle_save_skill(agent, "global")
+            ctx = agent.build_tool_context()
+            await ctx.save_pending_skill_draft("global")
 
-        assert success
         assert agent._pending_skill_draft is None
 
     @pytest.mark.asyncio
-    async def test_file_exists_returns_error(self, tmp_path):
-        """Returns error when skill directory already exists."""
-        agent = _build_mock_agent()
+    async def test_file_exists_returns_error(self, mock_coding_agent, tmp_path):
+        agent = mock_coding_agent
         draft = SkillDraft(name="existing-skill", description="Already exists", body="# Body")
         agent._pending_skill_draft = draft
 
-        # Pre-create the directory to trigger FileExistsError
         skill_dir = tmp_path / "existing-skill"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("existing")
 
         with patch(
-            "basket_assistant.commands.create_skill._resolve_global_skills_dir",
+            "basket_assistant.skills.authoring.resolve_global_skills_dir",
             return_value=tmp_path,
         ):
-            success, msg = await handle_save_skill(agent, "global")
+            ctx = agent.build_tool_context()
+            msg = await ctx.save_pending_skill_draft("global")
 
-        assert not success
+        assert msg.startswith("Error:")
         assert "already exists" in msg
 
     @pytest.mark.asyncio
-    async def test_scope_case_insensitive(self, tmp_path):
-        """Scope argument is case-insensitive."""
-        agent = _build_mock_agent()
+    async def test_scope_case_insensitive(self, mock_coding_agent, tmp_path):
+        agent = mock_coding_agent
         agent._pending_skill_draft = SkillDraft(
             name="case-test", description="Test case", body="# Body"
         )
 
         with patch(
-            "basket_assistant.commands.create_skill._resolve_global_skills_dir",
+            "basket_assistant.skills.authoring.resolve_global_skills_dir",
             return_value=tmp_path,
         ):
-            success, _ = await handle_save_skill(agent, "GLOBAL")
+            ctx = agent.build_tool_context()
+            msg = await ctx.save_pending_skill_draft("GLOBAL")
 
-        assert success
+        assert "saved" in msg.lower()
 
 
 # ---------------------------------------------------------------------------

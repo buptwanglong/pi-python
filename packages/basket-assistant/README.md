@@ -84,7 +84,7 @@ OpenCode/Claude-style layout: **one directory per skill with `SKILL.md` inside**
 - **Layout**: Create a subdirectory per skill (e.g. `git-release`); put `SKILL.md` inside. `SKILL.md` must have YAML frontmatter: `name` (matches directory name), `description` (1–1024 chars). Optional: `metadata`, `compatibility`, `license`. Name must match `^[a-z0-9]+(-[a-z0-9]+)*$`, length 1–64.
 - **Default search paths** (when not configured): Basket (`~/.basket/skills`, `./.basket/skills`), OpenCode (`~/.config/opencode/skills`, `./.opencode/skills`), Claude (`~/.claude/skills`, `./.claude/skills`), Agents (`~/.agents/skills`, `./.agents/skills`). Later path wins for the same skill name.
 - **Discovery and loading**: The agent has a `skill` tool; its description lists available skills in `<available_skills>`. Call the tool with a skill name to load the full content (returned as tool result). You can also type `/skill <id> [message]` in interactive mode to force that skill for the current turn.
-- **Settings** in `~/.basket/settings.json`: `skills_dirs` (list of paths; when set, only these are used), `skills_include` (list of skill names to load; empty = all).
+- **Settings** in `~/.basket/settings.json`: `skills_include` (list of skill names to expose in the skill tool; empty = all). Skills are discovered under `~/.basket/skills`, `./.basket/skills`, and installed plugins (`skills_dirs` is ignored).
 
 ## SubAgents and Task tool
 

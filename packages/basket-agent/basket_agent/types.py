@@ -160,6 +160,29 @@ class AgentEventError(AgentEvent):
     error: str
 
 
+class AgentEventToolRetry(AgentEvent):
+    """Event emitted when a tool call is being retried."""
+
+    type: str = "agent_tool_retry"
+    tool_name: str
+    attempt: int
+    max_retries: int
+    error: str
+
+
+class AgentEventContextCompacted(AgentEvent):
+    """Event emitted when context was compacted to fit the model's window.
+
+    Contains diagnostic information about the compaction that occurred.
+    """
+
+    type: str = "agent_context_compacted"
+    original_tokens: int
+    compacted_tokens: int
+    messages_removed: int
+    context_window: int
+
+
 __all__ = [
     "ToolExecutor",
     "AgentTool",
@@ -169,6 +192,8 @@ __all__ = [
     "AgentEvent",
     "AgentEventToolCallStart",
     "AgentEventToolCallEnd",
+    "AgentEventToolRetry",
+    "AgentEventContextCompacted",
     "AgentEventTurnStart",
     "AgentEventTurnEnd",
     "AgentEventComplete",

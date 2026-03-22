@@ -23,8 +23,6 @@ Available commands:
   /compact           Compress conversation context to save tokens
   /model [provider/id]  Show or switch the current LLM model
   /skill <id> [msg] Load a skill for this turn (see ~/.basket/skills)
-  /create-skill [topic] Create a skill from conversation
-  /save-skill <scope>   Save generated skill (global/project)
   /plugin <subcmd>   Manage plugins (list/install/uninstall; install supports git & URLs)
   /exit, /quit       Exit the assistant
 

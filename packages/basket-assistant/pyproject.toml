@@ -29,6 +29,7 @@ starlette = "^0.37.0"
 uvicorn = {extras = ["standard"], version = "^0.30.0"}
 websockets = "^14.0"
 questionary = "^2.0.0"
+pydantic = "^2.7"
 
 [tool.poetry.extras]
 remote = ["basket-remote"]
@@ -41,6 +42,20 @@ pytest-cov = "^7.0.0"
 
 [tool.poetry.scripts]
 basket = "basket_assistant.main:main"
+
+[tool.pyright]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+extraPaths = [
+    "../basket-agent",
+    "../basket-ai",
+    "../basket-gateway",
+    "../basket-trajectory",
+    "../basket-tui",
+    "../basket-remote",
+    "../basket-memory",
+]
 
 [build-system]
 requires = ["poetry-core"]

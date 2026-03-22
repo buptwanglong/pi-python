@@ -1,7 +1,7 @@
 """Plugin loader: discover installed plugins and aggregate their content.
 
 Scans ~/.basket/plugins/ for plugin directories and collects their
-skills, hooks, extensions, and agents into the existing loader pipelines.
+skills, hooks, commands, and agents into the existing loader pipelines.
 """
 
 import json
@@ -31,7 +31,7 @@ class PluginLoader:
     """Discover installed plugins and aggregate their content.
 
     Scans a plugins directory for sub-directories, validates each,
-    and provides methods to collect skill dirs, hook defs, extension dirs,
+    and provides methods to collect skill dirs, hook defs, command dirs,
     and agent dirs from all valid plugins.
     """
 
@@ -84,7 +84,7 @@ class PluginLoader:
         """Return skill parent directories from all plugins.
 
         Each plugin's skills/ directory is returned (if it exists and is non-empty).
-        These can be appended to the skills_dirs search path.
+        These are appended after ~/.basket/skills and cwd/.basket/skills.
         """
         dirs: List[Path] = []
         for plugin in self._ensure_discovered():
@@ -97,7 +97,7 @@ class PluginLoader:
         """Return merged hook definitions from all plugin hooks.json files.
 
         Returns event_name -> list of hook def dicts, ready to merge
-        into HookRunner via _merge_hook_defs.
+        for optional merging into hook configuration.
         """
         merged: Dict[str, List[Dict[str, Any]]] = {}
         for plugin in self._ensure_discovered():
@@ -123,13 +123,13 @@ class PluginLoader:
                 )
         return merged
 
-    def get_all_extension_dirs(self) -> List[Path]:
-        """Return extension directories from all plugins."""
+    def get_all_commands_dirs(self) -> List[Path]:
+        """Return commands directories from all plugins (declarative *.md slash commands)."""
         dirs: List[Path] = []
         for plugin in self._ensure_discovered():
-            ext_dir = plugin.path / "extensions"
-            if ext_dir.is_dir() and any(ext_dir.iterdir()):
-                dirs.append(ext_dir)
+            cmd_dir = plugin.path / "commands"
+            if cmd_dir.is_dir() and any(cmd_dir.iterdir()):
+                dirs.append(cmd_dir)
         return dirs
 
     def get_all_agent_dirs(self) -> List[Path]:

@@ -2,7 +2,10 @@
 
 import pytest
 
-from basket_assistant.interaction.commands.registry import CommandRegistry
+from pathlib import Path
+
+from basket_assistant.commands.registry import CommandRegistry
+from basket_assistant.core.loader.slash_commands_loader import SlashCommandSpec
 from basket_assistant.interaction.processors.input_processor import InputProcessor, ProcessResult
 
 
@@ -92,7 +95,7 @@ class TestInputProcessor:
         """Test that skill invocation has third priority."""
         result = await input_processor.process("/skill test-skill optional message")
 
-        assert result.action == "handled"
+        assert result.action == "send_to_agent"
         assert result.invoked_skill_id == "test-skill"
         assert result.message is not None
         # Message should include skill name + optional text
@@ -103,7 +106,7 @@ class TestInputProcessor:
         """Test skill invocation without optional message."""
         result = await input_processor.process("/skill my-skill")
 
-        assert result.action == "handled"
+        assert result.action == "send_to_agent"
         assert result.invoked_skill_id == "my-skill"
 
     @pytest.mark.asyncio
@@ -164,6 +167,57 @@ class TestInputProcessor:
         assert "Unknown command" in result.error
 
     @pytest.mark.asyncio
+    async def test_declarative_slash_command(self, mock_agent, command_registry):
+        """Declarative *.md commands expand to send_to_agent."""
+        spec = SlashCommandSpec(
+            name="review",
+            description="Review",
+            body_template="Please review: {{args}}",
+            skill_id=None,
+            disable_model_invocation=True,
+            source_path=Path("/tmp/review.md"),
+        )
+        proc = InputProcessor(mock_agent, command_registry, {"review": spec})
+        result = await proc.process("/review src/foo.py")
+        assert result.action == "send_to_agent"
+        assert result.invoked_skill_id is None
+        assert "src/foo.py" in result.message.content
+        assert "Please review:" in result.message.content
+
+    @pytest.mark.asyncio
+    async def test_declarative_with_skill_id(self, mock_agent, command_registry):
+        spec = SlashCommandSpec(
+            name="write-plan",
+            description="Plan",
+            body_template="Run planning",
+            skill_id="writing-plans",
+            disable_model_invocation=True,
+            source_path=Path("/tmp/plan.md"),
+        )
+        proc = InputProcessor(mock_agent, command_registry, {"write-plan": spec})
+        result = await proc.process("/write-plan")
+        assert result.action == "send_to_agent"
+        assert result.invoked_skill_id == "writing-plans"
+
+    @pytest.mark.asyncio
+    async def test_builtin_command_overrides_declarative_name(
+        self, mock_agent, command_registry
+    ):
+        """Registry wins over declarative when names collide."""
+        spec = SlashCommandSpec(
+            name="plan",
+            description="Decl",
+            body_template="should not run",
+            skill_id=None,
+            disable_model_invocation=True,
+            source_path=Path("/tmp/x.md"),
+        )
+        proc = InputProcessor(mock_agent, command_registry, {"plan": spec})
+        result = await proc.process("/plan x")
+        assert result.action == "handled"
+        assert result.message is None
+
+    @pytest.mark.asyncio
     async def test_empty_input(self, input_processor):
         """Test that empty input is sent to agent."""
         result = await input_processor.process("")
@@ -187,8 +241,6 @@ class TestClearCompactRouting:
     @pytest.fixture
     def full_registry(self):
         """Create a command registry with all builtins registered."""
-        from basket_assistant.interaction.commands.handlers import BuiltinCommandHandlers
-
         class FullMockContext:
             def __init__(self):
                 self.messages = []
@@ -267,6 +319,14 @@ class TestClearCompactRouting:
         assert result.action == "handled"
         assert result.error is None or result.error == ""
 
+    @pytest.mark.asyncio
+    async def test_exit_and_quit_return_exit_action(self, full_registry):
+        """Test /exit and /quit yield action exit for the interaction mode loop."""
+        result = await full_registry.process("/exit")
+        assert result.action == "exit"
+        result_quit = await full_registry.process("/quit")
+        assert result_quit.action == "exit"
+
 
 class TestProcessResult:
     """Test ProcessResult dataclass."""
@@ -293,9 +353,9 @@ class TestProcessResult:
 
     def test_process_result_with_skill(self):
         """Test ProcessResult with skill invocation."""
-        result = ProcessResult(action="handled", invoked_skill_id="test-skill")
+        result = ProcessResult(action="send_to_agent", invoked_skill_id="test-skill")
 
-        assert result.action == "handled"
+        assert result.action == "send_to_agent"
         assert result.invoked_skill_id == "test-skill"
 
     def test_process_result_with_error(self):
@@ -304,3 +364,8 @@ class TestProcessResult:
 
         assert result.action == "handled"
         assert result.error == "Something went wrong"
+
+    def test_process_result_exit_action(self):
+        """Test ProcessResult exit action."""
+        result = ProcessResult(action="exit")
+        assert result.action == "exit"

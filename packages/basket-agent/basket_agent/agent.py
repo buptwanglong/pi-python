@@ -11,7 +11,8 @@ and provides a convenient interface for:
 import asyncio
 from typing import Any, Callable, Dict, List, Optional
 
-from basket_ai.types import Context, Model, Tool
+from basket_ai.types import Context, Model, Tool, AssistantMessageEvent
+from basket_agent.types import AgentEvent
 
 from .agent_loop import run_agent_loop
 from .types import AgentState, AgentTool, ToolExecutor
@@ -81,7 +82,7 @@ class Agent:
             self.event_handlers[event_type] = []
         self.event_handlers[event_type].append(handler)
 
-    async def _emit_event(self, event: Any) -> None:
+    async def _emit_event(self, event: AgentEvent | AssistantMessageEvent) -> None:
         """Emit a typed event to all subscribed handlers."""
         event_type = event.type if hasattr(event, "type") else event.get("type") if isinstance(event, dict) else None
         if event_type and event_type in self.event_handlers:
