@@ -7,9 +7,30 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .models import Settings
+
+
+def get_agents_dirs(settings: Settings) -> List[Path]:
+    """Resolve agents directories; default ~/.basket/agents and ./.basket/agents.
+
+    Pure settings-based path resolution — no agent internals needed.
+    """
+    if settings.agents_dirs:
+        return [Path(d).expanduser().resolve() for d in settings.agents_dirs]
+    return [
+        Path.home() / ".basket" / "agents",
+        Path.cwd() / ".basket" / "agents",
+    ]
+
+
+def get_agent_root(settings: Settings, agent_name: str) -> Path:
+    """Root directory for an agent: agents_base / agent_name (sessions/, workspace/ live under this)."""
+    dirs = get_agents_dirs(settings)
+    base = dirs[0] if dirs else Path.home() / ".basket" / "agents"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / agent_name
 
 
 class AgentConfigResolver:
@@ -89,8 +110,6 @@ class AgentConfigResolver:
         """
         if agent_key and agent_key in self.settings.agents:
             # Per-agent sessions: agents/<name>/sessions/
-            from ..agent.prompts import get_agent_root
-
             agent_root = get_agent_root(self.settings, agent_key)
             return agent_root / "sessions"
 

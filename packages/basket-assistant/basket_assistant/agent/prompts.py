@@ -6,33 +6,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from ..core import Settings, SubAgentConfig, get_skill_full_content, load_agents_from_dirs
+from ..core.settings.resolver import (
+    get_agent_root,
+    get_agents_dirs,
+)
 
 if TYPE_CHECKING:
     from ._protocol import AssistantAgentProtocol
 
-from ..core.workspace_bootstrap import (
+from ..core.loader.workspace_bootstrap import (
     load_daily_memory,
     load_workspace_sections,
     resolve_workspace_dir,
 )
+from ..skills.registry import get_builtin_skill_roots
 
 
-def get_agents_dirs(settings: Settings) -> List[Path]:
-    """Resolve agents directories; default ~/.basket/agents and ./.basket/agents."""
-    if settings.agents_dirs:
-        return [Path(d).expanduser().resolve() for d in settings.agents_dirs]
-    return [
-        Path.home() / ".basket" / "agents",
-        Path.cwd() / ".basket" / "agents",
-    ]
-
-
-def get_agent_root(settings: Settings, agent_name: str) -> Path:
-    """Root directory for an agent: agents_base / agent_name (sessions/, workspace/ live under this)."""
-    dirs = get_agents_dirs(settings)
-    base = dirs[0] if dirs else Path.home() / ".basket" / "agents"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / agent_name
+# get_agents_dirs and get_agent_root are imported from core.settings.resolver
+# and re-exported here for backward compatibility with callers that use prompts.get_agents_dirs().
 
 
 def get_subagent_configs(agent: AssistantAgentProtocol) -> Dict[str, SubAgentConfig]:
@@ -53,14 +44,18 @@ def get_subagent_configs(agent: AssistantAgentProtocol) -> Dict[str, SubAgentCon
 def get_skills_dirs(
     settings: Settings, plugin_skill_dirs: Optional[List[Path]] = None
 ) -> List[Path]:
-    """Resolve skills directories: only ~/.basket/skills, cwd/.basket/skills, then plugins.
+    """Resolve skills directories: package builtin roots, ~/.basket/skills, cwd/.basket/skills, plugins.
 
     ``settings.skills_dirs`` is ignored (fixed layout); use symlinks under ~/.basket/skills if needed.
+    Builtin roots come from ``skills.registry``; later dirs override earlier for the same skill id.
     """
-    dirs: List[Path] = [
-        Path.home() / ".basket" / "skills",
-        Path.cwd() / ".basket" / "skills",
-    ]
+    dirs: List[Path] = list(get_builtin_skill_roots())
+    dirs.extend(
+        [
+            Path.home() / ".basket" / "skills",
+            Path.cwd() / ".basket" / "skills",
+        ]
+    )
     if plugin_skill_dirs:
         dirs.extend(plugin_skill_dirs)
     return dirs
@@ -150,7 +145,7 @@ def _resolve_main_agent_workspace_dir(settings: Settings) -> Optional[Path]:
             if path.exists() and path.is_dir():
                 return path
             path.mkdir(parents=True, exist_ok=True)
-            from ..core.workspace_bootstrap import ensure_workspace_default_fill
+            from ..core.loader.workspace_bootstrap import ensure_workspace_default_fill
             ensure_workspace_default_fill(path)
             return path
     return resolve_workspace_dir(settings)

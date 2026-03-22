@@ -23,6 +23,10 @@ def _make_test_ctx(subagent_configs=None, session_id="test"):
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     return ctx, recent_tasks
 
@@ -60,6 +64,10 @@ def ctx_with_agents():
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=ctx.settings,
+        get_skills_dirs=ctx.get_skills_dirs,
+        get_plugin_skill_dirs=ctx.get_plugin_skill_dirs,
+        draft_skill_from_session=ctx.draft_skill_from_session,
+        save_pending_skill_draft=ctx.save_pending_skill_draft,
     )
     return ctx, recent_tasks
 
@@ -102,6 +110,10 @@ async def test_task_tool_execute_returns_task_result_wrapper(ctx_with_agents):
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=ctx.settings,
+        get_skills_dirs=ctx.get_skills_dirs,
+        get_plugin_skill_dirs=ctx.get_plugin_skill_dirs,
+        draft_skill_from_session=ctx.draft_skill_from_session,
+        save_pending_skill_draft=ctx.save_pending_skill_draft,
     )
     tool = create_task_tool(ctx)
     result = await tool["execute_fn"](
@@ -133,6 +145,10 @@ async def test_task_tool_execute_unknown_subagent_returns_error_in_result(ctx_wi
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=ctx.settings,
+        get_skills_dirs=ctx.get_skills_dirs,
+        get_plugin_skill_dirs=ctx.get_plugin_skill_dirs,
+        draft_skill_from_session=ctx.draft_skill_from_session,
+        save_pending_skill_draft=ctx.save_pending_skill_draft,
     )
     tool = create_task_tool(ctx)
     result = await tool["execute_fn"](
@@ -160,6 +176,10 @@ async def test_task_tool_execute_appends_recent_task(ctx_with_agents):
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=ctx.settings,
+        get_skills_dirs=ctx.get_skills_dirs,
+        get_plugin_skill_dirs=ctx.get_plugin_skill_dirs,
+        draft_skill_from_session=ctx.draft_skill_from_session,
+        save_pending_skill_draft=ctx.save_pending_skill_draft,
     )
     tool = create_task_tool(ctx)
     await tool["execute_fn"](

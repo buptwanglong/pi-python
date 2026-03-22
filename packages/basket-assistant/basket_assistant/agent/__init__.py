@@ -209,6 +209,7 @@ class AssistantAgent:
             self.settings.permissions.default_mode == "plan"
         )
         self._pending_asks: List[dict] = []
+        self._pending_skill_draft: Any = None
         self._assistant_event_handlers: Dict[str, List[Callable]] = {}
         self._trajectory_recorder: Optional[Any] = None
         self._trajectory_handlers_registered: bool = False
@@ -246,6 +247,82 @@ class AssistantAgent:
             if 0 <= index < len(self._recent_tasks):
                 self._recent_tasks[index].update(updates)
 
+        async def _draft_skill_from_session(topic_hint: Optional[str]) -> str:
+            from basket_assistant.core.skill_authoring import (
+                extract_conversation_text,
+                format_skill_md,
+                generate_skill_draft,
+            )
+
+            th = (topic_hint or "").strip() or None
+            if self.session_manager is None or self._session_id is None:
+                return "Error: No active session. Cannot create skill draft."
+            messages = await self.session_manager.load_messages(self._session_id)
+            if not messages:
+                return "Error: Current session has no conversation history. Cannot generate skill."
+            conversation_text = extract_conversation_text(messages, topic_hint=th)
+            if not conversation_text.strip():
+                return "Error: No usable conversation text found."
+            try:
+                draft = await generate_skill_draft(self.model, conversation_text, topic_hint=th)
+            except ValueError as e:
+                return f"Error: Failed to generate skill draft: {e}"
+
+            preview = format_skill_md(draft)
+            preview_display = (
+                f"Skill draft generated:\n"
+                f"  Name: {draft.name}\n"
+                f"  Description: {draft.description}\n"
+                f"{'─' * 40}\n"
+                f"{preview}\n"
+                f"{'─' * 40}\n"
+                f"After the user confirms, call save_pending_skill_draft with scope global or project."
+            )
+            self._pending_skill_draft = draft
+            return preview_display
+
+        async def _save_pending_skill_draft(scope: str) -> str:
+            from basket_assistant.core.skill_authoring import (
+                SkillScope,
+                resolve_global_skills_dir,
+                resolve_project_skills_dir,
+                save_skill_to_disk,
+            )
+
+            draft = self._pending_skill_draft
+            if draft is None:
+                return "Error: No pending skill draft. Run draft_skill_from_session first."
+
+            scope_str = (scope or "").strip().lower()
+            if scope_str == "global":
+                sk_scope = SkillScope.GLOBAL
+            elif scope_str == "project":
+                sk_scope = SkillScope.PROJECT
+            else:
+                return (
+                    "Error: scope must be 'global' or 'project'. "
+                    f"global → {resolve_global_skills_dir()}; "
+                    f"project → {resolve_project_skills_dir()}"
+                )
+
+            try:
+                saved_path = save_skill_to_disk(
+                    draft,
+                    sk_scope,
+                    project_skills_dir=resolve_project_skills_dir(),
+                    global_skills_dir=resolve_global_skills_dir(),
+                )
+            except FileExistsError:
+                return f"Error: Skill '{draft.name}' already exists at target location."
+            except OSError as e:
+                return f"Error: Failed to save skill: {e}"
+
+            self._pending_skill_draft = None
+            return (
+                f"Skill '{draft.name}' saved to {saved_path.parent}. "
+                f"It is now available via the skill tool."
+            )
+
         return AgentContext(
             session_id=self._session_id,
             plan_mode=self._plan_mode,
@@ -257,6 +334,10 @@ class AssistantAgent:
             save_pending_asks=_save_pending_asks,
             append_recent_task=_append_recent_task,
             update_recent_task=_update_recent_task,
+            get_skills_dirs=self._get_skills_dirs,
+            get_plugin_skill_dirs=self._get_plugin_skill_dirs,
+            draft_skill_from_session=_draft_skill_from_session,
+            save_pending_skill_draft=_save_pending_skill_draft,
         )
 
     def _get_system_prompt(self) -> str:
@@ -279,6 +360,12 @@ class AssistantAgent:
             else None
         )
         return prompts.get_skills_dirs(self.settings, plugin_skill_dirs=plugin_skill_dirs)
+
+    def _get_plugin_skill_dirs(self) -> List[Path]:
+        """Return plugin-provided skill directories (empty list when no loader)."""
+        if hasattr(self, "_plugin_loader") and self._plugin_loader:
+            return list(self._plugin_loader.get_all_skill_dirs())
+        return []
 
     def _get_plan_mode_prompt_suffix(self) -> str:
         return prompts.get_plan_mode_prompt_suffix()

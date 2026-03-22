@@ -410,12 +410,11 @@ class SessionManager:
         if not metadata_entry:
             raise ValueError(f"No metadata found for session {session_id}")
 
-        # Create updated metadata
+        # Create updated metadata (immutable copy)
         metadata = SessionMetadata(**metadata_entry.data)
-        for key, value in updates.items():
-            setattr(metadata, key, value)
-
-        metadata.updated_at = int(time.time() * 1000)
+        metadata = metadata.model_copy(
+            update={**updates, "updated_at": int(time.time() * 1000)}
+        )
 
         # Append new metadata entry
         entry = SessionEntry(

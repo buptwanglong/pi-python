@@ -45,9 +45,8 @@ class SettingsManager:
 
     def update(self, **kwargs: Any) -> Settings:
         settings = self.load()
-        for key, value in kwargs.items():
-            if hasattr(settings, key):
-                setattr(settings, key, value)
+        valid_updates = {k: v for k, v in kwargs.items() if hasattr(settings, k)}
+        settings = settings.model_copy(update=valid_updates)
         self.save(settings)
         return settings
 
@@ -66,17 +65,51 @@ class SettingsManager:
     def set(self, key: str, value: Any) -> None:
         settings = self.load()
         parts = key.split(".")
+
+        if len(parts) == 1:
+            # Top-level field — immutable copy
+            if hasattr(settings, parts[0]):
+                settings = settings.model_copy(update={parts[0]: value})
+            self.save(settings)
+            return
+
+        # Walk down the nested path, collecting (parent_model, attr_name) pairs
+        # so we can rebuild immutably from the leaf back to the root.
+        from pydantic import BaseModel as _BM
+
+        ancestors: list[tuple[Any, str]] = []  # (model, child_attr_name)
         target: Any = settings
         for part in parts[:-1]:
-            if hasattr(target, part):
+            if isinstance(target, _BM) and hasattr(target, part):
+                ancestors.append((target, part))
                 target = getattr(target, part)
             elif isinstance(target, dict):
                 if part not in target:
                     target[part] = {}
+                ancestors.append((target, part))
                 target = target[part]
+            else:
+                # Path segment not found — nothing to set
+                self.save(settings)
+                return
+
         final_key = parts[-1]
-        if hasattr(target, final_key):
-            setattr(target, final_key, value)
+        # Apply the leaf update
+        if isinstance(target, _BM) and hasattr(target, final_key):
+            target = target.model_copy(update={final_key: value})
         elif isinstance(target, dict):
-            target[final_key] = value
+            target = {**target, final_key: value}
+        else:
+            self.save(settings)
+            return
+
+        # Rebuild ancestors from leaf back to root
+        for parent, attr_name in reversed(ancestors):
+            if isinstance(parent, _BM):
+                target = parent.model_copy(update={attr_name: target})
+            elif isinstance(parent, dict):
+                parent[attr_name] = target
+                target = parent
+
+        settings = target  # type: ignore[assignment]
         self.save(settings)

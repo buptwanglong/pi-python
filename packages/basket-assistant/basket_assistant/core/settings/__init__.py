@@ -15,7 +15,7 @@ from .models import (
     Settings,
     SubAgentConfig,
 )
-from .resolver import AgentConfigResolver
+from .resolver import AgentConfigResolver, get_agent_root, get_agents_dirs
 
 __all__ = [
     "AgentConfig",
@@ -27,6 +27,8 @@ __all__ = [
     "Settings",
     "SettingsManager",
     "SubAgentConfig",
+    "get_agent_root",
+    "get_agents_dirs",
     "load_settings",
     "migrate_legacy_to_agents",
     "resolve_agent_config",

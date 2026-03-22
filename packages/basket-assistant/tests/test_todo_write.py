@@ -27,6 +27,10 @@ def _make_test_ctx(session_id="test-session"):
         append_recent_task=MagicMock(),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     return ctx, saved
 
@@ -159,6 +163,10 @@ async def test_todo_write_persists_to_file_when_session_id_set(tmp_path):
         append_recent_task=MagicMock(),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
 
     tool = create_todo_write_tool(ctx)

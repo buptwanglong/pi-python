@@ -29,6 +29,10 @@ def _make_test_ctx(subagent_configs=None, session_id="test"):
         append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     return ctx, recent_tasks
 
@@ -99,6 +103,10 @@ class TestExecuteParallelTasks:
             append_recent_task=ctx_with_agents.append_recent_task,
             update_recent_task=ctx_with_agents.update_recent_task,
             settings=ctx_with_agents.settings,
+            get_skills_dirs=ctx_with_agents.get_skills_dirs,
+            get_plugin_skill_dirs=ctx_with_agents.get_plugin_skill_dirs,
+            draft_skill_from_session=ctx_with_agents.draft_skill_from_session,
+            save_pending_skill_draft=ctx_with_agents.save_pending_skill_draft,
         )
         tool = create_parallel_task_tool(ctx)
 
@@ -142,6 +150,10 @@ class TestExecuteParallelTasks:
             append_recent_task=ctx_with_agents.append_recent_task,
             update_recent_task=ctx_with_agents.update_recent_task,
             settings=ctx_with_agents.settings,
+            get_skills_dirs=ctx_with_agents.get_skills_dirs,
+            get_plugin_skill_dirs=ctx_with_agents.get_plugin_skill_dirs,
+            draft_skill_from_session=ctx_with_agents.draft_skill_from_session,
+            save_pending_skill_draft=ctx_with_agents.save_pending_skill_draft,
         )
         tool = create_parallel_task_tool(ctx)
 
@@ -187,6 +199,10 @@ class TestExecuteParallelTasks:
             append_recent_task=ctx_with_agents.append_recent_task,
             update_recent_task=ctx_with_agents.update_recent_task,
             settings=ctx_with_agents.settings,
+            get_skills_dirs=ctx_with_agents.get_skills_dirs,
+            get_plugin_skill_dirs=ctx_with_agents.get_plugin_skill_dirs,
+            draft_skill_from_session=ctx_with_agents.draft_skill_from_session,
+            save_pending_skill_draft=ctx_with_agents.save_pending_skill_draft,
         )
         tool = create_parallel_task_tool(ctx)
 
@@ -230,6 +246,10 @@ class TestExecuteParallelTasks:
             append_recent_task=ctx_with_agents.append_recent_task,
             update_recent_task=ctx_with_agents.update_recent_task,
             settings=ctx_with_agents.settings,
+            get_skills_dirs=ctx_with_agents.get_skills_dirs,
+            get_plugin_skill_dirs=ctx_with_agents.get_plugin_skill_dirs,
+            draft_skill_from_session=ctx_with_agents.draft_skill_from_session,
+            save_pending_skill_draft=ctx_with_agents.save_pending_skill_draft,
         )
         tool = create_parallel_task_tool(ctx)
 

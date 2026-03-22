@@ -20,6 +20,10 @@ def test_agent_context_is_frozen():
         append_recent_task=MagicMock(),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     with pytest.raises(AttributeError):
         ctx.session_id = "changed"
@@ -39,6 +43,10 @@ def test_agent_context_fields_accessible():
         append_recent_task=MagicMock(),
         update_recent_task=MagicMock(),
         settings=mock_settings,
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     assert ctx.session_id == "s1"
     assert ctx.plan_mode is True
@@ -59,6 +67,10 @@ def test_agent_context_none_session_id():
         append_recent_task=MagicMock(),
         update_recent_task=MagicMock(),
         settings=MagicMock(),
+        get_skills_dirs=MagicMock(return_value=[]),
+        get_plugin_skill_dirs=MagicMock(return_value=[]),
+        draft_skill_from_session=AsyncMock(),
+        save_pending_skill_draft=AsyncMock(),
     )
     assert ctx.session_id is None
 
@@ -77,3 +89,5 @@ async def test_assistant_agent_build_tool_context(mock_coding_agent):
     assert callable(ctx.get_subagent_configs)
     assert callable(ctx.save_todos)
     assert callable(ctx.append_recent_task)
+    assert callable(ctx.draft_skill_from_session)
+    assert callable(ctx.save_pending_skill_draft)
