@@ -5,6 +5,7 @@ Tests for the Agent class.
 import pytest
 
 from basket_agent import Agent
+from basket_agent.types import AgentEvent, AgentEventTurnStart
 from basket_ai.types import Context, Model
 
 
@@ -232,6 +233,28 @@ class TestAgentIntegration:
 
         tool_end_events = [e for e in events if e["type"] == "agent_tool_call_end"]
         assert len(tool_end_events) > 0
+
+
+class TestAgentEventEmission:
+    """Tests for typed event emission."""
+
+    @pytest.mark.asyncio
+    async def test_emit_event_passes_typed_event_to_handler(self, sample_model):
+        """Handler should receive a typed AgentEvent, not a dict."""
+        agent = Agent(sample_model)
+        received = []
+
+        def handler(event: AgentEvent):
+            received.append(event)
+
+        agent.on("agent_turn_start", handler)
+
+        event = AgentEventTurnStart(turn_number=1)
+        await agent._emit_event(event)
+
+        assert len(received) == 1
+        assert isinstance(received[0], AgentEventTurnStart)
+        assert received[0].turn_number == 1
 
 
 if __name__ == "__main__":

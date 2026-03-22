@@ -81,10 +81,10 @@ class Agent:
             self.event_handlers[event_type] = []
         self.event_handlers[event_type].append(handler)
 
-    async def _emit_event(self, event: Dict[str, Any]) -> None:
-        """Emit an event to all subscribed handlers."""
-        event_type = event.get("type")
-        if event_type in self.event_handlers:
+    async def _emit_event(self, event: Any) -> None:
+        """Emit a typed event to all subscribed handlers."""
+        event_type = event.type if hasattr(event, "type") else event.get("type") if isinstance(event, dict) else None
+        if event_type and event_type in self.event_handlers:
             for handler in self.event_handlers[event_type]:
                 if asyncio.iscoroutinefunction(handler):
                     await handler(event)
