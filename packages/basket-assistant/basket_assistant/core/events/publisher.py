@@ -1,74 +1,66 @@
 """EventPublisher: Central event distribution hub.
 
-The EventPublisher subscribes to basket-agent events, converts them to standardized
-AssistantEvent instances, and distributes them to registered adapters.
-
-Key responsibilities:
-- Subscribe to basket-agent events
-- Convert raw dict events to typed AssistantEvent instances
-- Publish events to all registered subscribers
-- Handle subscriber errors gracefully (don't let one adapter crash others)
+Subscribes to basket-agent events and distributes typed events to adapters.
+No conversion needed — events flow through as typed objects.
 """
 
-import logging
-from typing import Any, Callable, Dict, List
+from __future__ import annotations
 
-from .types import AssistantEvent, event_from_dict
+import logging
+from typing import TYPE_CHECKING, Any, Callable, Dict, List
+
+if TYPE_CHECKING:
+    from basket_assistant.agent import AssistantAgent
 
 logger = logging.getLogger(__name__)
+
+# All event types the publisher subscribes to on the basket-agent
+AGENT_EVENT_TYPES = (
+    "text_delta",
+    "thinking_delta",
+    "agent_tool_call_start",
+    "agent_tool_call_end",
+    "agent_turn_start",
+    "agent_turn_end",
+    "agent_complete",
+    "agent_error",
+)
 
 
 class EventPublisher:
     """Central event distribution hub for the assistant.
 
-    The EventPublisher sits between the basket-agent and UI adapters, converting
-    raw agent events into standardized AssistantEvent instances and distributing
-    them to subscribers.
+    Subscribes to basket-agent events and forwards them to adapters.
+    Events are already typed — no conversion needed.
 
     Example:
-        >>> publisher = EventPublisher(agent)
-        >>> publisher.subscribe("text_delta", lambda event: print(event.delta))
-        >>> # Now all text_delta events will be printed
+        >>> publisher = EventPublisher(assistant)
+        >>> publisher.subscribe("agent_tool_call_start", lambda e: print(e.tool_name))
     """
 
-    def __init__(self, agent: Any):
-        """Initialize the event publisher.
-
-        Args:
-            agent: The basket-agent instance to listen to
-        """
-        self._agent = agent
-        self._subscribers: Dict[str, List[Callable[[AssistantEvent], None]]] = {}
-
-        # Subscribe to all agent events
+    def __init__(self, agent: AssistantAgent):
+        self._assistant = agent
+        self._subscribers: Dict[str, List[Callable[[Any], None]]] = {}
         self._setup_agent_subscriptions()
 
     def _setup_agent_subscriptions(self) -> None:
-        """Subscribe to basket-agent events."""
-        # Text and thinking deltas
-        self._agent.on("text_delta", self._on_text_delta)
-        self._agent.on("thinking_delta", self._on_thinking_delta)
+        """Subscribe to all agent event types with a single generic handler."""
+        ba = self._assistant.agent
+        for event_type in AGENT_EVENT_TYPES:
+            ba.on(event_type, self._on_agent_event)
 
-        # Tool calls
-        self._agent.on("agent_tool_call_start", self._on_tool_call_start)
-        self._agent.on("agent_tool_call_end", self._on_tool_call_end)
+    def _on_agent_event(self, event: Any) -> None:
+        """Forward typed event to subscribers."""
+        event_type = event.type if hasattr(event, "type") else None
+        if event_type:
+            self._publish(event_type, event)
 
-        # Turn lifecycle
-        self._agent.on("agent_turn_start", self._on_turn_start)
-        self._agent.on("agent_turn_end", self._on_turn_end)
-
-        # Agent completion
-        self._agent.on("agent_complete", self._on_agent_complete)
-        self._agent.on("agent_error", self._on_agent_error)
-
-    def subscribe(
-        self, event_type: str, handler: Callable[[AssistantEvent], None]
-    ) -> None:
+    def subscribe(self, event_type: str, handler: Callable[[Any], None]) -> None:
         """Subscribe to a specific event type.
 
         Args:
-            event_type: The event type to listen for (e.g., "text_delta")
-            handler: Callback function that receives the event
+            event_type: Event type string (e.g., "text_delta", "agent_tool_call_start")
+            handler: Callback that receives the typed event
         """
         if event_type not in self._subscribers:
             self._subscribers[event_type] = []
@@ -82,39 +74,17 @@ class EventPublisher:
                 len(self._subscribers[event_type]),
             )
 
-    def unsubscribe(
-        self, event_type: str, handler: Callable[[AssistantEvent], None]
-    ) -> None:
-        """Unsubscribe from a specific event type.
-
-        Args:
-            event_type: The event type to stop listening to
-            handler: The callback function to remove
-        """
+    def unsubscribe(self, event_type: str, handler: Callable[[Any], None]) -> None:
+        """Unsubscribe from a specific event type."""
         if event_type in self._subscribers:
             try:
                 self._subscribers[event_type].remove(handler)
-                logger.debug(
-                    "Unsubscribed from %s: %s (remaining: %d)",
-                    event_type,
-                    handler.__name__
-                    if hasattr(handler, "__name__")
-                    else str(handler)[:50],
-                    len(self._subscribers[event_type]),
-                )
             except ValueError:
-                pass  # Handler wasn't subscribed
+                pass
 
-    def _publish(self, event: AssistantEvent) -> None:
-        """Publish an event to all subscribers.
-
-        Catches and logs exceptions in subscriber handlers to prevent one
-        failing adapter from affecting others.
-
-        Args:
-            event: The event to publish
-        """
-        handlers = self._subscribers.get(event.type, [])
+    def _publish(self, event_type: str, event: Any) -> None:
+        """Publish an event to all subscribers for the given type."""
+        handlers = self._subscribers.get(event_type, [])
         if not handlers:
             return
 
@@ -124,84 +94,11 @@ class EventPublisher:
             except Exception as e:
                 logger.error(
                     "Event handler failed: type=%s handler=%s error=%s",
-                    event.type,
+                    event_type,
                     handler.__name__ if hasattr(handler, "__name__") else "unknown",
                     e,
                     exc_info=True,
                 )
-                # Don't raise, continue notifying other subscribers
-
-    # Agent event handlers - convert dict events to typed events
-
-    def _on_text_delta(self, event: Dict[str, Any]) -> None:
-        """Handle text_delta event from agent."""
-        try:
-            typed_event = event_from_dict("text_delta", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error("Failed to process text_delta event: %s", e, exc_info=True)
-
-    def _on_thinking_delta(self, event: Dict[str, Any]) -> None:
-        """Handle thinking_delta event from agent."""
-        try:
-            typed_event = event_from_dict("thinking_delta", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error(
-                "Failed to process thinking_delta event: %s", e, exc_info=True
-            )
-
-    def _on_tool_call_start(self, event: Dict[str, Any]) -> None:
-        """Handle agent_tool_call_start event from agent."""
-        try:
-            typed_event = event_from_dict("agent_tool_call_start", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error(
-                "Failed to process tool_call_start event: %s", e, exc_info=True
-            )
-
-    def _on_tool_call_end(self, event: Dict[str, Any]) -> None:
-        """Handle agent_tool_call_end event from agent."""
-        try:
-            typed_event = event_from_dict("agent_tool_call_end", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error("Failed to process tool_call_end event: %s", e, exc_info=True)
-
-    def _on_turn_start(self, event: Dict[str, Any]) -> None:
-        """Handle agent_turn_start event from agent."""
-        try:
-            typed_event = event_from_dict("agent_turn_start", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error("Failed to process turn_start event: %s", e, exc_info=True)
-
-    def _on_turn_end(self, event: Dict[str, Any]) -> None:
-        """Handle agent_turn_end event from agent."""
-        try:
-            typed_event = event_from_dict("agent_turn_end", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error("Failed to process turn_end event: %s", e, exc_info=True)
-
-    def _on_agent_complete(self, event: Dict[str, Any]) -> None:
-        """Handle agent_complete event from agent."""
-        try:
-            typed_event = event_from_dict("agent_complete", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error(
-                "Failed to process agent_complete event: %s", e, exc_info=True
-            )
-
-    def _on_agent_error(self, event: Dict[str, Any]) -> None:
-        """Handle agent_error event from agent."""
-        try:
-            typed_event = event_from_dict("agent_error", event)
-            self._publish(typed_event)
-        except Exception as e:
-            logger.error("Failed to process agent_error event: %s", e, exc_info=True)
 
     def cleanup(self) -> None:
         """Clean up all subscriptions."""
