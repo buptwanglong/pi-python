@@ -6,12 +6,11 @@ Replaces the entire todo list on each call. Used for multi-step task tracking.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Literal
+from typing import Any, List, Literal
 
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from basket_assistant.agent._protocol import AssistantAgentProtocol
+from basket_assistant.agent.context import AgentContext
 
 TodoStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 
@@ -36,11 +35,11 @@ class TodoWriteParams(BaseModel):
     )
 
 
-def create_todo_write_tool(agent_ref: AssistantAgentProtocol) -> dict:
+def create_todo_write_tool(ctx: AgentContext) -> dict:
     """
     Create the todo_write tool. Call from main when registering tools.
 
-    agent_ref must have: _current_todos (list) to store the latest list.
+    ctx provides save_todos callback to persist the todo list.
 
     Returns a dict with name, description, parameters, execute_fn for agent.register_tool().
     """
@@ -71,10 +70,7 @@ def create_todo_write_tool(agent_ref: AssistantAgentProtocol) -> dict:
                 )
             else:
                 serialized.append({"id": None, "content": str(item), "status": "pending"})
-        agent_ref._current_todos = serialized
-        session_id = agent_ref._session_id
-        if session_id and agent_ref.session_manager:
-            await agent_ref.session_manager.save_todos(session_id, serialized)
+        await ctx.save_todos(serialized)
         n = len(serialized)
         return f"Todo list updated ({n} item{'s' if n != 1 else ''})."
 

@@ -1,22 +1,46 @@
 """Tests for the todo_write tool (create_todo_write_tool, execute_fn)."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from basket_assistant.agent.context import AgentContext
 from basket_assistant.tools import TodoItem, TodoWriteParams, create_todo_write_tool
 
 
+def _make_test_ctx(session_id="test-session"):
+    """Build an AgentContext for tests with a captured save_todos list."""
+    saved: list[dict] = []
+
+    async def save_todos(todos):
+        saved.clear()
+        saved.extend(todos)
+
+    ctx = AgentContext(
+        session_id=session_id,
+        plan_mode=False,
+        run_subagent=AsyncMock(),
+        get_subagent_configs=MagicMock(return_value={}),
+        get_subagent_display_description=MagicMock(return_value=""),
+        save_todos=save_todos,
+        save_pending_asks=AsyncMock(),
+        append_recent_task=MagicMock(),
+        update_recent_task=MagicMock(),
+        settings=MagicMock(),
+    )
+    return ctx, saved
+
+
 @pytest.fixture
-def agent_ref():
-    """Agent ref with _current_todos list; _session_id None so persist is not called."""
-    ref = __import__("unittest.mock").mock.MagicMock()
-    ref._current_todos = []
-    ref._session_id = None
-    return ref
+def ctx_and_saved():
+    """AgentContext with a captured save_todos list."""
+    return _make_test_ctx()
 
 
-def test_todo_write_tool_name_and_params(agent_ref):
+def test_todo_write_tool_name_and_params(ctx_and_saved):
     """Tool has name todo_write and TodoWriteParams."""
-    tool = create_todo_write_tool(agent_ref)
+    ctx, _saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     assert tool["name"] == "todo_write"
     assert tool["parameters"] is TodoWriteParams
     assert "Create or update" in tool["description"]
@@ -25,15 +49,16 @@ def test_todo_write_tool_name_and_params(agent_ref):
 
 
 @pytest.mark.asyncio
-async def test_todo_write_updates_agent_todos_and_returns_confirmation(agent_ref):
-    """execute_fn replaces _current_todos and returns message with count."""
-    tool = create_todo_write_tool(agent_ref)
+async def test_todo_write_updates_todos_and_returns_confirmation(ctx_and_saved):
+    """execute_fn saves todos via ctx and returns message with count."""
+    ctx, saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     todos = [
         TodoItem(id="1", content="First task", status="pending"),
         TodoItem(id="2", content="Second task", status="in_progress"),
     ]
     result = await tool["execute_fn"](todos=todos)
-    assert agent_ref._current_todos == [
+    assert saved == [
         {"id": "1", "content": "First task", "status": "pending"},
         {"id": "2", "content": "Second task", "status": "in_progress"},
     ]
@@ -41,55 +66,61 @@ async def test_todo_write_updates_agent_todos_and_returns_confirmation(agent_ref
 
 
 @pytest.mark.asyncio
-async def test_todo_write_empty_list(agent_ref):
-    """Empty list clears _current_todos."""
-    agent_ref._current_todos = [{"id": "1", "content": "x", "status": "pending"}]
-    tool = create_todo_write_tool(agent_ref)
+async def test_todo_write_empty_list(ctx_and_saved):
+    """Empty list clears saved todos."""
+    ctx, saved = ctx_and_saved
+    # Pre-populate to verify clearing
+    saved.extend([{"id": "1", "content": "x", "status": "pending"}])
+    tool = create_todo_write_tool(ctx)
     result = await tool["execute_fn"](todos=[])
-    assert agent_ref._current_todos == []
+    assert saved == []
     assert "0 item" in result or "0 items" in result
 
 
 @pytest.mark.asyncio
-async def test_todo_write_single_item(agent_ref):
+async def test_todo_write_single_item(ctx_and_saved):
     """Single item updates list and returns singular message."""
-    tool = create_todo_write_tool(agent_ref)
+    ctx, saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     result = await tool["execute_fn"](todos=[TodoItem(content="Only one", status="completed")])
-    assert len(agent_ref._current_todos) == 1
-    assert agent_ref._current_todos[0]["content"] == "Only one"
-    assert agent_ref._current_todos[0]["status"] == "completed"
+    assert len(saved) == 1
+    assert saved[0]["content"] == "Only one"
+    assert saved[0]["status"] == "completed"
     assert "1 item" in result and "items" not in result or "1 item)" in result
 
 
 @pytest.mark.asyncio
-async def test_todo_write_accepts_list_of_dicts(agent_ref):
+async def test_todo_write_accepts_list_of_dicts(ctx_and_saved):
     """execute_fn accepts list of dicts (e.g. from JSON tool call)."""
-    tool = create_todo_write_tool(agent_ref)
+    ctx, saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     todos = [
         {"id": "a", "content": "From dict", "status": "in_progress"},
         {"content": "No id", "status": "pending"},
     ]
     result = await tool["execute_fn"](todos=todos)
-    assert agent_ref._current_todos[0]["content"] == "From dict"
-    assert agent_ref._current_todos[0]["status"] == "in_progress"
-    assert agent_ref._current_todos[1]["content"] == "No id"
+    assert saved[0]["content"] == "From dict"
+    assert saved[0]["status"] == "in_progress"
+    assert saved[1]["content"] == "No id"
     assert "2 items" in result
 
 
 @pytest.mark.asyncio
-async def test_todo_write_non_list_returns_error(agent_ref):
+async def test_todo_write_non_list_returns_error(ctx_and_saved):
     """When todos is not a list, return error message."""
-    tool = create_todo_write_tool(agent_ref)
+    ctx, saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     result = await tool["execute_fn"](todos="not a list")
     assert "Error" in result
     assert "list" in result
-    assert agent_ref._current_todos == []  # unchanged
+    assert saved == []  # unchanged
 
 
 @pytest.mark.asyncio
-async def test_todo_write_statuses_preserved(agent_ref):
+async def test_todo_write_statuses_preserved(ctx_and_saved):
     """All four statuses are stored correctly."""
-    tool = create_todo_write_tool(agent_ref)
+    ctx, saved = ctx_and_saved
+    tool = create_todo_write_tool(ctx)
     todos = [
         TodoItem(content="p", status="pending"),
         TodoItem(content="i", status="in_progress"),
@@ -97,23 +128,40 @@ async def test_todo_write_statuses_preserved(agent_ref):
         TodoItem(content="x", status="cancelled"),
     ]
     await tool["execute_fn"](todos=todos)
-    statuses = [t["status"] for t in agent_ref._current_todos]
+    statuses = [t["status"] for t in saved]
     assert statuses == ["pending", "in_progress", "completed", "cancelled"]
 
 
 @pytest.mark.asyncio
 async def test_todo_write_persists_to_file_when_session_id_set(tmp_path):
-    """When agent has _session_id and session_manager, todos are saved to session file."""
+    """When save_todos callback persists via SessionManager, todos are saved to session file."""
     from basket_assistant.core.session_manager import SessionManager
 
     session_mgr = SessionManager(tmp_path)
     session_id = await session_mgr.create_session("test-model")
-    agent_ref = __import__("unittest.mock").mock.MagicMock()
-    agent_ref._current_todos = []
-    agent_ref._session_id = session_id
-    agent_ref.session_manager = session_mgr
 
-    tool = create_todo_write_tool(agent_ref)
+    # Build a save_todos callback that mirrors real build_tool_context behavior
+    current_todos: list[dict] = []
+
+    async def save_todos(todos):
+        current_todos.clear()
+        current_todos.extend(todos)
+        await session_mgr.save_todos(session_id, todos)
+
+    ctx = AgentContext(
+        session_id=session_id,
+        plan_mode=False,
+        run_subagent=AsyncMock(),
+        get_subagent_configs=MagicMock(return_value={}),
+        get_subagent_display_description=MagicMock(return_value=""),
+        save_todos=save_todos,
+        save_pending_asks=AsyncMock(),
+        append_recent_task=MagicMock(),
+        update_recent_task=MagicMock(),
+        settings=MagicMock(),
+    )
+
+    tool = create_todo_write_tool(ctx)
     todos = [
         TodoItem(id="1", content="Persisted task", status="in_progress"),
     ]
