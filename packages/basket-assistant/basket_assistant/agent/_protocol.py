@@ -6,7 +6,7 @@ agent parameter as AssistantAgentProtocol instead of Any.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from basket_agent import Agent
 from basket_ai.types import Context, Model
@@ -47,12 +47,7 @@ class AssistantAgentProtocol(Protocol):
     _plan_mode: bool
     _plugin_loader: Any  # Optional[PluginLoader] — typed as Any to avoid coupling
     _guardrail_engine: Optional[GuardrailEngine]
-    _assistant_event_handlers: Dict[str, List[Callable]]
     _todo_show_full: bool
-
-    # ── Trajectory ──
-    _trajectory_recorder: Optional[Any]
-    _trajectory_handlers_registered: bool
 
     # ── Hooks ──
     hook_runner: HookRunner
