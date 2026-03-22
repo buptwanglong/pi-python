@@ -4,9 +4,14 @@ TodoWrite tool - Manage a structured task list for the current session (OpenCode
 Replaces the entire todo list on each call. Used for multi-step task tracking.
 """
 
-from typing import Any, List, Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, List, Literal
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from basket_assistant.agent._protocol import AssistantAgentProtocol
 
 TodoStatus = Literal["pending", "in_progress", "completed", "cancelled"]
 
@@ -31,7 +36,7 @@ class TodoWriteParams(BaseModel):
     )
 
 
-def create_todo_write_tool(agent_ref: Any) -> dict:
+def create_todo_write_tool(agent_ref: AssistantAgentProtocol) -> dict:
     """
     Create the todo_write tool. Call from main when registering tools.
 
@@ -67,8 +72,8 @@ def create_todo_write_tool(agent_ref: Any) -> dict:
             else:
                 serialized.append({"id": None, "content": str(item), "status": "pending"})
         agent_ref._current_todos = serialized
-        session_id = getattr(agent_ref, "_session_id", None)
-        if session_id and getattr(agent_ref, "session_manager", None):
+        session_id = agent_ref._session_id
+        if session_id and agent_ref.session_manager:
             await agent_ref.session_manager.save_todos(session_id, serialized)
         n = len(serialized)
         return f"Todo list updated ({n} item{'s' if n != 1 else ''})."

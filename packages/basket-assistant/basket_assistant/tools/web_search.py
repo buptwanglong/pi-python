@@ -4,12 +4,17 @@ Web Search tool - Search the web for real-time information.
 Default: duckduckgo-search (no API key). Optional: Serper API when configured.
 """
 
+from __future__ import annotations
+
 import logging
 import os
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from basket_assistant.core import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +88,14 @@ async def _search_serper(search_term: str, num_results: int, api_key: str) -> st
     return _format_results(entries)
 
 
-def create_web_search_tool(settings: Any) -> dict:
+def create_web_search_tool(settings: Settings) -> dict:
     """
     Create the web search tool. Uses duckduckgo-search by default; Serper when
     web_search_provider == "serper" and api_keys["SERPER_API_KEY"] or env SERPER_API_KEY is set.
 
     Returns a dict with name, description, parameters, execute_fn for agent.register_tool().
     """
-    provider = (getattr(settings, "web_search_provider", None) or "").strip().lower()
+    provider = (settings.web_search_provider or "").strip().lower()
     api_key = None
     if hasattr(settings, "api_keys") and settings.api_keys:
         api_key = settings.api_keys.get("SERPER_API_KEY", "")

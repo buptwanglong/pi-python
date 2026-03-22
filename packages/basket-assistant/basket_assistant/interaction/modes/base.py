@@ -10,16 +10,24 @@ Key responsibilities:
 - Agent execution with error recovery
 """
 
+from __future__ import annotations
+
 import logging
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 from basket_ai.types import UserMessage
 
-from ..commands.registry import CommandRegistry
+from basket_assistant.agent.prompts import get_slash_commands_dirs
+from basket_assistant.commands.registry import CommandRegistry
+from basket_assistant.core.slash_commands_loader import collect_slash_commands
 from ..processors.input_processor import InputProcessor
 from ..errors import ModeInitializationError
+
+if TYPE_CHECKING:
+    from basket_assistant.agent._protocol import AssistantAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +60,7 @@ class InteractionMode(ABC):
         ...                 break
     """
 
-    def __init__(self, agent: Any) -> None:
+    def __init__(self, agent: AssistantAgentProtocol) -> None:
         """Initialize the interaction mode.
 
         Args:
@@ -60,7 +68,20 @@ class InteractionMode(ABC):
         """
         self.agent = agent
         self.command_registry = CommandRegistry(agent)
-        self.input_processor = InputProcessor(agent, self.command_registry)
+        plugin_cmd_dirs: List[Path] = []
+        pl = agent._plugin_loader
+        if pl is not None:
+            getter = getattr(pl, "get_all_commands_dirs", None)
+            if callable(getter):
+                out = getter()
+                if isinstance(out, list):
+                    plugin_cmd_dirs = out
+        slash_dirs = get_slash_commands_dirs(plugin_cmd_dirs)
+        slash_index = collect_slash_commands(slash_dirs)
+        setattr(agent, "_slash_commands_index", slash_index)
+        self.input_processor = InputProcessor(
+            agent, self.command_registry, slash_index
+        )
         self.publisher: Optional[Any] = None
         self.adapter: Optional[Any] = None
 
@@ -182,14 +203,15 @@ class InteractionMode(ABC):
         # Process input
         result = await self.input_processor.process(user_input)
 
-        # Check for exit commands
-        if user_input.strip() in ["/quit", "/exit"]:
+        if result.action == "exit":
             return False
 
         # If command was handled, don't run agent
         if result.action == "handled":
             if result.error:
                 print(f"Error: {result.error}")
+            elif result.command_output:
+                print(result.command_output)
             return True
 
         # Add message to context and run agent

@@ -1,12 +1,21 @@
 """
-Task tool - Delegate work to a subagent by name (OpenCode-style).
+Task tools - Delegate work to subagents by name (OpenCode-style).
+
+Includes the single ``task`` tool and the ``parallel_task`` tool that
+runs multiple subagent tasks concurrently via ``asyncio.gather``.
 """
 
+from __future__ import annotations
+
+import asyncio
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, List
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from basket_assistant.agent._protocol import AssistantAgentProtocol
 
 
 class TaskParams(BaseModel):
@@ -17,7 +26,23 @@ class TaskParams(BaseModel):
     subagent_type: str = Field(..., description="The name of the subagent to use (from available list)")
 
 
-def create_task_tool(agent_ref: Any) -> dict:
+class TaskSpec(BaseModel):
+    """Specification for a single task in a parallel batch."""
+
+    description: str = Field(..., description="Short description of the task")
+    prompt: str = Field(..., description="The task for the subagent to perform")
+    subagent_type: str = Field(..., description="The name of the subagent to use")
+
+
+class ParallelTaskParams(BaseModel):
+    """Parameters for the parallel_task tool."""
+
+    tasks: List[TaskSpec] = Field(
+        ..., description="List of tasks to run in parallel. Each needs description, prompt, and subagent_type."
+    )
+
+
+def create_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
     """
     Create the task tool with dynamic description. Call from main when registering tools.
 
@@ -38,17 +63,16 @@ def create_task_tool(agent_ref: Any) -> dict:
             "Available subagents (pass subagent_type when calling this tool):",
         ]
         for name, cfg in sorted(configs.items()):
-            desc = getattr(agent_ref, "get_subagent_display_description", None)
-            label = (desc(name, cfg) if callable(desc) else (getattr(cfg, "description", "") or name)).strip() or name
+            label = agent_ref.get_subagent_display_description(name, cfg)
             lines.append(f"  - {name}: {label}")
         description = "\n".join(lines)
 
     async def execute_task(description: str, prompt: str, subagent_type: str) -> str:
         task_id = str(uuid.uuid4())
         created_at = int(time.time() * 1000)
-        parent_session_id = getattr(agent_ref, "_session_id", None)
+        parent_session_id = agent_ref._session_id
         # Optional: append to in-memory list for traceability
-        recent = getattr(agent_ref, "_recent_tasks", None)
+        recent = agent_ref._recent_tasks
         if recent is not None:
             recent.append({
                 "task_id": task_id,
@@ -87,4 +111,104 @@ def create_task_tool(agent_ref: Any) -> dict:
     }
 
 
-__all__ = ["TaskParams", "create_task_tool"]
+def create_parallel_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
+    """
+    Create the parallel_task tool that runs multiple subagent tasks concurrently.
+
+    agent_ref must have: run_subagent(name, prompt) -> str, _get_subagent_configs() -> Dict[str, SubAgentConfig].
+
+    Returns a dict with name, description, parameters, execute_fn for agent.register_tool().
+    """
+    configs = agent_ref._get_subagent_configs()
+    if not configs:
+        agent_list = "No subagents configured."
+    else:
+        agent_names = ", ".join(sorted(configs.keys()))
+        agent_list = f"Available subagents: {agent_names}"
+
+    description = (
+        "Run multiple subagent tasks in parallel. Each task is dispatched to its "
+        "specified subagent concurrently via asyncio.gather. Results are returned "
+        "in the same order as the input tasks.\n\n"
+        "When to use: when you need to delegate 2+ independent tasks that can run "
+        "simultaneously (e.g., research in one agent while exploring code in another).\n"
+        "When NOT to use: when tasks depend on each other's results.\n\n"
+        f"{agent_list}"
+    )
+
+    async def execute_parallel_tasks(tasks: List[dict]) -> str:
+        """Run all tasks in parallel and return formatted results."""
+        # Convert raw dicts to TaskSpec if needed
+        specs = [
+            TaskSpec(**t) if isinstance(t, dict) else t
+            for t in tasks
+        ]
+
+        async def _run_single(spec: TaskSpec) -> dict:
+            """Run one subagent task, capturing result or error."""
+            task_id = str(uuid.uuid4())
+            try:
+                result = await agent_ref.run_subagent(
+                    spec.subagent_type, spec.prompt
+                )
+                return {
+                    "task_id": task_id,
+                    "description": spec.description,
+                    "subagent_type": spec.subagent_type,
+                    "status": "completed",
+                    "result": result,
+                    "error": None,
+                }
+            except Exception as e:
+                return {
+                    "task_id": task_id,
+                    "description": spec.description,
+                    "subagent_type": spec.subagent_type,
+                    "status": "failed",
+                    "result": None,
+                    "error": str(e),
+                }
+
+        coroutines = [_run_single(spec) for spec in specs]
+        results = await asyncio.gather(*coroutines, return_exceptions=True)
+
+        # Format output
+        output_parts = [f"Parallel execution: {len(specs)} tasks"]
+        for i, res in enumerate(results):
+            if isinstance(res, Exception):
+                # Unexpected gather-level exception
+                output_parts.append(
+                    f"\n--- Task {i + 1} ---\n"
+                    f"status: failed\n"
+                    f"error: {res}"
+                )
+            else:
+                output_parts.append(
+                    f"\n--- Task {i + 1}: {res['description']} (task_id: {res['task_id']}) ---\n"
+                    f"subagent: {res['subagent_type']}\n"
+                    f"status: {res['status']}"
+                )
+                if res["error"]:
+                    output_parts.append(f"error: {res['error']}")
+                else:
+                    output_parts.append(
+                        f"\n<task_result>\n{res['result']}\n</task_result>"
+                    )
+
+        return "\n".join(output_parts)
+
+    return {
+        "name": "parallel_task",
+        "description": description,
+        "parameters": ParallelTaskParams,
+        "execute_fn": execute_parallel_tasks,
+    }
+
+
+__all__ = [
+    "TaskParams",
+    "TaskSpec",
+    "ParallelTaskParams",
+    "create_task_tool",
+    "create_parallel_task_tool",
+]
