@@ -135,7 +135,7 @@ async def test_todo_write_statuses_preserved(ctx_and_saved):
 @pytest.mark.asyncio
 async def test_todo_write_persists_to_file_when_session_id_set(tmp_path):
     """When save_todos callback persists via SessionManager, todos are saved to session file."""
-    from basket_assistant.core.session_manager import SessionManager
+    from basket_assistant.core.session import SessionManager
 
     session_mgr = SessionManager(tmp_path)
     session_id = await session_mgr.create_session("test-model")

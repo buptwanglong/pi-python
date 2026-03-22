@@ -3,9 +3,12 @@ Session manager - JSONL persistence for conversations.
 
 This module handles reading and writing conversation sessions in JSONL format.
 Each line is a JSON object representing a session entry (message, metadata, etc.).
+
+For type="message" entries, SessionEntry.data is
+{"role": "user"|"assistant"|"toolResult", "payload": <message dict>};
+payload uses model_dump(mode="json") so aliases (toolCallId, toolName, etc.) round-trip.
 """
 
-import asyncio
 import json
 import logging
 import uuid
@@ -14,43 +17,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from pydantic import BaseModel, Field
 
 from basket_ai.types import Message
 
-from .messages_io import entry_data_to_message_safe, message_to_entry_data
+from .models import SessionEntry, SessionMetadata, _sanitize_agent_name
+from .serialization import (
+    entry_data_to_message,
+    entry_data_to_message_safe,
+    message_to_entry_data,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class SessionEntry(BaseModel):
-    """A single entry in a session file."""
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    parent_id: Optional[str] = None
-    timestamp: int
-    type: str  # "message", "metadata", "branch", etc.
-    data: Dict[str, Any] = Field(default_factory=dict)
-
-
-def _sanitize_agent_name(name: str) -> str:
-    """Sanitize agent name for use as a path segment (no path traversal)."""
-    if not name:
-        return name
-    return name.replace("/", "_").replace("\\", "_").replace("..", "_").strip() or "_"
-
-
-class SessionMetadata(BaseModel):
-    """Metadata about a session."""
-
-    session_id: str
-    created_at: int
-    updated_at: int
-    model_id: str
-    total_messages: int = 0
-    total_tokens: int = 0
-    parent_session_id: Optional[str] = None
-    agent_name: Optional[str] = None
 
 
 class SessionManager:
@@ -74,6 +51,35 @@ class SessionManager:
             self.sessions_dir = self.sessions_dir / _sanitize_agent_name(agent_name)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
+    # ------------------------------------------------------------------
+    # Static methods delegate to module-level functions for backward compat
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def message_to_entry_data(message: Message) -> Dict[str, Any]:
+        """
+        Convert a Message to SessionEntry.data dict.
+        data = {"role": ..., "payload": message.model_dump(mode="json")}.
+        """
+        return message_to_entry_data(message)
+
+    @staticmethod
+    def entry_data_to_message(data: Dict[str, Any]) -> Message:
+        """
+        Deserialize SessionEntry.data to UserMessage, AssistantMessage, or ToolResultMessage.
+        Uses payload with populate_by_name so aliases (toolCallId, toolName, etc.) work.
+        """
+        return entry_data_to_message(data)
+
+    @staticmethod
+    def entry_data_to_message_safe(data: Dict[str, Any]) -> Optional[Message]:
+        """Like entry_data_to_message but returns None on invalid data (skip bad entries)."""
+        return entry_data_to_message_safe(data)
+
+    # ------------------------------------------------------------------
+    # Path helpers
+    # ------------------------------------------------------------------
+
     def _get_session_path(self, session_id: str) -> Path:
         """Get the file path for a session."""
         return self.sessions_dir / f"{session_id}.jsonl"
@@ -85,6 +91,10 @@ class SessionManager:
     def _get_pending_ask_path(self, session_id: str) -> Path:
         """Get the file path for a session's pending ask list."""
         return self.sessions_dir / f"{session_id}.pending_ask.json"
+
+    # ------------------------------------------------------------------
+    # Side-car persistence (todos, pending asks)
+    # ------------------------------------------------------------------
 
     async def save_pending_asks(
         self, session_id: str, pending_asks: List[Dict[str, Any]]
@@ -163,6 +173,53 @@ class SessionManager:
             logger.debug("Failed to load todos for %s: %s", session_id, e)
             return []
 
+    # ------------------------------------------------------------------
+    # JSONL I/O
+    # ------------------------------------------------------------------
+
+    async def append_entry(self, session_id: str, entry: SessionEntry) -> None:
+        """
+        Append an entry to a session file.
+
+        Args:
+            session_id: Session ID
+            entry: Entry to append
+        """
+        path = self._get_session_path(session_id)
+
+        async with aiofiles.open(path, "a", encoding="utf-8") as f:
+            line = json.dumps(entry.model_dump()) + "\n"
+            await f.write(line)
+
+    async def read_entries(self, session_id: str) -> List[SessionEntry]:
+        """
+        Read all entries from a session.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List of session entries
+        """
+        path = self._get_session_path(session_id)
+
+        if not path.exists():
+            raise FileNotFoundError(f"Session not found: {session_id}")
+
+        entries = []
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            async for line in f:
+                line = line.strip()
+                if line:
+                    data = json.loads(line)
+                    entries.append(SessionEntry(**data))
+
+        return entries
+
+    # ------------------------------------------------------------------
+    # High-level API
+    # ------------------------------------------------------------------
+
     async def create_session(
         self,
         model_id: str,
@@ -240,45 +297,6 @@ class SessionManager:
             data=metadata.model_dump(),
         )
         await self.append_entry(session_id, entry)
-
-    async def append_entry(self, session_id: str, entry: SessionEntry) -> None:
-        """
-        Append an entry to a session file.
-
-        Args:
-            session_id: Session ID
-            entry: Entry to append
-        """
-        path = self._get_session_path(session_id)
-
-        async with aiofiles.open(path, "a", encoding="utf-8") as f:
-            line = json.dumps(entry.model_dump()) + "\n"
-            await f.write(line)
-
-    async def read_entries(self, session_id: str) -> List[SessionEntry]:
-        """
-        Read all entries from a session.
-
-        Args:
-            session_id: Session ID
-
-        Returns:
-            List of session entries
-        """
-        path = self._get_session_path(session_id)
-
-        if not path.exists():
-            raise FileNotFoundError(f"Session not found: {session_id}")
-
-        entries = []
-        async with aiofiles.open(path, "r", encoding="utf-8") as f:
-            async for line in f:
-                line = line.strip()
-                if line:
-                    data = json.loads(line)
-                    entries.append(SessionEntry(**data))
-
-        return entries
 
     async def append_messages(self, session_id: str, messages: List[Message]) -> None:
         """
@@ -411,4 +429,6 @@ class SessionManager:
         await self.append_entry(session_id, entry)
 
 
-__all__ = ["SessionEntry", "SessionMetadata", "SessionManager"]
+__all__ = [
+    "SessionManager",
+]

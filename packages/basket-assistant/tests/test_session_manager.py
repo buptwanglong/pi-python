@@ -16,7 +16,7 @@ from basket_ai.types import (
 )
 from basket_ai.types import StopReason
 
-from basket_assistant.core.session_manager import (
+from basket_assistant.core.session import (
     SessionManager,
     SessionEntry,
     SessionMetadata,

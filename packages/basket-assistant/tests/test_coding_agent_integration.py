@@ -54,7 +54,7 @@ class TestAssistantAgentIntegration:
         settings_manager.save(settings)
 
         # Initialize agent
-        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager)
 
         # Verify initialization
         assert agent.settings is not None
@@ -104,7 +104,7 @@ class TestAssistantAgentIntegration:
         settings.sessions_dir = str(tmp_path / "sessions")
         settings.agents = {"general": SubAgentConfig()}
         mock_settings_manager.save(settings)
-        agent = AssistantAgent(settings_manager=mock_settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=mock_settings_manager)
         tool_names = {t.name for t in agent.agent.tools}
         assert "task" in tool_names
 
@@ -250,15 +250,12 @@ class TestAssistantAgentIntegration:
         assert callable(mock_coding_agent.agent.on)
 
     @pytest.mark.asyncio
-    async def test_extension_loader_integration(self, mock_coding_agent):
-        """Test that extension loader is properly initialized."""
-        assert mock_coding_agent.extension_loader is not None
-        assert mock_coding_agent.extension_loader.extension_api is not None
+    async def test_hook_runner_initialized(self, mock_coding_agent):
+        """HookRunner is created for subprocess hooks (hooks.json / settings.hooks)."""
+        assert mock_coding_agent.hook_runner is not None
+        from basket_assistant.hooks import HookRunner
 
-        # Verify extension API has access to agent
-        api = mock_coding_agent.extension_loader.extension_api
-        assert api.get_context() == mock_coding_agent.context
-        assert api.get_settings() == mock_coding_agent.settings
+        assert isinstance(mock_coding_agent.hook_runner, HookRunner)
 
     @pytest.mark.asyncio
     async def test_session_manager_integration(self, mock_coding_agent, tmp_path):
@@ -271,7 +268,7 @@ class TestAssistantAgentIntegration:
         assert session_id is not None
 
         # Test appending to session (append_entry expects SessionEntry)
-        from basket_assistant.core.session_manager import SessionEntry
+        from basket_assistant.core.session import SessionEntry
 
         entry = SessionEntry(
             timestamp=1234567890,
@@ -348,7 +345,7 @@ class TestAssistantAgentIntegration:
         settings.sessions_dir = str(sessions_dir)
         settings_manager.save(settings)
 
-        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager)
         session_id = await agent.session_manager.create_session(agent.model.id)
         todos = [{"id": "1", "content": "Loaded task", "status": "in_progress"}]
         await agent.session_manager.save_todos(session_id, todos)
@@ -382,7 +379,7 @@ class TestAssistantAgentIntegration:
         settings.sessions_dir = str(sessions_dir)
         settings.permissions = PermissionsSettings(default_mode="plan")
         settings_manager.save(settings)
-        agent = AssistantAgent(settings_manager=settings_manager, load_extensions=False)
+        agent = AssistantAgent(settings_manager=settings_manager)
         assert agent.get_plan_mode() is True
 
     @pytest.mark.asyncio

@@ -3,7 +3,7 @@ Core modules for the coding agent.
 """
 
 from .messages import MessageTree, MessageTreeNode
-from .session_manager import SessionEntry, SessionManager, SessionMetadata
+from .session import SessionEntry, SessionManager, SessionMetadata
 from .configuration import AgentLoader
 from .settings import (
     AgentConfig,
