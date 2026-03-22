@@ -100,4 +100,15 @@ READ_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=READ_TOOL["name"],
+    description=READ_TOOL["description"],
+    parameters=ReadParams,
+    factory=lambda ctx: read_file,
+))
+
+
 __all__ = ["ReadParams", "ReadResult", "read_file", "READ_TOOL"]

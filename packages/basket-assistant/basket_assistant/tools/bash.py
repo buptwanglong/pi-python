@@ -91,4 +91,16 @@ BASH_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=BASH_TOOL["name"],
+    description=BASH_TOOL["description"],
+    parameters=BashParams,
+    factory=lambda ctx: execute_bash,
+    plan_mode_blocked=True,
+))
+
+
 __all__ = ["BashParams", "BashResult", "execute_bash", "BASH_TOOL"]

@@ -133,4 +133,16 @@ EDIT_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=EDIT_TOOL["name"],
+    description=EDIT_TOOL["description"],
+    parameters=EditParams,
+    factory=lambda ctx: edit_file,
+    plan_mode_blocked=True,
+))
+
+
 __all__ = ["EditParams", "EditResult", "edit_file", "EDIT_TOOL"]

@@ -128,4 +128,15 @@ GREP_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=GREP_TOOL["name"],
+    description=GREP_TOOL["description"],
+    parameters=GrepParams,
+    factory=lambda ctx: grep_files,
+))
+
+
 __all__ = ["GrepParams", "GrepMatch", "GrepResult", "grep_files", "GREP_TOOL"]

@@ -69,4 +69,16 @@ WRITE_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=WRITE_TOOL["name"],
+    description=WRITE_TOOL["description"],
+    parameters=WriteParams,
+    factory=lambda ctx: write_file,
+    plan_mode_blocked=True,
+))
+
+
 __all__ = ["WriteParams", "WriteResult", "write_file", "WRITE_TOOL"]

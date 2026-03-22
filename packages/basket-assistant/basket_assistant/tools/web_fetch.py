@@ -103,4 +103,15 @@ WEB_FETCH_TOOL = {
 }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name=WEB_FETCH_TOOL["name"],
+    description=WEB_FETCH_TOOL["description"],
+    parameters=WebFetchParams,
+    factory=lambda ctx: web_fetch,
+))
+
+
 __all__ = ["WebFetchParams", "web_fetch", "WEB_FETCH_TOOL"]
