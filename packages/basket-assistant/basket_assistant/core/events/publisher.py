@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List
 
 if TYPE_CHECKING:
-    from basket_assistant.agent import AssistantAgent
+    from basket_assistant.agent._protocol import AssistantAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class EventPublisher:
         >>> publisher.subscribe("agent_tool_call_start", lambda e: print(e.tool_name))
     """
 
-    def __init__(self, agent: AssistantAgent):
+    def __init__(self, agent: AssistantAgentProtocol):
         self._assistant = agent
         self._subscribers: Dict[str, List[Callable[[Any], None]]] = {}
         self._setup_agent_subscriptions()
