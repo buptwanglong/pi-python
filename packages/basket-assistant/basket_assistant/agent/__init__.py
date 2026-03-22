@@ -6,15 +6,15 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from basket_agent import Agent
 from basket_ai.api import get_model
 from basket_ai.types import Context
 
 from ..core import SettingsManager, SessionManager, AgentConfigResolver
-from ..extensions import ExtensionLoader
 from ..guardrails.defaults import create_default_engine
+from ..hooks import HookRunner
 
 from . import events
 from . import prompts
@@ -37,7 +37,6 @@ class AssistantAgent:
     def __init__(
         self,
         settings_manager: Optional[SettingsManager] = None,
-        load_extensions: bool = True,
         agent_name: Optional[str] = None,
     ):
         """
@@ -45,7 +44,6 @@ class AssistantAgent:
 
         Args:
             settings_manager: Optional settings manager (creates default if None)
-            load_extensions: Whether to load extensions
             agent_name: Agent name (None uses default_agent from settings)
         """
         # Load settings
@@ -60,8 +58,13 @@ class AssistantAgent:
         self._setup_agent()
         self._setup_state()
 
-        # Initialize extension loader (needed by tools)
-        self.extension_loader = ExtensionLoader(self)
+        settings_hooks = getattr(self.settings, "hooks", None) or {}  # dynamic field, not in Settings model
+        if not isinstance(settings_hooks, dict):
+            settings_hooks = {}
+        self.hook_runner = HookRunner(
+            project_root=Path.cwd(),
+            settings_hooks=settings_hooks,
+        )
 
         # Load plugins and merge into search paths
         from ..plugins.loader import PluginLoader
@@ -69,13 +72,23 @@ class AssistantAgent:
         self._plugin_loader = PluginLoader()
         self._plugin_loader.discover()
 
-        # Load extensions and register tools
-        if load_extensions:
-            self._load_extensions()
         tools.register_tools(self)
 
         # Setup event handlers (for ask_user_question, todos, etc.)
         events.setup_event_handlers(self)
+
+    async def try_process_gateway_slash(
+        self,
+        user_content: str,
+        *,
+        event_sink: Optional[Callable[[dict], Awaitable[None]]] = None,
+    ) -> Optional[Tuple[str, bool]]:
+        """If input is a handled slash command, return (reply_text, want_exit). Else None."""
+        from .gateway_slash import try_process_gateway_slash
+
+        return await try_process_gateway_slash(
+            self, user_content, event_sink=event_sink
+        )
 
     def _setup_environment(self) -> None:
         """Setup environment variables from API keys."""
@@ -113,6 +126,37 @@ class AssistantAgent:
                 model_id = sub.model.get("model_id", model_id)
             result.append({"agent_name": name, "model_id": model_id})
         return result
+
+    async def list_plugins_for_picker(self) -> List[Dict[str, Any]]:
+        """Return installed plugins for gateway GET /api/plugins and native TUI picker."""
+        from ..plugins.commands import plugin_list
+
+        result = await plugin_list()
+        return [
+            {
+                "name": p.name,
+                "version": p.version,
+                "description": p.description or "",
+            }
+            for p in result.plugins
+        ]
+
+    async def gateway_plugin_install(
+        self,
+        source: str,
+        *,
+        event_sink: Callable[[dict], Awaitable[None]],
+    ) -> Tuple[bool, str]:
+        """Install a plugin; stream progress via ``event_sink`` (e.g. WebSocket)."""
+        from ..plugins.commands import plugin_install
+
+        async def progress_sink(payload: dict) -> None:
+            await event_sink(payload)
+
+        result = await plugin_install(source.strip(), progress_sink=progress_sink)
+        if result.success:
+            return True, result.message or ""
+        return False, result.error or "Install failed"
 
     def _setup_session_manager(self) -> None:
         """Setup session manager with per-agent or global sessions directory."""
@@ -161,26 +205,22 @@ class AssistantAgent:
         self._session_id: Optional[str] = None
         self._todo_show_full: bool = False
         self._plan_mode: bool = (
-            getattr(self.settings.permissions, "default_mode", "default") == "plan"
+            self.settings.permissions.default_mode == "plan"
         )
         self._pending_asks: List[dict] = []
         self._assistant_event_handlers: Dict[str, List[Callable]] = {}
+        self._trajectory_recorder: Optional[Any] = None
+        self._trajectory_handlers_registered: bool = False
 
         # Guardrails engine -- blocks dangerous tool operations
-        workspace_dir = getattr(self.settings, "workspace_dir", None)
+        workspace_dir = self.settings.workspace_dir
         guardrails_enabled = getattr(
             self.settings, "guardrails_enabled", True
-        )
+        )  # dynamic field, not in Settings model
         self._guardrail_engine = create_default_engine(
             workspace_dir=str(workspace_dir) if workspace_dir else None,
             enabled=guardrails_enabled,
         )
-
-    def _load_extensions(self) -> None:
-        """Load default extensions."""
-        num_loaded = self.extension_loader.load_default_extensions()
-        if num_loaded > 0:
-            print(f"📦 Loaded {num_loaded} extension(s)")
 
     def _get_system_prompt(self) -> str:
         return prompts.get_system_prompt_base(self.settings)
