@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 class TUIAdapter(EventAdapter):
     """TUI adapter that forwards events to basket-tui's EventBus.
 
-    This adapter converts AssistantEvent instances into TUI-specific events
-    and publishes them to the TUI's event bus for display.
+    This adapter receives typed events from basket-agent and publishes them
+    to the TUI's event bus for display.
 
     Args:
         publisher: The EventPublisher to subscribe to

@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 class WebUIAdapter(EventAdapter):
     """WebUI adapter that sends events over WebSocket.
 
-    This adapter converts AssistantEvent instances to JSON and sends them
-    over a WebSocket connection for display in a web UI.
+    This adapter receives typed events from basket-agent, converts them to JSON,
+    and sends them over a WebSocket connection for display in a web UI.
 
     Args:
         publisher: The EventPublisher to subscribe to
