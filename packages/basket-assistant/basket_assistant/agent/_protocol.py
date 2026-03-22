@@ -1,8 +1,10 @@
 """Protocol defining the structural type contract for AssistantAgent.
 
 All helper modules in agent/ (tools, events, prompts, session, gateway_slash)
-and external callers (tools/task.py, commands/, etc.) should type their
-agent parameter as AssistantAgentProtocol instead of Any.
+should type their agent parameter as AssistantAgentProtocol instead of Any.
+
+Tool implementations no longer access agent attributes directly — they
+receive an AgentContext snapshot via build_tool_context().
 """
 from __future__ import annotations
 
@@ -20,8 +22,12 @@ from ..hooks import HookRunner
 class AssistantAgentProtocol(Protocol):
     """Structural type for AssistantAgent consumed by helper modules.
 
-    Grouped by responsibility area. All attributes here are set in
+    Grouped by responsibility area.  All attributes here are set in
     AssistantAgent.__init__ and are guaranteed present at runtime.
+
+    Note: tool-only state (e.g. _recent_tasks) is **not** declared here.
+    Tools access such state through the AgentContext returned by
+    build_tool_context().
     """
 
     # ── Settings & Configuration ──
@@ -41,18 +47,18 @@ class AssistantAgentProtocol(Protocol):
     _session_id: Optional[str]
     _current_todos: List[dict]
     _pending_asks: List[dict]
-    _recent_tasks: Optional[List[dict]]
 
     # ── Tool & Plugin State ──
     _plan_mode: bool
     _plugin_loader: Any  # Optional[PluginLoader] — typed as Any to avoid coupling
-    _guardrail_engine: Optional[GuardrailEngine]
+    _guardrail_engine: GuardrailEngine
     _todo_show_full: bool
 
     # ── Hooks ──
     hook_runner: HookRunner
 
-    # ── Methods accessed by callers ──
+    # ── Methods accessed by agent/ helpers ──
+    def build_tool_context(self) -> Any: ...
     def get_subagent_display_description(self, name: str, cfg: Any) -> str: ...
     def _get_subagent_configs(self) -> Dict[str, Any]: ...
     async def run_subagent(self, subagent_name: str, user_prompt: str) -> str: ...
