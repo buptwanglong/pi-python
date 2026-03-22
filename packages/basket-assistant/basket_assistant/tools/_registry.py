@@ -22,6 +22,7 @@ class ToolDefinition:
     factory: Callable[[Any], Callable]  # AgentContext -> execute_fn
     plan_mode_blocked: bool = False
     description_factory: Optional[Callable[[Any], str]] = None  # ctx -> dynamic description
+    requires_subagents: bool = False  # Only register when subagent configs exist
 
 
 _TOOL_REGISTRY: List[ToolDefinition] = []

@@ -225,6 +225,7 @@ register(ToolDefinition(
     parameters=TaskParams,
     factory=_task_factory,
     description_factory=_task_description,
+    requires_subagents=True,
 ))
 
 
@@ -244,6 +245,7 @@ register(ToolDefinition(
     parameters=ParallelTaskParams,
     factory=_parallel_task_factory,
     description_factory=_parallel_task_description,
+    requires_subagents=True,
 ))
 
 

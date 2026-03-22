@@ -155,6 +155,7 @@ register(ToolDefinition(
     description="Execute a directed acyclic graph of subagent tasks.",
     parameters=DAGTaskParams,
     factory=lambda ctx: create_dag_task_tool(ctx)["execute_fn"],
+    requires_subagents=True,
 ))
 
 

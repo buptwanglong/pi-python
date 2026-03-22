@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, List
 
 from basket_agent import Agent
 from basket_ai.api import get_model
@@ -17,15 +17,6 @@ from ..guardrails.engine import GuardrailEngine
 
 if TYPE_CHECKING:
     from ._protocol import AssistantAgentProtocol
-from ..tools import (
-    BUILT_IN_TOOLS,
-    create_ask_user_question_tool,
-    create_parallel_task_tool,
-    create_skill_tool,
-    create_task_tool,
-    create_todo_write_tool,
-    create_web_search_tool,
-)
 
 from . import prompts
 
@@ -58,30 +49,37 @@ def _wrap_execute_fn_for_guardrails(original_fn, engine: GuardrailEngine, tool_n
     return wrapped
 
 
-def _get_plugin_skill_dirs(agent: AssistantAgentProtocol) -> list:
-    """Return plugin skill dirs from agent's plugin loader, or empty list."""
-    loader = agent._plugin_loader
-    return loader.get_all_skill_dirs() if loader else []
-
-
 def get_registerable_tools(agent: AssistantAgentProtocol) -> List[dict]:
-    """Return list of tool dicts (name, description, parameters, execute_fn) as used in register_tools."""
-    include = agent.settings.skills_include or None
-    if include is not None and len(agent.settings.skills_include) == 0:
-        include = None
-    skill_tool = create_skill_tool(
-        lambda: prompts.get_skills_dirs(
-            agent.settings, plugin_skill_dirs=_get_plugin_skill_dirs(agent)
-        ),
-        include,
-    )
+    """Return list of tool dicts (name, description, parameters, execute_fn) from the registry."""
+    # Trigger self-registration by importing all tool modules
+    import basket_assistant.tools  # noqa: F401
+
+    from ..tools._registry import get_all
+
     ctx = agent.build_tool_context()
     configs = prompts.get_subagent_configs(agent)
-    extra: List[dict] = [skill_tool]
-    if configs:
-        extra.append(create_task_tool(ctx))
-        extra.append(create_parallel_task_tool(ctx))
-    return list(BUILT_IN_TOOLS) + extra
+    has_subagents = bool(configs)
+
+    tools = []
+    for defn in get_all():
+        if defn.requires_subagents and not has_subagents:
+            continue
+
+        fn = defn.factory(ctx)
+        desc = defn.description
+        if defn.description_factory:
+            try:
+                desc = defn.description_factory(ctx)
+            except Exception:
+                pass  # Fall back to static description
+
+        tools.append({
+            "name": defn.name,
+            "description": desc,
+            "parameters": defn.parameters,
+            "execute_fn": fn,
+        })
+    return tools
 
 
 def filter_tools_for_subagent(agent: AssistantAgentProtocol, cfg: SubAgentConfig) -> List[dict]:
@@ -217,99 +215,47 @@ def wrap_tool_with_hooks(agent: AssistantAgentProtocol, name: str, execute_fn):
 
 
 def register_tools(agent: AssistantAgentProtocol) -> None:
-    """Register all built-in tools with the agent.
+    """Register all tools from the declarative registry.
 
     Wrapping order (outermost runs first):
         plan_mode → guardrails → hooks → original_fn
     """
+    # Trigger self-registration by importing all tool modules
+    import basket_assistant.tools  # noqa: F401
+
+    from ..tools._registry import get_all
+
     ctx = agent.build_tool_context()
     get_plan = lambda: agent._plan_mode
     engine = agent._guardrail_engine
-
-    def _apply_guardrails(fn, name):
-        if engine is not None:
-            return _wrap_execute_fn_for_guardrails(fn, engine, name)
-        return fn
-
-    for tool in BUILT_IN_TOOLS:
-        name = tool["name"]
-        fn = tool["execute_fn"]
-        fn = wrap_tool_with_hooks(agent, name, fn)
-        fn = _apply_guardrails(fn, name)
-        if name in PLAN_MODE_FORBIDDEN_TOOLS:
-            fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
-        agent.agent.register_tool(
-            name=name,
-            description=tool["description"],
-            parameters=tool["parameters"],
-            execute_fn=fn,
-        )
-    include = agent.settings.skills_include or None
-    if include is not None and len(agent.settings.skills_include) == 0:
-        include = None
-    skill_tool = create_skill_tool(
-        lambda: prompts.get_skills_dirs(
-            agent.settings, plugin_skill_dirs=_get_plugin_skill_dirs(agent)
-        ),
-        include,
-    )
-    fn = wrap_tool_with_hooks(agent, skill_tool["name"], skill_tool["execute_fn"])
-    fn = _apply_guardrails(fn, skill_tool["name"])
-    agent.agent.register_tool(
-        name=skill_tool["name"],
-        description=skill_tool["description"],
-        parameters=skill_tool["parameters"],
-        execute_fn=fn,
-    )
     configs = prompts.get_subagent_configs(agent)
-    if configs:
-        task_tool = create_task_tool(ctx)
-        fn = wrap_tool_with_hooks(agent, task_tool["name"], task_tool["execute_fn"])
-        fn = _apply_guardrails(fn, task_tool["name"])
+    has_subagents = bool(configs)
+
+    for defn in get_all():
+        # Skip subagent-only tools when no subagent configs exist
+        if defn.requires_subagents and not has_subagents:
+            continue
+
+        fn = defn.factory(ctx)
+
+        # Build dynamic description if available
+        desc = defn.description
+        if defn.description_factory:
+            try:
+                desc = defn.description_factory(ctx)
+            except Exception:
+                pass  # Fall back to static description
+
+        # Wrapping pipeline: hooks → guardrails → plan_mode (outermost)
+        fn = wrap_tool_with_hooks(agent, defn.name, fn)
+        if engine is not None:
+            fn = _wrap_execute_fn_for_guardrails(fn, engine, defn.name)
+        if defn.plan_mode_blocked or defn.name in PLAN_MODE_FORBIDDEN_TOOLS:
+            fn = _wrap_execute_fn_for_plan_mode(fn, get_plan)
+
         agent.agent.register_tool(
-            name=task_tool["name"],
-            description=task_tool["description"],
-            parameters=task_tool["parameters"],
+            name=defn.name,
+            description=desc,
+            parameters=defn.parameters,
             execute_fn=fn,
         )
-        parallel_tool = create_parallel_task_tool(ctx)
-        fn = wrap_tool_with_hooks(agent, parallel_tool["name"], parallel_tool["execute_fn"])
-        fn = _apply_guardrails(fn, parallel_tool["name"])
-        agent.agent.register_tool(
-            name=parallel_tool["name"],
-            description=parallel_tool["description"],
-            parameters=parallel_tool["parameters"],
-            execute_fn=fn,
-        )
-    web_search_tool = create_web_search_tool(agent.settings)
-    fn = wrap_tool_with_hooks(
-        agent, web_search_tool["name"], web_search_tool["execute_fn"]
-    )
-    fn = _apply_guardrails(fn, web_search_tool["name"])
-    agent.agent.register_tool(
-        name=web_search_tool["name"],
-        description=web_search_tool["description"],
-        parameters=web_search_tool["parameters"],
-        execute_fn=fn,
-    )
-    todo_tool = create_todo_write_tool(ctx)
-    todo_fn = todo_tool["execute_fn"]
-    todo_fn = wrap_tool_with_hooks(agent, todo_tool["name"], todo_fn)
-    todo_fn = _apply_guardrails(todo_fn, todo_tool["name"])
-    if "todo_write" in PLAN_MODE_FORBIDDEN_TOOLS:
-        todo_fn = _wrap_execute_fn_for_plan_mode(todo_fn, get_plan)
-    agent.agent.register_tool(
-        name=todo_tool["name"],
-        description=todo_tool["description"],
-        parameters=todo_tool["parameters"],
-        execute_fn=todo_fn,
-    )
-    ask_tool = create_ask_user_question_tool(ctx)
-    fn = wrap_tool_with_hooks(agent, ask_tool["name"], ask_tool["execute_fn"])
-    fn = _apply_guardrails(fn, ask_tool["name"])
-    agent.agent.register_tool(
-        name=ask_tool["name"],
-        description=ask_tool["description"],
-        parameters=ask_tool["parameters"],
-        execute_fn=fn,
-    )
