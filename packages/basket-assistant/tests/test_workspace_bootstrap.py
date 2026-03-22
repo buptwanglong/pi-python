@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from basket_assistant.core.settings_full import Settings
+from basket_assistant.core.settings import Settings
 from basket_assistant.core.workspace_bootstrap import (
     ensure_workspace_default_fill,
     load_daily_memory,

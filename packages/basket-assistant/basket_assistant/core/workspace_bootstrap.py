@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .settings import Settings
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKSPACE_DIR = "~/.basket/workspace"
@@ -85,7 +87,7 @@ def ensure_workspace_default_fill(workspace_dir: Path) -> None:
     (workspace_dir / "memory").mkdir(exist_ok=True)
 
 
-def resolve_workspace_dir(settings: Any, for_main_agent: bool = True) -> Optional[Path]:
+def resolve_workspace_dir(settings: Settings, for_main_agent: bool = True) -> Optional[Path]:
     """
     Resolve workspace directory from settings.
 
@@ -95,7 +97,7 @@ def resolve_workspace_dir(settings: Any, for_main_agent: bool = True) -> Optiona
     (path can still be resolved for other uses). For backward compatibility we still return
     a path when using default so that prompt assembly always has a workspace.
     """
-    raw = getattr(settings, "workspace_dir", None)
+    raw = settings.workspace_dir
     if not raw or not str(raw).strip():
         path = Path(DEFAULT_WORKSPACE_DIR).expanduser().resolve()
     else:

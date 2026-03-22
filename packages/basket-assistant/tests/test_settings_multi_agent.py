@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from basket_assistant.core.settings_full import Settings, load_settings
+from basket_assistant.core.settings import Settings, load_settings
 
 
 def test_load_settings_requires_agents_and_default_agent() -> None:
