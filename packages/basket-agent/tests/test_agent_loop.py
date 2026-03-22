@@ -5,11 +5,19 @@ Tests for the agent execution loop.
 import pytest
 
 from basket_agent.agent_loop import execute_tool_call, run_agent_turn
-from basket_agent.types import AgentState, AgentTool, ToolExecutor
+from basket_agent.types import (
+    AgentEvent,
+    AgentEventTurnEnd,
+    AgentEventTurnStart,
+    AgentState,
+    AgentTool,
+    ToolExecutor,
+)
 from basket_ai.types import (
     AssistantMessage,
     Context,
     Model,
+    StopReason,
     TextContent,
     ToolCall,
     UserMessage,
@@ -186,6 +194,55 @@ class TestAgentLoopIntegration:
 
         # Should complete
         assert any(e.get("type") == "agent_complete" for e in events)
+
+
+class TestAgentLoopTypedEvents:
+    """Verify agent_loop yields typed AgentEvent instances, not dicts."""
+
+    @pytest.mark.asyncio
+    async def test_turn_events_are_typed(self, sample_model):
+        """run_agent_turn should yield AgentEvent instances, not dicts."""
+        from unittest.mock import AsyncMock, patch
+
+        context = Context(
+            systemPrompt="You are a test agent.",
+            messages=[UserMessage(role="user", content="Say hello", timestamp=0)],
+        )
+        state = AgentState(model=sample_model, context=context, max_turns=1)
+
+        mock_message = AssistantMessage(
+            role="assistant",
+            content=[TextContent(type="text", text="Hello!")],
+            api="openai-completions",
+            provider="openai",
+            model="gpt-4o-mini",
+            stopReason=StopReason.STOP,
+            timestamp=0,
+        )
+
+        mock_stream = AsyncMock()
+        mock_stream.__aiter__ = lambda self: self
+        mock_stream.__anext__ = AsyncMock(side_effect=StopAsyncIteration)
+        mock_stream.result = AsyncMock(return_value=mock_message)
+
+        with patch("basket_agent.agent_loop.stream", return_value=mock_stream):
+            events = []
+            async for event in run_agent_turn(state, stream_llm_events=False):
+                events.append(event)
+
+            agent_events = [e for e in events if isinstance(e, AgentEvent)]
+            assert len(agent_events) >= 2
+
+            for event in agent_events:
+                assert not isinstance(event, dict), f"Event should be typed AgentEvent, got dict: {event}"
+
+            turn_starts = [e for e in events if isinstance(e, AgentEventTurnStart)]
+            assert len(turn_starts) == 1
+            assert turn_starts[0].turn_number == 1
+
+            turn_ends = [e for e in events if isinstance(e, AgentEventTurnEnd)]
+            assert len(turn_ends) == 1
+            assert turn_ends[0].has_tool_calls is False
 
 
 if __name__ == "__main__":

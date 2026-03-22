@@ -2,11 +2,10 @@
 Agent execution loop.
 
 This module implements the core agent loop that streams LLM responses,
-detects tool calls, executes tools, and manages the conversation flow.
+detects tool calls, executes tools in parallel, and manages the conversation flow.
 """
 
 import asyncio
-import json
 import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -22,12 +21,18 @@ from basket_ai.types import (
     UserMessage,
 )
 
+from .context_manager import compact_context, estimate_context_tokens
+from .observation_formatter import format_observation
+from .retry import execute_with_retry
+from .tool_filter import create_filtered_context
 from .types import (
     AgentEvent,
     AgentEventComplete,
+    AgentEventContextCompacted,
     AgentEventError,
     AgentEventToolCallEnd,
     AgentEventToolCallStart,
+    AgentEventToolRetry,
     AgentEventTurnEnd,
     AgentEventTurnStart,
     AgentState,
@@ -64,9 +69,105 @@ async def execute_tool_call(
         return None, str(e)
 
 
+async def _execute_single_tool_call(
+    tool_call: ToolCall, state: AgentState
+) -> Dict[str, Any]:
+    """
+    Execute a single tool call, collecting events in a list for deferred yielding.
+
+    This helper is designed to be run via asyncio.gather for parallel execution.
+    Events are buffered rather than yielded directly, since asyncio.gather cannot
+    drive async generators.
+
+    Integrates with the retry mechanism (execute_with_retry) and buffers any
+    retry events alongside start/end events.
+
+    Args:
+        tool_call: The tool call to execute
+        state: Current agent state (used to look up tools)
+
+    Returns:
+        Dict with tool_call_id, tool_name, result, error, and buffered events list.
+    """
+    agent_tool = state.get_tool(tool_call.name)
+    events: List[AgentEvent] = []
+
+    if not agent_tool:
+        events.append(
+            AgentEventToolCallStart(
+                tool_name=tool_call.name,
+                tool_call_id=tool_call.id,
+                arguments=tool_call.arguments,
+            )
+        )
+        events.append(
+            AgentEventToolCallEnd(
+                tool_name=tool_call.name,
+                tool_call_id=tool_call.id,
+                result=None,
+                error=f"Tool not found: {tool_call.name}",
+            )
+        )
+        return {
+            "tool_call_id": tool_call.id,
+            "tool_name": tool_call.name,
+            "result": None,
+            "error": f"Tool not found: {tool_call.name}",
+            "events": events,
+        }
+
+    events.append(
+        AgentEventToolCallStart(
+            tool_name=tool_call.name,
+            tool_call_id=tool_call.id,
+            arguments=tool_call.arguments,
+        )
+    )
+
+    # Execute tool with automatic retry for transient errors
+    retry_events: list[AgentEventToolRetry] = []
+
+    def on_retry(
+        name: str, attempt: int, err: str, max_retries: int
+    ) -> None:
+        retry_events.append(
+            AgentEventToolRetry(
+                tool_name=name,
+                attempt=attempt,
+                max_retries=max_retries,
+                error=err,
+            )
+        )
+
+    result, error = await execute_with_retry(
+        tool_call, agent_tool, on_retry=on_retry
+    )
+
+    # Buffer any retry events that occurred
+    for retry_event in retry_events:
+        events.append(retry_event)
+
+    events.append(
+        AgentEventToolCallEnd(
+            tool_name=tool_call.name,
+            tool_call_id=tool_call.id,
+            result=result,
+            error=error,
+        )
+    )
+
+    return {
+        "tool_call_id": tool_call.id,
+        "tool_name": tool_call.name,
+        "result": result,
+        "error": error,
+        "events": events,
+    }
+
+
 async def run_agent_turn(
     state: AgentState, stream_llm_events: bool = True
-) -> AsyncIterator[AgentEvent | Dict[str, Any]]:
+) -> AsyncIterator[Any]:
     """
     Run a single agent turn.
 
@@ -74,7 +175,7 @@ async def run_agent_turn(
     1. Applies steering messages (if any)
     2. Streams the LLM response
     3. Detects tool calls
-    4. Executes tools if found
+    4. Executes tools in parallel if multiple are found
     5. Appends results to context
 
     Args:
@@ -88,7 +189,7 @@ async def run_agent_turn(
     state.current_turn += 1
 
     # Emit turn start event
-    yield AgentEventTurnStart(turn_number=state.current_turn).model_dump()
+    yield AgentEventTurnStart(turn_number=state.current_turn)
 
     # Apply steering messages if any
     if state.steering_messages:
@@ -107,6 +208,21 @@ async def run_agent_turn(
         # Clear steering messages
         state.clear_steering()
 
+    # Compact context if approaching the model's context window limit
+    context_window = state.model.context_window
+    original_tokens = estimate_context_tokens(state.context)
+    compacted_context, was_compacted = compact_context(state.context, context_window)
+    if was_compacted:
+        compacted_tokens = estimate_context_tokens(compacted_context)
+        messages_removed = len(state.context.messages) - len(compacted_context.messages)
+        state.context = compacted_context
+        yield AgentEventContextCompacted(
+            original_tokens=original_tokens,
+            compacted_tokens=compacted_tokens,
+            messages_removed=messages_removed,
+            context_window=context_window,
+        )
+
     # Stream LLM response
     try:
         logger.debug(
@@ -114,7 +230,10 @@ async def run_agent_turn(
             state.model.provider,
             state.model.id,
         )
-        event_stream = await stream(state.model, state.context)
+        # Filter tools based on conversation context to reduce token overhead.
+        # state.context retains all tools (for execution); only the LLM sees fewer.
+        filtered_context = create_filtered_context(state.context)
+        event_stream = await stream(state.model, filtered_context)
 
         # Forward LLM events if requested
         if stream_llm_events:
@@ -130,7 +249,7 @@ async def run_agent_turn(
 
     except Exception as e:
         logger.exception("LLM streaming error")
-        yield AgentEventError(error=str(e)).model_dump()
+        yield AgentEventError(error=str(e))
         raise AgentLoopError(f"LLM streaming error: {e}")
 
     # Add assistant message to context
@@ -143,79 +262,58 @@ async def run_agent_turn(
         # No tool calls, turn complete
         yield AgentEventTurnEnd(
             turn_number=state.current_turn, has_tool_calls=False
-        ).model_dump()
+        )
         return
 
-    # Execute tool calls
+    # Execute tool calls in parallel via asyncio.gather
+    gather_tasks = [
+        _execute_single_tool_call(tc, state) for tc in tool_calls
+    ]
+    completed = await asyncio.gather(*gather_tasks, return_exceptions=True)
+
     tool_results = []
-
-    for tool_call in tool_calls:
-        # Find the tool
-        agent_tool = state.get_tool(tool_call.name)
-
-        if not agent_tool:
-            # Tool not found
+    for i, result_or_exc in enumerate(completed):
+        if isinstance(result_or_exc, Exception):
+            # Handle unexpected exception from gather
+            tc = tool_calls[i]
             yield AgentEventToolCallStart(
-                tool_name=tool_call.name,
-                tool_call_id=tool_call.id,
-                arguments=tool_call.arguments,
-            ).model_dump()
-
+                tool_name=tc.name,
+                tool_call_id=tc.id,
+                arguments=tc.arguments,
+            )
             yield AgentEventToolCallEnd(
-                tool_name=tool_call.name,
-                tool_call_id=tool_call.id,
+                tool_name=tc.name,
+                tool_call_id=tc.id,
                 result=None,
-                error=f"Tool not found: {tool_call.name}",
-            ).model_dump()
-
+                error=str(result_or_exc),
+            )
             tool_results.append(
                 {
-                    "tool_call_id": tool_call.id,
-                    "tool_name": tool_call.name,
+                    "tool_call_id": tc.id,
+                    "tool_name": tc.name,
                     "result": None,
-                    "error": f"Tool not found: {tool_call.name}",
+                    "error": str(result_or_exc),
                 }
             )
-            continue
-
-        # Emit tool call start
-        yield AgentEventToolCallStart(
-            tool_name=tool_call.name,
-            tool_call_id=tool_call.id,
-            arguments=tool_call.arguments,
-        ).model_dump()
-
-        # Execute tool
-        result, error = await execute_tool_call(tool_call, agent_tool)
-
-        # Emit tool call end
-        yield AgentEventToolCallEnd(
-            tool_name=tool_call.name,
-            tool_call_id=tool_call.id,
-            result=result,
-            error=error,
-        ).model_dump()
-
-        tool_results.append(
-            {
-                "tool_call_id": tool_call.id,
-                "tool_name": tool_call.name,
-                "result": result,
-                "error": error,
-            }
-        )
+        else:
+            # Yield collected events in order (start, retries, then end)
+            for event in result_or_exc["events"]:
+                yield event
+            tool_results.append(
+                {
+                    "tool_call_id": result_or_exc["tool_call_id"],
+                    "tool_name": result_or_exc["tool_name"],
+                    "result": result_or_exc["result"],
+                    "error": result_or_exc["error"],
+                }
+            )
 
     # One ToolResultMessage per tool call (Anthropic requires each tool_use to have a matching tool_result)
     for tr in tool_results:
         if tr["error"]:
             result_content = [TextContent(type="text", text=f"Error: {tr['error']}")]
         else:
-            if hasattr(tr["result"], "model_dump"):
-                result_str = json.dumps(tr["result"].model_dump())
-            elif not isinstance(tr["result"], str):
-                result_str = json.dumps(tr["result"])
-            else:
-                result_str = tr["result"]
+            result_str = format_observation(tr["tool_name"], tr["result"])
             result_content = [TextContent(type="text", text=result_str)]
 
         tool_result_msg = ToolResultMessage(
@@ -230,12 +328,12 @@ async def run_agent_turn(
     # Emit turn end
     yield AgentEventTurnEnd(
         turn_number=state.current_turn, has_tool_calls=True
-    ).model_dump()
+    )
 
 
 async def run_agent_loop(
     state: AgentState, stream_llm_events: bool = True
-) -> AsyncIterator[AgentEvent | Dict[str, Any]]:
+) -> AsyncIterator[Any]:
     """
     Run the complete agent loop.
 
@@ -270,7 +368,7 @@ async def run_agent_loop(
                     # No more tool calls, agent complete
                     yield AgentEventComplete(
                         final_message=last_message, total_turns=state.current_turn
-                    ).model_dump()
+                    )
                     return
 
             # Check for follow-up messages
@@ -285,12 +383,18 @@ async def run_agent_loop(
         if isinstance(last_message, AssistantMessage):
             yield AgentEventComplete(
                 final_message=last_message, total_turns=state.current_turn
-            ).model_dump()
+            )
         else:
-            yield AgentEventError(error="Max turns reached without completion").model_dump()
+            yield AgentEventError(error="Max turns reached without completion")
 
     except Exception as e:
-        yield AgentEventError(error=str(e)).model_dump()
+        yield AgentEventError(error=str(e))
 
 
-__all__ = ["AgentLoopError", "execute_tool_call", "run_agent_turn", "run_agent_loop"]
+__all__ = [
+    "AgentLoopError",
+    "execute_tool_call",
+    "_execute_single_tool_call",
+    "run_agent_turn",
+    "run_agent_loop",
+]
