@@ -4,13 +4,11 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-from basket_assistant.core.events import (
-    AgentCompleteEvent,
-    AgentErrorEvent,
-    TextDeltaEvent,
-    ThinkingDeltaEvent,
-    ToolCallEndEvent,
-    ToolCallStartEvent,
+from basket_agent.types import (
+    AgentEventToolCallStart,
+    AgentEventToolCallEnd,
+    AgentEventComplete,
+    AgentEventError,
 )
 
 from .base import EventAdapter
@@ -44,8 +42,8 @@ class WebUIAdapter(EventAdapter):
         """Subscribe to all events."""
         self.publisher.subscribe("text_delta", self._on_text_delta)
         self.publisher.subscribe("thinking_delta", self._on_thinking_delta)
-        self.publisher.subscribe("tool_call_start", self._on_tool_call_start)
-        self.publisher.subscribe("tool_call_end", self._on_tool_call_end)
+        self.publisher.subscribe("agent_tool_call_start", self._on_tool_call_start)
+        self.publisher.subscribe("agent_tool_call_end", self._on_tool_call_end)
         self.publisher.subscribe("agent_complete", self._on_agent_complete)
         self.publisher.subscribe("agent_error", self._on_agent_error)
 
@@ -82,15 +80,15 @@ class WebUIAdapter(EventAdapter):
                 logger.error("Synchronous send failed: %s", e)
                 self._active = False
 
-    def _on_text_delta(self, event: TextDeltaEvent) -> None:
+    def _on_text_delta(self, event: Any) -> None:
         """Handle text_delta event."""
         self._send_async({"type": "text_delta", "delta": event.delta})
 
-    def _on_thinking_delta(self, event: ThinkingDeltaEvent) -> None:
+    def _on_thinking_delta(self, event: Any) -> None:
         """Handle thinking_delta event."""
         self._send_async({"type": "thinking_delta", "delta": event.delta})
 
-    def _on_tool_call_start(self, event: ToolCallStartEvent) -> None:
+    def _on_tool_call_start(self, event: AgentEventToolCallStart) -> None:
         """Handle tool_call_start event."""
         self._send_async(
             {
@@ -101,7 +99,7 @@ class WebUIAdapter(EventAdapter):
             }
         )
 
-    def _on_tool_call_end(self, event: ToolCallEndEvent) -> None:
+    def _on_tool_call_end(self, event: AgentEventToolCallEnd) -> None:
         """Handle tool_call_end event."""
         self._send_async(
             {
@@ -113,11 +111,11 @@ class WebUIAdapter(EventAdapter):
             }
         )
 
-    def _on_agent_complete(self, event: AgentCompleteEvent) -> None:
+    def _on_agent_complete(self, event: AgentEventComplete) -> None:
         """Handle agent_complete event."""
         self._send_async({"type": "agent_complete"})
 
-    def _on_agent_error(self, event: AgentErrorEvent) -> None:
+    def _on_agent_error(self, event: AgentEventError) -> None:
         """Handle agent_error event."""
         self._send_async({"type": "agent_error", "error": event.error})
 

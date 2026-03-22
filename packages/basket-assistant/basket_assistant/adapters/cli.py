@@ -3,11 +3,7 @@
 import logging
 from typing import Any, Dict, List
 
-from basket_assistant.core.events import (
-    TextDeltaEvent,
-    ToolCallEndEvent,
-    ToolCallStartEvent,
-)
+from basket_agent.types import AgentEventToolCallStart, AgentEventToolCallEnd
 
 from .base import EventAdapter
 
@@ -83,15 +79,15 @@ class CLIAdapter(EventAdapter):
     def _setup_subscriptions(self) -> None:
         """Subscribe to events we care about."""
         self.publisher.subscribe("text_delta", self._on_text_delta)
-        self.publisher.subscribe("tool_call_start", self._on_tool_call_start)
-        self.publisher.subscribe("tool_call_end", self._on_tool_call_end)
+        self.publisher.subscribe("agent_tool_call_start", self._on_tool_call_start)
+        self.publisher.subscribe("agent_tool_call_end", self._on_tool_call_end)
 
-    def _on_text_delta(self, event: TextDeltaEvent) -> None:
+    def _on_text_delta(self, event: Any) -> None:
         """Handle text_delta event."""
-        if event.delta:
+        if hasattr(event, "delta") and event.delta:
             print(event.delta, end="", flush=True)
 
-    def _on_tool_call_start(self, event: ToolCallStartEvent) -> None:
+    def _on_tool_call_start(self, event: AgentEventToolCallStart) -> None:
         """Handle tool_call_start event."""
         logger.info("Tool call: %s", event.tool_name)
 
@@ -102,7 +98,7 @@ class CLIAdapter(EventAdapter):
             else:
                 print(f"\n[Tool: {event.tool_name}]", flush=True)
 
-    def _on_tool_call_end(self, event: ToolCallEndEvent) -> None:
+    def _on_tool_call_end(self, event: AgentEventToolCallEnd) -> None:
         """Handle tool_call_end event."""
         if event.error:
             print(f"\n[Error: {event.error}]", flush=True)

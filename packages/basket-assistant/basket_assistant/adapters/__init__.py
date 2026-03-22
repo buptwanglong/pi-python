@@ -11,7 +11,7 @@ Available adapters:
 Usage:
     >>> from basket_assistant.adapters import CLIAdapter
     >>> from basket_assistant.core.events import EventPublisher
-    >>> publisher = EventPublisher(agent)
+    >>> publisher = EventPublisher(assistant)
     >>> adapter = CLIAdapter(publisher, verbose=True)
     >>> # Now events will be printed to stdout
 """
