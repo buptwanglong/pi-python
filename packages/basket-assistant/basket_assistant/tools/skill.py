@@ -86,4 +86,51 @@ def create_skill_tool(
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+
+def _skill_factory(ctx):
+    from ..agent import prompts
+
+    def _get_plugin_skill_dirs():
+        loader = getattr(ctx, '_plugin_loader', None)
+        return loader.get_all_skill_dirs() if loader else []
+
+    dirs_getter = lambda: prompts.get_skills_dirs(
+        ctx.settings, plugin_skill_dirs=_get_plugin_skill_dirs()
+    )
+    include = ctx.settings.skills_include or None
+    if include is not None and len(include) == 0:
+        include = None
+    tool = create_skill_tool(dirs_getter, include)
+    return tool["execute_fn"]
+
+
+def _skill_description(ctx):
+    from ..agent import prompts
+
+    def _get_plugin_skill_dirs():
+        loader = getattr(ctx, '_plugin_loader', None)
+        return loader.get_all_skill_dirs() if loader else []
+
+    dirs_getter = lambda: prompts.get_skills_dirs(
+        ctx.settings, plugin_skill_dirs=_get_plugin_skill_dirs()
+    )
+    include = ctx.settings.skills_include or None
+    if include is not None and len(include) == 0:
+        include = None
+    tool = create_skill_tool(dirs_getter, include)
+    return tool["description"]
+
+
+register(ToolDefinition(
+    name="skill",
+    description="Load a skill by name.",
+    parameters=SkillParams,
+    factory=_skill_factory,
+    description_factory=_skill_description,
+))
+
+
 __all__ = ["SkillParams", "create_skill_tool"]

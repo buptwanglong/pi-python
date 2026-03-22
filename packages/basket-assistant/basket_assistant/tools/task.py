@@ -205,6 +205,48 @@ def create_parallel_task_tool(ctx: AgentContext) -> dict:
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+
+def _task_factory(ctx):
+    tool = create_task_tool(ctx)
+    return tool["execute_fn"]
+
+
+def _task_description(ctx):
+    tool = create_task_tool(ctx)
+    return tool["description"]
+
+
+register(ToolDefinition(
+    name="task",
+    description="Delegate a task to a specialized subagent.",
+    parameters=TaskParams,
+    factory=_task_factory,
+    description_factory=_task_description,
+))
+
+
+def _parallel_task_factory(ctx):
+    tool = create_parallel_task_tool(ctx)
+    return tool["execute_fn"]
+
+
+def _parallel_task_description(ctx):
+    tool = create_parallel_task_tool(ctx)
+    return tool["description"]
+
+
+register(ToolDefinition(
+    name="parallel_task",
+    description="Run multiple subagent tasks in parallel.",
+    parameters=ParallelTaskParams,
+    factory=_parallel_task_factory,
+    description_factory=_parallel_task_description,
+))
+
+
 __all__ = [
     "TaskParams",
     "TaskSpec",

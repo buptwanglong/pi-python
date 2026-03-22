@@ -82,4 +82,16 @@ def create_todo_write_tool(ctx: AgentContext) -> dict:
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name="todo_write",
+    description="Create or update the structured task list for the current session.",
+    parameters=TodoWriteParams,
+    factory=lambda ctx: create_todo_write_tool(ctx)["execute_fn"],
+    plan_mode_blocked=True,
+))
+
+
 __all__ = ["TodoItem", "TodoStatus", "TodoWriteParams", "create_todo_write_tool"]

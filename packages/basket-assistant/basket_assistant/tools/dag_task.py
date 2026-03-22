@@ -147,6 +147,17 @@ def create_dag_task_tool(ctx: AgentContext) -> Dict[str, Any]:
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name="dag_task",
+    description="Execute a directed acyclic graph of subagent tasks.",
+    parameters=DAGTaskParams,
+    factory=lambda ctx: create_dag_task_tool(ctx)["execute_fn"],
+))
+
+
 __all__ = [
     "DAGNodeSpec",
     "DAGTaskParams",

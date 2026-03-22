@@ -126,4 +126,15 @@ def create_web_search_tool(settings: Settings) -> dict:
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name="web_search",
+    description="Search the web using DuckDuckGo or Serper.",
+    parameters=WebSearchParams,
+    factory=lambda ctx: create_web_search_tool(ctx.settings)["execute_fn"],
+))
+
+
 __all__ = ["WebSearchParams", "create_web_search_tool", "_format_results"]

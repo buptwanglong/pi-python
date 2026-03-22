@@ -57,6 +57,17 @@ def create_ask_user_question_tool(ctx=None) -> dict:
     }
 
 
+# ── Self-registration ──
+from ._registry import ToolDefinition, register
+
+register(ToolDefinition(
+    name="ask_user_question",
+    description="Ask the user a question with options.",
+    parameters=AskUserQuestionParams,
+    factory=lambda ctx: create_ask_user_question_tool(ctx)["execute_fn"],
+))
+
+
 __all__ = [
     "ASK_USER_QUESTION_PLACEHOLDER",
     "AskUserQuestionParams",
