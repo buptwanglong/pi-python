@@ -3,46 +3,81 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from basket_assistant.agent.context import AgentContext
 from basket_assistant.tools import create_task_tool, TaskParams
 
 
-@pytest.fixture
-def agent_ref_no_agents():
-    """Agent ref with no subagents configured."""
-    ref = MagicMock()
-    ref._get_subagent_configs.return_value = {}
-    return ref
+def _make_test_ctx(subagent_configs=None, session_id="test"):
+    """Build an AgentContext with mock callbacks for testing."""
+    configs = subagent_configs or {}
+    recent_tasks: list[dict] = []
+
+    ctx = AgentContext(
+        session_id=session_id,
+        plan_mode=False,
+        run_subagent=AsyncMock(return_value="Done"),
+        get_subagent_configs=MagicMock(return_value=configs),
+        get_subagent_display_description=MagicMock(return_value="A subagent"),
+        save_todos=AsyncMock(),
+        save_pending_asks=AsyncMock(),
+        append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
+        update_recent_task=MagicMock(),
+        settings=MagicMock(),
+    )
+    return ctx, recent_tasks
 
 
 @pytest.fixture
-def agent_ref_with_agents():
-    """Agent ref with two subagents (display label from get_subagent_display_description or name)."""
+def ctx_no_agents():
+    """AgentContext with no subagents configured."""
+    ctx, _ = _make_test_ctx()
+    return ctx
+
+
+@pytest.fixture
+def ctx_with_agents():
+    """AgentContext with two subagents."""
     from basket_assistant.core import SubAgentConfig
-    ref = MagicMock()
-    ref._get_subagent_configs.return_value = {
+
+    configs = {
         "general": SubAgentConfig(tools=None),
         "explore": SubAgentConfig(tools={"read": True, "grep": True}),
     }
-    # Optional: return a label when no workspace (mock has no get_subagent_display_description)
-    ref.get_subagent_display_description = lambda name, cfg: (
-        "General-purpose research" if name == "general" else "Fast codebase exploration"
+    ctx, recent_tasks = _make_test_ctx(subagent_configs=configs)
+    # Override display description to return meaningful labels
+    ctx = AgentContext(
+        session_id=ctx.session_id,
+        plan_mode=ctx.plan_mode,
+        run_subagent=ctx.run_subagent,
+        get_subagent_configs=ctx.get_subagent_configs,
+        get_subagent_display_description=MagicMock(
+            side_effect=lambda name, cfg: (
+                "General-purpose research" if name == "general" else "Fast codebase exploration"
+            )
+        ),
+        save_todos=ctx.save_todos,
+        save_pending_asks=ctx.save_pending_asks,
+        append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
+        update_recent_task=MagicMock(),
+        settings=ctx.settings,
     )
-    return ref
+    return ctx, recent_tasks
 
 
 @pytest.mark.asyncio
-async def test_task_tool_no_agents_description(agent_ref_no_agents):
+async def test_task_tool_no_agents_description(ctx_no_agents):
     """When no subagents, description says no subagents configured."""
-    tool = create_task_tool(agent_ref_no_agents)
+    tool = create_task_tool(ctx_no_agents)
     assert tool["name"] == "task"
     assert "No subagents configured" in tool["description"]
     assert tool["parameters"] is TaskParams
 
 
 @pytest.mark.asyncio
-async def test_task_tool_description_includes_subagent_list(agent_ref_with_agents):
+async def test_task_tool_description_includes_subagent_list(ctx_with_agents):
     """When subagents exist, description lists them with names and descriptions."""
-    tool = create_task_tool(agent_ref_with_agents)
+    ctx, _ = ctx_with_agents
+    tool = create_task_tool(ctx)
     desc = tool["description"]
     assert "general" in desc
     assert "General-purpose research" in desc
@@ -52,29 +87,54 @@ async def test_task_tool_description_includes_subagent_list(agent_ref_with_agent
 
 
 @pytest.mark.asyncio
-async def test_task_tool_execute_returns_task_result_wrapper(agent_ref_with_agents):
+async def test_task_tool_execute_returns_task_result_wrapper(ctx_with_agents):
     """execute_fn calls run_subagent and returns task_id + <task_result> wrapper."""
-    agent_ref_with_agents.run_subagent = AsyncMock(return_value="Done. Found 3 files.")
-    tool = create_task_tool(agent_ref_with_agents)
+    ctx, recent_tasks = ctx_with_agents
+    # Override run_subagent for this test
+    ctx = AgentContext(
+        session_id=ctx.session_id,
+        plan_mode=ctx.plan_mode,
+        run_subagent=AsyncMock(return_value="Done. Found 3 files."),
+        get_subagent_configs=ctx.get_subagent_configs,
+        get_subagent_display_description=ctx.get_subagent_display_description,
+        save_todos=ctx.save_todos,
+        save_pending_asks=ctx.save_pending_asks,
+        append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
+        update_recent_task=MagicMock(),
+        settings=ctx.settings,
+    )
+    tool = create_task_tool(ctx)
     result = await tool["execute_fn"](
         description="list files",
         prompt="List files in current directory",
         subagent_type="explore",
     )
-    assert "task_id: none" in result
+    assert "task_id:" in result
     assert "<task_result>" in result
     assert "</task_result>" in result
     assert "Done. Found 3 files." in result
-    agent_ref_with_agents.run_subagent.assert_called_once_with("explore", "List files in current directory")
+    ctx.run_subagent.assert_called_once_with("explore", "List files in current directory")
 
 
 @pytest.mark.asyncio
-async def test_task_tool_execute_unknown_subagent_returns_error_in_result(agent_ref_with_agents):
+async def test_task_tool_execute_unknown_subagent_returns_error_in_result(ctx_with_agents):
     """When run_subagent returns error (e.g. unknown name), result still wraps it in task_result."""
-    agent_ref_with_agents.run_subagent = AsyncMock(
-        return_value='SubAgent "unknown" not found. Available: general, explore'
+    ctx, recent_tasks = ctx_with_agents
+    ctx = AgentContext(
+        session_id=ctx.session_id,
+        plan_mode=ctx.plan_mode,
+        run_subagent=AsyncMock(
+            return_value='SubAgent "unknown" not found. Available: general, explore'
+        ),
+        get_subagent_configs=ctx.get_subagent_configs,
+        get_subagent_display_description=ctx.get_subagent_display_description,
+        save_todos=ctx.save_todos,
+        save_pending_asks=ctx.save_pending_asks,
+        append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
+        update_recent_task=MagicMock(),
+        settings=ctx.settings,
     )
-    tool = create_task_tool(agent_ref_with_agents)
+    tool = create_task_tool(ctx)
     result = await tool["execute_fn"](
         description="x",
         prompt="Do something",
@@ -83,3 +143,35 @@ async def test_task_tool_execute_unknown_subagent_returns_error_in_result(agent_
     assert "<task_result>" in result
     assert "not found" in result
     assert "general" in result or "explore" in result
+
+
+@pytest.mark.asyncio
+async def test_task_tool_execute_appends_recent_task(ctx_with_agents):
+    """execute_fn appends a task record via ctx.append_recent_task."""
+    ctx, recent_tasks = ctx_with_agents
+    ctx = AgentContext(
+        session_id=ctx.session_id,
+        plan_mode=ctx.plan_mode,
+        run_subagent=AsyncMock(return_value="Result"),
+        get_subagent_configs=ctx.get_subagent_configs,
+        get_subagent_display_description=ctx.get_subagent_display_description,
+        save_todos=ctx.save_todos,
+        save_pending_asks=ctx.save_pending_asks,
+        append_recent_task=MagicMock(side_effect=lambda r: recent_tasks.append(r)),
+        update_recent_task=MagicMock(),
+        settings=ctx.settings,
+    )
+    tool = create_task_tool(ctx)
+    await tool["execute_fn"](
+        description="test task",
+        prompt="Do something",
+        subagent_type="explore",
+    )
+    assert len(recent_tasks) == 1
+    assert recent_tasks[0]["description"] == "test task"
+    assert recent_tasks[0]["status"] == "running"
+    # update_recent_task should have been called with completed status
+    ctx.update_recent_task.assert_called_once()
+    call_args = ctx.update_recent_task.call_args
+    assert call_args[0][0] == -1
+    assert call_args[0][1]["status"] == "completed"

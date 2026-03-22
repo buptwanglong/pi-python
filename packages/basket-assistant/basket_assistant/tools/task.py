@@ -10,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, List
+from typing import Any, List
 
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from basket_assistant.agent._protocol import AssistantAgentProtocol
+from basket_assistant.agent.context import AgentContext
 
 
 class TaskParams(BaseModel):
@@ -42,15 +41,15 @@ class ParallelTaskParams(BaseModel):
     )
 
 
-def create_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
+def create_task_tool(ctx: AgentContext) -> dict:
     """
     Create the task tool with dynamic description. Call from main when registering tools.
 
-    agent_ref must have: run_subagent(name, prompt) -> str, _get_subagent_configs() -> Dict[str, SubAgentConfig].
+    ctx must provide: run_subagent, get_subagent_configs, get_subagent_display_description.
 
     Returns a dict with name, description, parameters, execute_fn for agent.register_tool().
     """
-    configs = agent_ref._get_subagent_configs()
+    configs = ctx.get_subagent_configs()
     if not configs:
         description = "Delegate a task to a specialized subagent. No subagents configured."
     else:
@@ -63,32 +62,32 @@ def create_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
             "Available subagents (pass subagent_type when calling this tool):",
         ]
         for name, cfg in sorted(configs.items()):
-            label = agent_ref.get_subagent_display_description(name, cfg)
+            label = ctx.get_subagent_display_description(name, cfg)
             lines.append(f"  - {name}: {label}")
         description = "\n".join(lines)
 
     async def execute_task(description: str, prompt: str, subagent_type: str) -> str:
         task_id = str(uuid.uuid4())
         created_at = int(time.time() * 1000)
-        parent_session_id = agent_ref._session_id
-        # Optional: append to in-memory list for traceability
-        recent = agent_ref._recent_tasks
-        if recent is not None:
-            recent.append({
-                "task_id": task_id,
-                "description": description,
-                "prompt": prompt,
-                "subagent_type": subagent_type,
-                "status": "running",
-                "created_at": created_at,
-                "parent_session_id": parent_session_id,
-                "result_summary": None,
-            })
+        parent_session_id = ctx.session_id
+        # Append to in-memory list for traceability
+        task_record = {
+            "task_id": task_id,
+            "description": description,
+            "prompt": prompt,
+            "subagent_type": subagent_type,
+            "status": "running",
+            "created_at": created_at,
+            "parent_session_id": parent_session_id,
+            "result_summary": None,
+        }
+        ctx.append_recent_task(task_record)
         try:
-            result = await agent_ref.run_subagent(subagent_type, prompt)
-            if recent and len(recent) > 0:
-                recent[-1]["status"] = "completed"
-                recent[-1]["result_summary"] = (result[:500] + "…") if len(result) > 500 else result
+            result = await ctx.run_subagent(subagent_type, prompt)
+            ctx.update_recent_task(-1, {
+                "status": "completed",
+                "result_summary": (result[:500] + "…") if len(result) > 500 else result,
+            })
             lines = [
                 f"task_id: {task_id}",
                 "",
@@ -98,9 +97,10 @@ def create_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
             ]
             return "\n".join(lines)
         except Exception as e:
-            if recent and len(recent) > 0:
-                recent[-1]["status"] = "failed"
-                recent[-1]["result_summary"] = str(e)[:500]
+            ctx.update_recent_task(-1, {
+                "status": "failed",
+                "result_summary": str(e)[:500],
+            })
             raise
 
     return {
@@ -111,15 +111,15 @@ def create_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
     }
 
 
-def create_parallel_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
+def create_parallel_task_tool(ctx: AgentContext) -> dict:
     """
     Create the parallel_task tool that runs multiple subagent tasks concurrently.
 
-    agent_ref must have: run_subagent(name, prompt) -> str, _get_subagent_configs() -> Dict[str, SubAgentConfig].
+    ctx must provide: run_subagent, get_subagent_configs.
 
     Returns a dict with name, description, parameters, execute_fn for agent.register_tool().
     """
-    configs = agent_ref._get_subagent_configs()
+    configs = ctx.get_subagent_configs()
     if not configs:
         agent_list = "No subagents configured."
     else:
@@ -148,7 +148,7 @@ def create_parallel_task_tool(agent_ref: AssistantAgentProtocol) -> dict:
             """Run one subagent task, capturing result or error."""
             task_id = str(uuid.uuid4())
             try:
-                result = await agent_ref.run_subagent(
+                result = await ctx.run_subagent(
                     spec.subagent_type, spec.prompt
                 )
                 return {
