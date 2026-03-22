@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from basket_assistant.agent import AssistantAgent
 from basket_assistant.agent.context import AgentContext
 
 
@@ -60,3 +61,19 @@ def test_agent_context_none_session_id():
         settings=MagicMock(),
     )
     assert ctx.session_id is None
+
+
+@pytest.mark.asyncio
+async def test_assistant_agent_build_tool_context(mock_coding_agent):
+    """AssistantAgent.build_tool_context() returns a valid AgentContext."""
+    agent = mock_coding_agent
+    ctx = agent.build_tool_context()
+
+    assert isinstance(ctx, AgentContext)
+    assert ctx.session_id == agent._session_id
+    assert ctx.plan_mode == agent._plan_mode
+    assert ctx.settings is agent.settings
+    assert callable(ctx.run_subagent)
+    assert callable(ctx.get_subagent_configs)
+    assert callable(ctx.save_todos)
+    assert callable(ctx.append_recent_task)

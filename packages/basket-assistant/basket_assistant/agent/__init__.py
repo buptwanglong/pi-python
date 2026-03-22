@@ -15,11 +15,13 @@ from basket_ai.types import Context
 from ..core import SettingsManager, SessionManager, AgentConfigResolver
 from ..guardrails.defaults import create_default_engine
 from ..hooks import HookRunner
+from ..plugins.loader import PluginLoader
 
 from . import events
 from . import prompts
 from . import session
 from . import tools
+from .context import AgentContext
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,6 @@ class AssistantAgent:
         )
 
         # Load plugins and merge into search paths
-        from ..plugins.loader import PluginLoader
 
         self._plugin_loader = PluginLoader()
         self._plugin_loader.discover()
@@ -220,6 +221,42 @@ class AssistantAgent:
         self._guardrail_engine = create_default_engine(
             workspace_dir=str(workspace_dir) if workspace_dir else None,
             enabled=guardrails_enabled,
+        )
+
+    def build_tool_context(self) -> AgentContext:
+        """Build an AgentContext snapshot for tool factory functions.
+
+        Returns a frozen dataclass exposing only what tools need.
+        Called during register_tools(); tools keep the reference.
+        """
+        async def _save_todos(todos: list) -> None:
+            self._current_todos = todos
+            if self._session_id and self.session_manager:
+                await self.session_manager.save_todos(self._session_id, todos)
+
+        async def _save_pending_asks(asks: list) -> None:
+            self._pending_asks = asks
+            if self._session_id and self.session_manager:
+                await self.session_manager.save_pending_asks(self._session_id, asks)
+
+        def _append_recent_task(record: dict) -> None:
+            self._recent_tasks.append(record)
+
+        def _update_recent_task(index: int, updates: dict) -> None:
+            if 0 <= index < len(self._recent_tasks):
+                self._recent_tasks[index].update(updates)
+
+        return AgentContext(
+            session_id=self._session_id,
+            plan_mode=self._plan_mode,
+            settings=self.settings,
+            run_subagent=self.run_subagent,
+            get_subagent_configs=self._get_subagent_configs,
+            get_subagent_display_description=self.get_subagent_display_description,
+            save_todos=_save_todos,
+            save_pending_asks=_save_pending_asks,
+            append_recent_task=_append_recent_task,
+            update_recent_task=_update_recent_task,
         )
 
     def _get_system_prompt(self) -> str:
