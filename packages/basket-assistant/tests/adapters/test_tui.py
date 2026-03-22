@@ -5,16 +5,14 @@ Tests forwarding events to TUI event bus.
 
 import pytest
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 from basket_assistant.adapters import TUIAdapter
-from basket_assistant.core.events import (
-    EventPublisher,
-    TextDeltaEvent,
-    ThinkingDeltaEvent,
-    ToolCallStartEvent,
-    ToolCallEndEvent,
-    AgentCompleteEvent,
-    AgentErrorEvent,
+from basket_assistant.core.events import EventPublisher
+from basket_agent.types import (
+    AgentEventToolCallStart,
+    AgentEventToolCallEnd,
+    AgentEventError,
 )
 
 
@@ -23,10 +21,11 @@ class TestTUIAdapter:
 
     @pytest.fixture
     def mock_agent(self):
-        """Create a mock basket-agent."""
-        agent = Mock()
-        agent.on = Mock()
-        return agent
+        """Create a mock AssistantAgent (inner ``agent`` has ``.on``)."""
+        assistant = Mock()
+        assistant.agent = Mock()
+        assistant.agent.on = Mock()
+        return assistant
 
     @pytest.fixture
     def publisher(self, mock_agent):
@@ -47,8 +46,8 @@ class TestTUIAdapter:
         # Check subscriptions
         assert "text_delta" in publisher._subscribers
         assert "thinking_delta" in publisher._subscribers
-        assert "tool_call_start" in publisher._subscribers
-        assert "tool_call_end" in publisher._subscribers
+        assert "agent_tool_call_start" in publisher._subscribers
+        assert "agent_tool_call_end" in publisher._subscribers
         assert "agent_complete" in publisher._subscribers
         assert "agent_error" in publisher._subscribers
 
@@ -56,7 +55,7 @@ class TestTUIAdapter:
         """Test forwarding text_delta to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = TextDeltaEvent(delta="Hello")
+        event = SimpleNamespace(type="text_delta", delta="Hello")
         adapter._on_text_delta(event)
 
         mock_event_bus.publish.assert_called_once_with(
@@ -67,7 +66,7 @@ class TestTUIAdapter:
         """Test forwarding thinking_delta to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = ThinkingDeltaEvent(delta="Thinking...")
+        event = SimpleNamespace(type="thinking_delta", delta="Thinking...")
         adapter._on_thinking_delta(event)
 
         mock_event_bus.publish.assert_called_once_with(
@@ -78,7 +77,7 @@ class TestTUIAdapter:
         """Test forwarding tool_call_start to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = ToolCallStartEvent(
+        event = AgentEventToolCallStart(
             tool_name="bash",
             arguments={"command": "ls"},
             tool_call_id="call_123",
@@ -98,7 +97,7 @@ class TestTUIAdapter:
         """Test forwarding tool_call_end to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = ToolCallEndEvent(
+        event = AgentEventToolCallEnd(
             tool_name="bash",
             result="output",
             error=None,
@@ -120,7 +119,7 @@ class TestTUIAdapter:
         """Test forwarding tool_call_end with error to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = ToolCallEndEvent(
+        event = AgentEventToolCallEnd(
             tool_name="bash",
             result=None,
             error="Command failed",
@@ -142,7 +141,7 @@ class TestTUIAdapter:
         """Test forwarding agent_complete to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = AgentCompleteEvent()
+        event = SimpleNamespace(type="agent_complete")
         adapter._on_agent_complete(event)
 
         mock_event_bus.publish.assert_called_once_with("assistant.agent_complete", {})
@@ -151,7 +150,7 @@ class TestTUIAdapter:
         """Test forwarding agent_error to TUI event bus."""
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = AgentErrorEvent(error="Something went wrong")
+        event = AgentEventError(error="Something went wrong")
         adapter._on_agent_error(event)
 
         mock_event_bus.publish.assert_called_once_with(
@@ -164,7 +163,7 @@ class TestTUIAdapter:
 
         adapter = TUIAdapter(publisher, mock_event_bus)
 
-        event = TextDeltaEvent(delta="test")
+        event = SimpleNamespace(type="text_delta", delta="test")
 
         # Should not raise
         adapter._on_text_delta(event)

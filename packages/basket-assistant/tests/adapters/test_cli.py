@@ -6,14 +6,11 @@ Tests CLI output for different event types.
 import pytest
 from unittest.mock import Mock, patch
 from io import StringIO
+from types import SimpleNamespace
 
 from basket_assistant.adapters import CLIAdapter
-from basket_assistant.core.events import (
-    EventPublisher,
-    TextDeltaEvent,
-    ToolCallStartEvent,
-    ToolCallEndEvent,
-)
+from basket_assistant.core.events import EventPublisher
+from basket_agent.types import AgentEventToolCallStart, AgentEventToolCallEnd
 
 
 class TestCLIAdapter:
@@ -21,10 +18,11 @@ class TestCLIAdapter:
 
     @pytest.fixture
     def mock_agent(self):
-        """Create a mock basket-agent."""
-        agent = Mock()
-        agent.on = Mock()
-        return agent
+        """Create a mock AssistantAgent (inner ``agent`` has ``.on``)."""
+        assistant = Mock()
+        assistant.agent = Mock()
+        assistant.agent.on = Mock()
+        return assistant
 
     @pytest.fixture
     def publisher(self, mock_agent):
@@ -37,11 +35,11 @@ class TestCLIAdapter:
 
         # Check subscriptions
         assert "text_delta" in publisher._subscribers
-        assert "tool_call_start" in publisher._subscribers
-        assert "tool_call_end" in publisher._subscribers
+        assert "agent_tool_call_start" in publisher._subscribers
+        assert "agent_tool_call_end" in publisher._subscribers
         assert len(publisher._subscribers["text_delta"]) == 1
-        assert len(publisher._subscribers["tool_call_start"]) == 1
-        assert len(publisher._subscribers["tool_call_end"]) == 1
+        assert len(publisher._subscribers["agent_tool_call_start"]) == 1
+        assert len(publisher._subscribers["agent_tool_call_end"]) == 1
 
     @patch("sys.stdout", new_callable=StringIO)
     def test_text_delta_output(self, mock_stdout, publisher):
@@ -49,10 +47,10 @@ class TestCLIAdapter:
         adapter = CLIAdapter(publisher, verbose=False)
 
         # Emit text_delta event
-        event = TextDeltaEvent(delta="Hello, ")
+        event = SimpleNamespace(type="text_delta", delta="Hello, ")
         adapter._on_text_delta(event)
 
-        event = TextDeltaEvent(delta="world!")
+        event = SimpleNamespace(type="text_delta", delta="world!")
         adapter._on_text_delta(event)
 
         output = mock_stdout.getvalue()
@@ -64,7 +62,7 @@ class TestCLIAdapter:
         """Test tool_call_start with verbose=True."""
         adapter = CLIAdapter(publisher, verbose=True)
 
-        event = ToolCallStartEvent(
+        event = AgentEventToolCallStart(
             tool_name="bash",
             arguments={"command": "ls -la"},
             tool_call_id="call_123",
@@ -80,7 +78,7 @@ class TestCLIAdapter:
         """Test tool_call_start with verbose=False."""
         adapter = CLIAdapter(publisher, verbose=False)
 
-        event = ToolCallStartEvent(
+        event = AgentEventToolCallStart(
             tool_name="bash",
             arguments={"command": "ls -la"},
             tool_call_id="call_123",
@@ -96,7 +94,7 @@ class TestCLIAdapter:
         """Test tool_call_end event with error."""
         adapter = CLIAdapter(publisher, verbose=False)
 
-        event = ToolCallEndEvent(
+        event = AgentEventToolCallEnd(
             tool_name="bash",
             result=None,
             error="Command failed: exit code 1",
@@ -113,7 +111,7 @@ class TestCLIAdapter:
         """Test tool_call_end event without error."""
         adapter = CLIAdapter(publisher, verbose=False)
 
-        event = ToolCallEndEvent(
+        event = AgentEventToolCallEnd(
             tool_name="bash",
             result="success",
             error=None,
@@ -129,7 +127,7 @@ class TestCLIAdapter:
         """Test formatting of tool arguments with long values."""
         adapter = CLIAdapter(publisher, verbose=True)
 
-        event = ToolCallStartEvent(
+        event = AgentEventToolCallStart(
             tool_name="bash",
             arguments={"command": "x" * 100},  # Very long command
             tool_call_id="call_123",
@@ -147,7 +145,7 @@ class TestCLIAdapter:
         """Test formatting of tool arguments with multiple keys."""
         adapter = CLIAdapter(publisher, verbose=True)
 
-        event = ToolCallStartEvent(
+        event = AgentEventToolCallStart(
             tool_name="edit",
             arguments={
                 "file_path": "/path/to/file.py",
@@ -168,7 +166,7 @@ class TestCLIAdapter:
         """Test handling of empty delta."""
         adapter = CLIAdapter(publisher, verbose=False)
 
-        event = TextDeltaEvent(delta="")
+        event = SimpleNamespace(type="text_delta", delta="")
 
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             adapter._on_text_delta(event)

@@ -7,9 +7,11 @@ import asyncio
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from io import StringIO
+from types import SimpleNamespace
 
 from basket_assistant.core.events import EventPublisher
 from basket_assistant.adapters import CLIAdapter, TUIAdapter, WebUIAdapter
+from basket_agent.types import AgentEventToolCallStart, AgentEventToolCallEnd
 
 
 class TestEventFlow:
@@ -17,10 +19,11 @@ class TestEventFlow:
 
     @pytest.fixture
     def mock_agent(self):
-        """Create a mock basket-agent."""
-        agent = Mock()
-        agent.on = Mock()
-        return agent
+        """Create a mock AssistantAgent (inner ``agent`` has ``.on``)."""
+        assistant = Mock()
+        assistant.agent = Mock()
+        assistant.agent.on = Mock()
+        return assistant
 
     @pytest.fixture
     def publisher(self, mock_agent):
@@ -40,7 +43,7 @@ class TestEventFlow:
         tool_start_handler = None
         tool_end_handler = None
 
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             event_type = call[0][0]
             handler = call[0][1]
             if event_type == "text_delta":
@@ -50,28 +53,28 @@ class TestEventFlow:
             elif event_type == "agent_tool_call_end":
                 tool_end_handler = handler
 
-        # Simulate agent events
+        # Simulate agent events with typed objects
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             # Text streaming
-            text_delta_handler({"delta": "Hello "})
-            text_delta_handler({"delta": "world!"})
+            text_delta_handler(SimpleNamespace(type="text_delta", delta="Hello "))
+            text_delta_handler(SimpleNamespace(type="text_delta", delta="world!"))
 
             # Tool call
             tool_start_handler(
-                {
-                    "tool_name": "bash",
-                    "arguments": {"command": "ls"},
-                    "tool_call_id": "call_1",
-                }
+                AgentEventToolCallStart(
+                    tool_name="bash",
+                    arguments={"command": "ls"},
+                    tool_call_id="call_1",
+                )
             )
 
             tool_end_handler(
-                {
-                    "tool_name": "bash",
-                    "result": "file1.txt\nfile2.txt",
-                    "error": None,
-                    "tool_call_id": "call_1",
-                }
+                AgentEventToolCallEnd(
+                    tool_name="bash",
+                    result="file1.txt\nfile2.txt",
+                    error=None,
+                    tool_call_id="call_1",
+                )
             )
 
             output = mock_stdout.getvalue()
@@ -95,7 +98,7 @@ class TestEventFlow:
         tool_start_handler = None
         tool_end_handler = None
 
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             event_type = call[0][0]
             handler = call[0][1]
             if event_type == "text_delta":
@@ -105,22 +108,22 @@ class TestEventFlow:
             elif event_type == "agent_tool_call_end":
                 tool_end_handler = handler
 
-        # Simulate agent events
-        text_delta_handler({"delta": "Hello"})
+        # Simulate agent events with typed objects
+        text_delta_handler(SimpleNamespace(type="text_delta", delta="Hello"))
         tool_start_handler(
-            {
-                "tool_name": "bash",
-                "arguments": {"command": "ls"},
-                "tool_call_id": "call_1",
-            }
+            AgentEventToolCallStart(
+                tool_name="bash",
+                arguments={"command": "ls"},
+                tool_call_id="call_1",
+            )
         )
         tool_end_handler(
-            {
-                "tool_name": "bash",
-                "result": "output",
-                "error": None,
-                "tool_call_id": "call_1",
-            }
+            AgentEventToolCallEnd(
+                tool_name="bash",
+                result="output",
+                error=None,
+                tool_call_id="call_1",
+            )
         )
 
         # Verify event bus was called
@@ -146,7 +149,7 @@ class TestEventFlow:
         tool_start_handler = None
         tool_end_handler = None
 
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             event_type = call[0][0]
             handler = call[0][1]
             if event_type == "text_delta":
@@ -156,22 +159,22 @@ class TestEventFlow:
             elif event_type == "agent_tool_call_end":
                 tool_end_handler = handler
 
-        # Simulate agent events
-        text_delta_handler({"delta": "Hello"})
+        # Simulate agent events with typed objects
+        text_delta_handler(SimpleNamespace(type="text_delta", delta="Hello"))
         tool_start_handler(
-            {
-                "tool_name": "bash",
-                "arguments": {"command": "ls"},
-                "tool_call_id": "call_1",
-            }
+            AgentEventToolCallStart(
+                tool_name="bash",
+                arguments={"command": "ls"},
+                tool_call_id="call_1",
+            )
         )
         tool_end_handler(
-            {
-                "tool_name": "bash",
-                "result": "output",
-                "error": None,
-                "tool_call_id": "call_1",
-            }
+            AgentEventToolCallEnd(
+                tool_name="bash",
+                result="output",
+                error=None,
+                tool_call_id="call_1",
+            )
         )
 
         # Wait for async sends to complete
@@ -197,15 +200,15 @@ class TestEventFlow:
 
         # Get text_delta handler
         text_delta_handler = None
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             if call[0][0] == "text_delta":
                 text_delta_handler = call[0][1]
                 break
 
-        # Emit event
+        # Emit typed event
         import sys
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
-            text_delta_handler({"delta": "test"})
+            text_delta_handler(SimpleNamespace(type="text_delta", delta="test"))
 
             # CLI should print
             assert "test" in mock_stdout.getvalue()
@@ -226,7 +229,7 @@ class TestEventFlow:
         tool_end_handler = None
         turn_start_handler = None
 
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             event_type = call[0][0]
             handler = call[0][1]
             if event_type == "text_delta":
@@ -238,16 +241,20 @@ class TestEventFlow:
             elif event_type == "agent_turn_start":
                 turn_start_handler = handler
 
-        # Emit events in specific order
-        turn_start_handler({"turn_number": 1})
-        text_handler({"delta": "text1"})
+        # Emit typed events in specific order
+        turn_start_handler(SimpleNamespace(type="agent_turn_start", turn_number=1))
+        text_handler(SimpleNamespace(type="text_delta", delta="text1"))
         tool_start_handler(
-            {"tool_name": "bash", "arguments": {}, "tool_call_id": "call_1"}
+            AgentEventToolCallStart(
+                tool_name="bash", arguments={}, tool_call_id="call_1"
+            )
         )
         tool_end_handler(
-            {"tool_name": "bash", "result": "ok", "error": None, "tool_call_id": "call_1"}
+            AgentEventToolCallEnd(
+                tool_name="bash", result="ok", error=None, tool_call_id="call_1"
+            )
         )
-        text_handler({"delta": "text2"})
+        text_handler(SimpleNamespace(type="text_delta", delta="text2"))
 
         # Verify order
         published_events = [call[0][0] for call in mock_event_bus.publish.call_args_list]
@@ -276,17 +283,16 @@ class TestEventFlow:
 
         # Get text_delta handler
         text_handler = None
-        for call in mock_agent.on.call_args_list:
+        for call in mock_agent.agent.on.call_args_list:
             if call[0][0] == "text_delta":
                 text_handler = call[0][1]
                 break
 
-        # Emit event
-        text_handler({"delta": "test"})
+        # Emit typed event
+        text_handler(SimpleNamespace(type="text_delta", delta="test"))
 
         # Failing adapter should have tried
         mock_event_bus_fail.publish.assert_called_once()
 
         # Working adapter should still work
         mock_event_bus_ok.publish.assert_called_once()
-
