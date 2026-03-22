@@ -55,6 +55,9 @@ dmypy.json
 *~
 .DS_Store
 
+# tmux verbose logs (-v/-vv); can exceed GitHub's 100MB limit
+tmux-*.log
+
 # Project specific
 .pi/
 sessions/
