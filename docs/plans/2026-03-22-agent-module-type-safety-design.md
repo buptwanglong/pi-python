@@ -1,7 +1,7 @@
 # Agent Module Type Safety Refactoring Design
 
 **Date:** 2026-03-22
-**Status:** Approved
+**Status:** Implemented
 **Scope:** `basket-assistant/basket_assistant/agent/` + callers (~15 files, ~90 sites)
 
 ## Problem
