@@ -8,6 +8,14 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from basket_ai.types import EventTextDelta
+from basket_agent.types import (
+    AgentEventToolCallStart,
+    AgentEventToolCallEnd,
+    AgentEventTurnStart,
+    AgentEventTurnEnd,
+)
+
 if TYPE_CHECKING:
     from ._protocol import AssistantAgentProtocol
 
@@ -54,14 +62,14 @@ def _tool_call_args_summary(tool_name: str, args: Dict[str, Any], max_len: int =
 def setup_event_handlers(agent: AssistantAgentProtocol) -> None:
     """Setup event handlers for agent events."""
 
-    def on_text_delta(event):
-        delta = event.get("delta", "")
+    def on_text_delta(event: EventTextDelta):
+        delta = event.delta
         if delta:
             print(delta, end="", flush=True)
 
-    async def on_tool_call_start(event):
-        tool_name = event.get("tool_name", "unknown")
-        args = event.get("arguments", {}) or {}
+    async def on_tool_call_start(event: AgentEventToolCallStart):
+        tool_name = event.tool_name
+        args = event.arguments or {}
         summary = _tool_call_args_summary(tool_name, args)
         if summary:
             logger.info("Tool call start: %s %s", tool_name, summary)
@@ -74,10 +82,10 @@ def setup_event_handlers(agent: AssistantAgentProtocol) -> None:
                 args_str[:500] + "..." if len(args_str) > 500 else args_str,
             )
         if agent.settings.agent.verbose:
-            print(f"\n[Tool: {event['tool_name']}]", flush=True)
+            print(f"\n[Tool: {event.tool_name}]", flush=True)
             logger.info("[Tool: %s]", tool_name)
         if tool_name == "ask_user_question":
-            tool_call_id = event.get("tool_call_id") or ""
+            tool_call_id = event.tool_call_id
             if tool_call_id:
                 question = (args or {}).get("question", "")
                 options = (
@@ -106,21 +114,21 @@ def setup_event_handlers(agent: AssistantAgentProtocol) -> None:
                 print(msg, flush=True)
                 logger.info("[Ask: %s] Reply in your next message%s", q, f" ({n} pending)" if n > 1 else "")
 
-    async def on_tool_call_end(event):
-        tool_name = event.get("tool_name", "unknown")
-        err = event.get("error")
+    async def on_tool_call_end(event: AgentEventToolCallEnd):
+        tool_name = event.tool_name
+        err = event.error
         logger.info("Tool call end: %s error=%s", tool_name, bool(err))
-        if not err and event.get("result") is not None:
-            result_str = str(event.get("result", ""))
+        if not err and event.result is not None:
+            result_str = str(event.result)
             logger.debug(
                 "Tool call result: %s",
                 result_str[:500] + "..." if len(result_str) > 500 else result_str,
             )
         if err:
-            print(f"[Error: {event['error']}]", flush=True)
-            logger.warning("[Error: %s]", event.get("error", ""))
+            print(f"[Error: {event.error}]", flush=True)
+            logger.warning("[Error: %s]", event.error)
             if tool_name == "ask_user_question":
-                tid = event.get("tool_call_id")
+                tid = event.tool_call_id
                 if tid:
                     agent._pending_asks = [
                         p for p in agent._pending_asks if p.get("tool_call_id") != tid
@@ -159,31 +167,31 @@ def setup_logging_handlers(agent: AssistantAgentProtocol) -> None:
     """
     basket_agent = agent.agent if hasattr(agent, "agent") else agent
 
-    def on_turn_start(event: dict) -> None:
+    def on_turn_start(event: AgentEventTurnStart) -> None:
         logger.info(
             "LLM turn started, turn_number=%s",
-            event.get("turn_number"),
+            event.turn_number,
         )
 
-    def on_turn_end(event: dict) -> None:
+    def on_turn_end(event: AgentEventTurnEnd) -> None:
         logger.info(
             "LLM turn ended, turn_number=%s, has_tool_calls=%s",
-            event.get("turn_number"),
-            event.get("has_tool_calls", False),
+            event.turn_number,
+            event.has_tool_calls,
         )
 
-    def on_tool_call_start_log(event: dict) -> None:
-        tool_name = event.get("tool_name", "unknown")
-        args = event.get("arguments", {}) or {}
+    def on_tool_call_start_log(event: AgentEventToolCallStart) -> None:
+        tool_name = event.tool_name
+        args = event.arguments or {}
         summary = _tool_call_args_summary(tool_name, args)
         if summary:
             logger.info("Tool call start: %s %s", tool_name, summary)
         else:
             logger.info("Tool call start: %s", tool_name)
 
-    def on_tool_call_end_log(event: dict) -> None:
-        tool_name = event.get("tool_name", "unknown")
-        err = event.get("error")
+    def on_tool_call_end_log(event: AgentEventToolCallEnd) -> None:
+        tool_name = event.tool_name
+        err = event.error
         logger.info("Tool call end: %s error=%s", tool_name, bool(err))
 
     basket_agent.on("agent_turn_start", on_turn_start)
@@ -258,11 +266,13 @@ def get_trajectory_dir(agent: AssistantAgentProtocol) -> Optional[str]:
     return out or None
 
 
-def on_trajectory_event(agent: AssistantAgentProtocol, event: dict) -> None:
+def on_trajectory_event(agent: AssistantAgentProtocol, event: Any) -> None:
     """Forward agent event to current trajectory recorder (if any)."""
     recorder = agent._trajectory_recorder
     if recorder is not None:
-        recorder.on_event(event)
+        # Trajectory recorder expects dict format
+        data = event.model_dump() if hasattr(event, "model_dump") else event
+        recorder.on_event(data)
 
 
 def ensure_trajectory_handlers(agent: AssistantAgentProtocol) -> None:
