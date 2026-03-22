@@ -87,7 +87,6 @@ poetry run pytest -v
 
 # Run specific test file or category
 poetry run pytest tests/test_tools/ -v
-poetry run pytest tests/test_extensions.py -v
 
 # Run with coverage
 poetry run pytest --cov=basket_ai --cov-report=html tests/
@@ -99,7 +98,7 @@ poetry run pytest -v
 **Test organization:**
 - `packages/basket-ai/tests/` - Provider tests, streaming, types
 - `packages/basket-agent/tests/` - Agent loop, tools, events
-- `packages/basket-assistant/tests/` - CLI, tools, extensions, sessions
+- `packages/basket-assistant/tests/` - CLI, tools, sessions
 - `conftest.py` in each test directory provides fixtures
 
 ### Code Quality
@@ -162,7 +161,7 @@ poetry run basket init --force  # Overwrite existing
 - Default: `~/.basket/workspace` (auto-created with templates)
 
 **Skills:**
-- `skills_dirs`: Search paths for skills (SKILL.md format)
+- `skills_include`: Filter which skills appear in the skill tool index (empty = all). Skills are loaded only from `~/.basket/skills`, `./.basket/skills`, and plugin `skills/` dirs (`skills_dirs` in settings is ignored).
 - Default paths: `~/.basket/skills`, `~/.claude/skills`, `~/.config/opencode/skills`
 
 **SubAgents:**
@@ -203,10 +202,6 @@ async def on_tool_call(event: dict):
 
 Sessions stored as JSONL in `~/.basket/sessions/`. Each line is a JSON object (message or metadata). Tree structure supports branching conversations.
 
-### Extension System
-
-Extensions placed in `~/.basket/extensions/` or `./extensions/`. Must have a `setup(basket)` function. Supports tool registration, command registration (`@basket.register_command`), and event handlers.
-
 ### Skills System
 
 OpenCode/Claude-compatible skill layout:
@@ -225,6 +220,15 @@ await task(
     description="Exploring codebase"
 )
 ```
+
+### Import Rules (basket-assistant internal)
+
+To prevent circular imports, follow these dependency rules:
+
+- `tools/*.py` → only import `AgentContext` (from `agent.context`), never `AssistantAgent`
+- `agent/` internal modules → use `AssistantAgentProtocol` (from `._protocol`)
+- `core/` never imports `agent/` (one-way dependency: `agent` → `core`)
+- Never import `AssistantAgent` concrete class under `TYPE_CHECKING` (only `agent/__init__.py` may)
 
 ## Important Constraints
 

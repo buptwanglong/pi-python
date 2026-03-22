@@ -1,10 +1,15 @@
 """Protocol defining the structural type contract for AssistantAgent.
 
 All helper modules in agent/ (tools, events, prompts, session, gateway_slash)
-should type their agent parameter as AssistantAgentProtocol instead of Any.
+and external callers (tools/task.py, commands/, etc.) should type their
+agent parameter as AssistantAgentProtocol instead of Any.
 
-Tool implementations no longer access agent attributes directly — they
-receive an AgentContext snapshot via build_tool_context().
+IMPORT RULES (basket-assistant):
+1. tools/*.py → only import AgentContext (from agent.context), never AssistantAgent
+2. agent/ internal modules → use AssistantAgentProtocol (from ._protocol)
+3. Never import AssistantAgent concrete class in TYPE_CHECKING
+   (only agent/__init__.py and main entry points can)
+4. core/ never imports agent/ (one-way dependency: agent → core)
 """
 from __future__ import annotations
 
