@@ -1,16 +1,21 @@
 """Session switching, history/todos/pending_asks load and persist, resume pending ask."""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 from basket_ai.types import TextContent
+
+if TYPE_CHECKING:
+    from ._protocol import AssistantAgentProtocol
 
 logger = logging.getLogger(__name__)
 
 
 async def set_session_id(
-    agent: Any, session_id: Optional[str], load_history: bool = True
+    agent: AssistantAgentProtocol, session_id: Optional[str], load_history: bool = True
 ) -> None:
     """
     Set the current session id and load its todo list and pending_asks from disk.
@@ -38,7 +43,7 @@ async def set_session_id(
                 session_id,
                 len(agent.context.messages),
             )
-        hook_runner = getattr(agent.extension_loader, "hook_runner", None)
+        hook_runner = agent.hook_runner
         if hook_runner is not None:
             await hook_runner.run(
                 "session.created",
@@ -57,7 +62,7 @@ async def set_session_id(
 
 
 async def try_resume_pending_ask(
-    agent: Any,
+    agent: AssistantAgentProtocol,
     user_content: str,
     tool_call_id: Optional[str] = None,
     *,

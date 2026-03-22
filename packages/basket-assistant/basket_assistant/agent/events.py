@@ -1,10 +1,15 @@
 """Agent event handlers, before_run/turn_done emission, trajectory recording."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from ._protocol import AssistantAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +51,7 @@ def _tool_call_args_summary(tool_name: str, args: Dict[str, Any], max_len: int =
     return (s[:max_len] + "...") if len(s) > max_len else s
 
 
-def setup_event_handlers(agent: Any) -> None:
+def setup_event_handlers(agent: AssistantAgentProtocol) -> None:
     """Setup event handlers for agent events."""
 
     def on_text_delta(event):
@@ -147,7 +152,7 @@ def setup_event_handlers(agent: Any) -> None:
     agent.agent.on("agent_tool_call_end", on_tool_call_end)
 
 
-def setup_logging_handlers(agent: Any) -> None:
+def setup_logging_handlers(agent: AssistantAgentProtocol) -> None:
     """
     Register handlers that only write INFO logs for LLM turns and tool calls.
     Shared by CLI and TUI; same events drive both logging and display responses.
@@ -187,7 +192,7 @@ def setup_logging_handlers(agent: Any) -> None:
     basket_agent.on("agent_tool_call_end", on_tool_call_end_log)
 
 
-async def emit_assistant_event(agent: Any, event_name: str, payload: dict) -> None:
+async def emit_assistant_event(agent: AssistantAgentProtocol, event_name: str, payload: dict) -> None:
     """Emit an assistant-level event (e.g. before_run, turn_done) to registered handlers."""
     handlers = agent._assistant_event_handlers.get(event_name, [])
     if event_name in ("before_run", "turn_done"):
@@ -219,7 +224,7 @@ async def emit_assistant_event(agent: Any, event_name: str, payload: dict) -> No
             )
 
 
-def messages_for_hook_payload(agent: Any, messages: List) -> List[Dict[str, str]]:
+def messages_for_hook_payload(agent: AssistantAgentProtocol, messages: List) -> List[Dict[str, str]]:
     """Convert message objects to JSON-serializable [{"role", "content"}, ...] for hooks."""
     out = []
     for msg in messages:
@@ -244,7 +249,7 @@ def messages_for_hook_payload(agent: Any, messages: List) -> List[Dict[str, str]
     return out
 
 
-def get_trajectory_dir(agent: Any) -> Optional[str]:
+def get_trajectory_dir(agent: AssistantAgentProtocol) -> Optional[str]:
     """Trajectory directory from env or settings; None if disabled."""
     out = (
         os.environ.get("BASKET_TRAJECTORY_DIR")
@@ -253,16 +258,16 @@ def get_trajectory_dir(agent: Any) -> Optional[str]:
     return out or None
 
 
-def on_trajectory_event(agent: Any, event: dict) -> None:
+def on_trajectory_event(agent: AssistantAgentProtocol, event: dict) -> None:
     """Forward agent event to current trajectory recorder (if any)."""
-    recorder = getattr(agent, "_trajectory_recorder", None)
+    recorder = agent._trajectory_recorder
     if recorder is not None:
         recorder.on_event(event)
 
 
-def ensure_trajectory_handlers(agent: Any) -> None:
+def ensure_trajectory_handlers(agent: AssistantAgentProtocol) -> None:
     """Register trajectory event handlers once (no-op when trajectory disabled)."""
-    if getattr(agent, "_trajectory_handlers_registered", False):
+    if agent._trajectory_handlers_registered:
         return
     for event_type in (
         "agent_turn_start",
@@ -277,7 +282,7 @@ def ensure_trajectory_handlers(agent: Any) -> None:
 
 
 async def run_with_trajectory_if_enabled(
-    agent: Any,
+    agent: AssistantAgentProtocol,
     stream_llm_events: bool = True,
     invoked_skill_id: Optional[str] = None,
 ):

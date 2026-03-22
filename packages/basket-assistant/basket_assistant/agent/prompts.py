@@ -1,9 +1,15 @@
 """System prompts, plan mode suffix, and skills/agents directory resolution."""
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-from ..core import SubAgentConfig, get_skill_full_content, load_agents_from_dirs
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+from ..core import Settings, SubAgentConfig, get_skill_full_content, load_agents_from_dirs
+
+if TYPE_CHECKING:
+    from ._protocol import AssistantAgentProtocol
+
 from ..core.workspace_bootstrap import (
     load_daily_memory,
     load_workspace_sections,
@@ -11,9 +17,9 @@ from ..core.workspace_bootstrap import (
 )
 
 
-def get_agents_dirs(settings: Any) -> List[Path]:
+def get_agents_dirs(settings: Settings) -> List[Path]:
     """Resolve agents directories; default ~/.basket/agents and ./.basket/agents."""
-    if getattr(settings, "agents_dirs", None):
+    if settings.agents_dirs:
         return [Path(d).expanduser().resolve() for d in settings.agents_dirs]
     return [
         Path.home() / ".basket" / "agents",
@@ -21,7 +27,7 @@ def get_agents_dirs(settings: Any) -> List[Path]:
     ]
 
 
-def get_agent_root(settings: Any, agent_name: str) -> Path:
+def get_agent_root(settings: Settings, agent_name: str) -> Path:
     """Root directory for an agent: agents_base / agent_name (sessions/, workspace/ live under this)."""
     dirs = get_agents_dirs(settings)
     base = dirs[0] if dirs else Path.home() / ".basket" / "agents"
@@ -29,7 +35,7 @@ def get_agent_root(settings: Any, agent_name: str) -> Path:
     return base / agent_name
 
 
-def get_subagent_configs(agent: Any) -> Dict[str, SubAgentConfig]:
+def get_subagent_configs(agent: AssistantAgentProtocol) -> Dict[str, SubAgentConfig]:
     """Merge settings.agents with agents loaded from .basket/agents/*.md; later overrides.
     Excludes default_agent so the main agent is not listed as a Task subagent.
     """
@@ -38,37 +44,36 @@ def get_subagent_configs(agent: Any) -> Dict[str, SubAgentConfig]:
         out[k] = v
     for k, v in load_agents_from_dirs(get_agents_dirs(agent.settings)).items():
         out[k] = v
-    default_agent = getattr(agent.settings, "default_agent", None)
+    default_agent = agent.settings.default_agent
     if default_agent and default_agent in out:
         out = {k: v for k, v in out.items() if k != default_agent}
     return out
 
 
 def get_skills_dirs(
-    settings: Any, plugin_skill_dirs: Optional[List[Path]] = None
+    settings: Settings, plugin_skill_dirs: Optional[List[Path]] = None
 ) -> List[Path]:
-    """Resolve skills directories; default includes Basket, OpenCode, Claude, Agents paths.
+    """Resolve skills directories: only ~/.basket/skills, cwd/.basket/skills, then plugins.
 
-    Args:
-        settings: Application settings object.
-        plugin_skill_dirs: Optional extra skill directories from plugins.
+    ``settings.skills_dirs`` is ignored (fixed layout); use symlinks under ~/.basket/skills if needed.
     """
-    if getattr(settings, "skills_dirs", None):
-        dirs = [Path(d).expanduser().resolve() for d in settings.skills_dirs]
-    else:
-        dirs = [
-            Path.home() / ".basket" / "skills",
-            Path.cwd() / ".basket" / "skills",
-            Path.home() / ".config" / "opencode" / "skills",
-            Path.cwd() / ".opencode" / "skills",
-            Path.home() / ".claude" / "skills",
-            Path.cwd() / ".claude" / "skills",
-            Path.home() / ".agents" / "skills",
-            Path.cwd() / ".agents" / "skills",
-        ]
-    # Append plugin skill dirs
+    dirs: List[Path] = [
+        Path.home() / ".basket" / "skills",
+        Path.cwd() / ".basket" / "skills",
+    ]
     if plugin_skill_dirs:
         dirs.extend(plugin_skill_dirs)
+    return dirs
+
+
+def get_slash_commands_dirs(plugin_commands_dirs: Optional[List[Path]] = None) -> List[Path]:
+    """Fixed dirs for declarative slash commands (*.md). No settings override."""
+    dirs: List[Path] = [
+        Path.home() / ".basket" / "commands",
+        Path.cwd() / ".basket" / "commands",
+    ]
+    if plugin_commands_dirs:
+        dirs.extend(plugin_commands_dirs)
     return dirs
 
 
@@ -130,16 +135,16 @@ def compose_system_prompt_from_workspace(
     return composed + "\n\n---\n\n" + _TOOLS_SYSTEM_BLOCK
 
 
-def _resolve_main_agent_workspace_dir(settings: Any) -> Optional[Path]:
+def _resolve_main_agent_workspace_dir(settings: Settings) -> Optional[Path]:
     """
     Resolve workspace path for main agent: agents[default_agent].workspace_dir if set and valid,
     else global settings.workspace_dir (or default ~/.basket/workspace via resolve_workspace_dir).
     """
-    default_agent = getattr(settings, "default_agent", None)
-    agents = getattr(settings, "agents", None) or {}
+    default_agent = settings.default_agent
+    agents = settings.agents
     if default_agent and default_agent in agents:
         cfg = agents[default_agent]
-        raw = getattr(cfg, "workspace_dir", None)
+        raw = cfg.workspace_dir
         if raw and str(raw).strip():
             path = Path(str(raw).strip()).expanduser().resolve()
             if path.exists() and path.is_dir():
@@ -151,7 +156,7 @@ def _resolve_main_agent_workspace_dir(settings: Any) -> Optional[Path]:
     return resolve_workspace_dir(settings)
 
 
-def get_system_prompt_base(settings: Optional[Any] = None) -> str:
+def get_system_prompt_base(settings: Optional[Settings] = None) -> str:
     """
     Get the base system prompt for the agent.
 
@@ -199,7 +204,7 @@ Your response must include:
 
 
 def get_system_prompt_for_run(
-    agent: Any, invoked_skill_id: Optional[str] = None
+    agent: AssistantAgentProtocol, invoked_skill_id: Optional[str] = None
 ) -> str:
     """System prompt for this run; if invoked_skill_id set, append that skill's full content."""
     prompt = agent._default_system_prompt

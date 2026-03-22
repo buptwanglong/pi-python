@@ -1,8 +1,10 @@
 """Tool list, subagent filter/run, hook wrapper, and tool registration."""
 
+from __future__ import annotations
+
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 from basket_agent import Agent
 from basket_ai.api import get_model
@@ -10,8 +12,11 @@ from basket_ai.types import Context, UserMessage
 
 from ..core import SubAgentConfig
 from ..core.workspace_bootstrap import ensure_workspace_default_fill
-from ..extensions.api import _wrap_tool_execute_with_hooks
+from ..hooks.tool_hooks import wrap_tool_execute_with_hooks
 from ..guardrails.engine import GuardrailEngine
+
+if TYPE_CHECKING:
+    from ._protocol import AssistantAgentProtocol
 from ..tools import (
     BUILT_IN_TOOLS,
     create_ask_user_question_tool,
@@ -53,13 +58,13 @@ def _wrap_execute_fn_for_guardrails(original_fn, engine: GuardrailEngine, tool_n
     return wrapped
 
 
-def _get_plugin_skill_dirs(agent: Any) -> list:
+def _get_plugin_skill_dirs(agent: AssistantAgentProtocol) -> list:
     """Return plugin skill dirs from agent's plugin loader, or empty list."""
-    loader = getattr(agent, "_plugin_loader", None)
+    loader = agent._plugin_loader
     return loader.get_all_skill_dirs() if loader else []
 
 
-def get_registerable_tools(agent: Any) -> List[dict]:
+def get_registerable_tools(agent: AssistantAgentProtocol) -> List[dict]:
     """Return list of tool dicts (name, description, parameters, execute_fn) as used in register_tools."""
     include = agent.settings.skills_include or None
     if include is not None and len(agent.settings.skills_include) == 0:
@@ -73,7 +78,7 @@ def get_registerable_tools(agent: Any) -> List[dict]:
     return list(BUILT_IN_TOOLS) + [skill_tool]
 
 
-def filter_tools_for_subagent(agent: Any, cfg: SubAgentConfig) -> List[dict]:
+def filter_tools_for_subagent(agent: AssistantAgentProtocol, cfg: SubAgentConfig) -> List[dict]:
     """Return tool dicts allowed for this subagent; cfg.tools None = all."""
     tools = get_registerable_tools(agent)
     if cfg.tools is None:
@@ -81,7 +86,7 @@ def filter_tools_for_subagent(agent: Any, cfg: SubAgentConfig) -> List[dict]:
     return [t for t in tools if cfg.tools.get(t["name"], False)]
 
 
-def get_subagent_display_description(agent: Any, name: str, cfg: SubAgentConfig) -> str:
+def get_subagent_display_description(agent: AssistantAgentProtocol, name: str, cfg: SubAgentConfig) -> str:
     """Display label for a subagent: first paragraph of workspace AGENTS.md, else name."""
     try:
         workspace_path = _resolve_subagent_workspace_path(agent, name, cfg)
@@ -97,16 +102,16 @@ def get_subagent_display_description(agent: Any, name: str, cfg: SubAgentConfig)
     return name
 
 
-def _resolve_subagent_workspace_path(agent: Any, subagent_name: str, cfg: SubAgentConfig) -> Path:
+def _resolve_subagent_workspace_path(agent: AssistantAgentProtocol, subagent_name: str, cfg: SubAgentConfig) -> Path:
     """Resolve workspace path for subagent: cfg.workspace_dir, else cfg.agent_dir/workspace, else default agents_dir/<name>/workspace."""
-    raw = getattr(cfg, "workspace_dir", None)
+    raw = cfg.workspace_dir
     if raw and str(raw).strip():
         path = Path(str(raw).strip()).expanduser().resolve()
         if path.exists() and path.is_dir():
             return path
         path.mkdir(parents=True, exist_ok=True)
         return path
-    agent_dir_raw = getattr(cfg, "agent_dir", None)
+    agent_dir_raw = cfg.agent_dir
     if agent_dir_raw and str(agent_dir_raw).strip():
         path = Path(str(agent_dir_raw).strip()).expanduser().resolve() / "workspace"
         path.mkdir(parents=True, exist_ok=True)
@@ -124,7 +129,7 @@ def _resolve_subagent_workspace_path(agent: Any, subagent_name: str, cfg: SubAge
     return path
 
 
-async def run_subagent(agent: Any, subagent_name: str, user_prompt: str) -> str:
+async def run_subagent(agent: AssistantAgentProtocol, subagent_name: str, user_prompt: str) -> str:
     """Run a subagent with the given prompt; returns last assistant text.
     Subagent system prompt is built from workspace (OpenClaw-style md files); when workspace_dir
     is unset, default ~/.basket/agents/<name>/ is used and default-filled.
@@ -192,12 +197,12 @@ async def run_subagent(agent: Any, subagent_name: str, user_prompt: str) -> str:
     return "(No response)"
 
 
-def wrap_tool_with_hooks(agent: Any, name: str, execute_fn):
+def wrap_tool_with_hooks(agent: AssistantAgentProtocol, name: str, execute_fn):
     """Wrap execute_fn with tool.execute.before / after hooks if HookRunner is present."""
-    runner = getattr(agent.extension_loader, "hook_runner", None)
+    runner = agent.hook_runner
     if runner is None:
         return execute_fn
-    return _wrap_tool_execute_with_hooks(
+    return wrap_tool_execute_with_hooks(
         name,
         execute_fn,
         runner,
@@ -205,14 +210,14 @@ def wrap_tool_with_hooks(agent: Any, name: str, execute_fn):
     )
 
 
-def register_tools(agent: Any) -> None:
+def register_tools(agent: AssistantAgentProtocol) -> None:
     """Register all built-in tools with the agent.
 
     Wrapping order (outermost runs first):
         plan_mode → guardrails → hooks → original_fn
     """
     get_plan = lambda: agent._plan_mode
-    engine = getattr(agent, "_guardrail_engine", None)
+    engine = agent._guardrail_engine
 
     def _apply_guardrails(fn, name):
         if engine is not None:
