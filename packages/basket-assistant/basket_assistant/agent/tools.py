@@ -75,7 +75,13 @@ def get_registerable_tools(agent: AssistantAgentProtocol) -> List[dict]:
         ),
         include,
     )
-    return list(BUILT_IN_TOOLS) + [skill_tool]
+    ctx = agent.build_tool_context()
+    configs = prompts.get_subagent_configs(agent)
+    extra: List[dict] = [skill_tool]
+    if configs:
+        extra.append(create_task_tool(ctx))
+        extra.append(create_parallel_task_tool(ctx))
+    return list(BUILT_IN_TOOLS) + extra
 
 
 def filter_tools_for_subagent(agent: AssistantAgentProtocol, cfg: SubAgentConfig) -> List[dict]:
@@ -216,6 +222,7 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
     Wrapping order (outermost runs first):
         plan_mode → guardrails → hooks → original_fn
     """
+    ctx = agent.build_tool_context()
     get_plan = lambda: agent._plan_mode
     engine = agent._guardrail_engine
 
@@ -256,7 +263,7 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
     )
     configs = prompts.get_subagent_configs(agent)
     if configs:
-        task_tool = create_task_tool(agent)
+        task_tool = create_task_tool(ctx)
         fn = wrap_tool_with_hooks(agent, task_tool["name"], task_tool["execute_fn"])
         fn = _apply_guardrails(fn, task_tool["name"])
         agent.agent.register_tool(
@@ -265,7 +272,7 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
             parameters=task_tool["parameters"],
             execute_fn=fn,
         )
-        parallel_tool = create_parallel_task_tool(agent)
+        parallel_tool = create_parallel_task_tool(ctx)
         fn = wrap_tool_with_hooks(agent, parallel_tool["name"], parallel_tool["execute_fn"])
         fn = _apply_guardrails(fn, parallel_tool["name"])
         agent.agent.register_tool(
@@ -285,7 +292,7 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
         parameters=web_search_tool["parameters"],
         execute_fn=fn,
     )
-    todo_tool = create_todo_write_tool(agent)
+    todo_tool = create_todo_write_tool(ctx)
     todo_fn = todo_tool["execute_fn"]
     todo_fn = wrap_tool_with_hooks(agent, todo_tool["name"], todo_fn)
     todo_fn = _apply_guardrails(todo_fn, todo_tool["name"])
@@ -297,7 +304,7 @@ def register_tools(agent: AssistantAgentProtocol) -> None:
         parameters=todo_tool["parameters"],
         execute_fn=todo_fn,
     )
-    ask_tool = create_ask_user_question_tool(agent)
+    ask_tool = create_ask_user_question_tool(ctx)
     fn = wrap_tool_with_hooks(agent, ask_tool["name"], ask_tool["execute_fn"])
     fn = _apply_guardrails(fn, ask_tool["name"])
     agent.agent.register_tool(

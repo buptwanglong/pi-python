@@ -6,7 +6,7 @@ from the event and appends to pending_asks. This tool only validates args and re
 User replies in next turn to resume.
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class AskUserQuestionParams(BaseModel):
     )
 
 
-def create_ask_user_question_tool(agent_ref: Any) -> dict:
+def create_ask_user_question_tool(ctx=None) -> dict:
     """
     Create the ask_user_question tool. Call from main when registering tools.
 
